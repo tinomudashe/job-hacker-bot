@@ -1,0 +1,17 @@
+# Use the Playwright Python image as the base
+FROM mcr.microsoft.com/playwright/python:v1.45.0-jammy
+
+# Set working directory inside the container
+WORKDIR /app
+
+# Copy the Playwright browser server script into the container
+COPY playwright_browser_server.py /app/
+
+# Install Python dependencies (only playwright if not already included in base image, or any other needed for the server script)
+# The base image already has playwright, so typically nothing else is needed here for just the server.
+
+# Expose the port the Playwright server runs on (8000 as configured in the script)
+EXPOSE 8000
+
+# Command to run the Playwright browser server script
+CMD ["python", "playwright_browser_server.py"] 

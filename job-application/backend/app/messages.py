@@ -1,0 +1,196 @@
+from fastapi import APIRouter, Depends, HTTPException, Header, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from typing import List, Optional
+import json
+
+from app.db import get_db
+from app.models_db import ChatMessage, User
+from app.dependencies import get_current_user
+from pydantic import BaseModel, Field
+from datetime import datetime
+import uuid
+
+router = APIRouter()
+
+class ChatMessageResponse(BaseModel):
+    id: str
+    content: str | dict
+    is_user_message: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+    @classmethod
+    def from_orm_model(cls, orm_model: ChatMessage):
+        try:
+            content = json.loads(orm_model.message)
+        except (json.JSONDecodeError, TypeError):
+            content = orm_model.message
+        
+        return cls(
+            id=orm_model.id,
+            content=content,
+            is_user_message=orm_model.is_user_message,
+            created_at=orm_model.created_at
+        )
+
+class UpdateMessageRequest(BaseModel):
+    content: str
+
+class Chat(BaseModel):
+    id: str
+    title: str
+
+@router.get("/chats", response_model=List[Chat])
+async def get_chats(
+    db: AsyncSession = Depends(get_db),
+    authorization: str = Header(...),
+):
+    """
+    Retrieve all chats for the current user.
+    """
+    token = authorization.split(" ")[1]
+    current_user = await get_current_user(token=token, db=db)
+    
+    result = await db.execute(
+        select(ChatMessage)
+        .where(ChatMessage.user_id == current_user.id)
+        .order_by(ChatMessage.created_at.desc())
+    )
+    messages = result.scalars().all()
+
+    chats = []
+    if messages:
+        # For simplicity, we'll treat each day as a new chat
+        # A more robust solution would involve grouping by conversation ID
+        chats = []
+        current_chat_date = None
+        for msg in messages:
+            if current_chat_date != msg.created_at.date():
+                chats.append(Chat(id=msg.id, title=f"Chat from {msg.created_at.strftime('%Y-%m-%d')}"))
+                current_chat_date = msg.created_at.date()
+
+    return chats
+
+@router.get("/messages", response_model=List[ChatMessageResponse])
+async def get_messages(
+    page_id: Optional[str] = Query(None, description="Filter messages by page ID"),
+    db: AsyncSession = Depends(get_db),
+    authorization: str = Header(...),
+):
+    """
+    Retrieve chat messages for the current user, optionally filtered by page.
+    """
+    # Token is expected to be "Bearer <token>"
+    token = authorization.split(" ")[1]
+    current_user = await get_current_user(token=token, db=db)
+    
+    query = select(ChatMessage).where(ChatMessage.user_id == current_user.id)
+    
+    if page_id:
+        query = query.where(ChatMessage.page_id == page_id)
+    else:
+        # If no page_id specified, get messages without a page (legacy behavior)
+        query = query.where(ChatMessage.page_id.is_(None))
+    
+    query = query.order_by(ChatMessage.created_at.asc())
+    
+    result = await db.execute(query)
+    messages = result.scalars().all()
+    return [ChatMessageResponse.from_orm_model(msg) for msg in messages]
+
+@router.delete("/messages/{message_id}", status_code=204)
+async def delete_message(
+    message_id: str,
+    db: AsyncSession = Depends(get_db),
+    authorization: str = Header(...),
+    cascade: bool = False,
+    above: bool = False,
+):
+    """
+    Delete a specific message.
+    If cascade is true, also deletes all subsequent messages in the conversation.
+    If above is true, only deletes messages after the specified message.
+    """
+    token = authorization.split(" ")[1]
+    current_user = await get_current_user(token=token, db=db)
+    
+    result = await db.execute(
+        select(ChatMessage).where(ChatMessage.id == message_id)
+    )
+    message = result.scalar_one_or_none()
+    
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+        
+    if message.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this message")
+    
+    if cascade:
+        operator = ">=" if not above else ">"
+        # Get all messages after the one to be deleted
+        result = await db.execute(
+            select(ChatMessage)
+            .where(ChatMessage.user_id == current_user.id)
+            .where(
+                ChatMessage.created_at >= message.created_at if not above else
+                ChatMessage.created_at > message.created_at
+            )
+        )
+        messages_to_delete = result.scalars().all()
+        for msg in messages_to_delete:
+            await db.delete(msg)
+    else:
+        await db.delete(message)
+        
+    await db.commit()
+    return
+
+@router.put("/messages/{message_id}", response_model=ChatMessageResponse)
+async def update_message(
+    message_id: str,
+    request: UpdateMessageRequest,
+    db: AsyncSession = Depends(get_db),
+    authorization: str = Header(...),
+):
+    """
+    Update a specific message.
+    """
+    token = authorization.split(" ")[1]
+    current_user = await get_current_user(token=token, db=db)
+    
+    result = await db.execute(
+        select(ChatMessage).where(ChatMessage.id == message_id)
+    )
+    message = result.scalar_one_or_none()
+    
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+        
+    if message.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to edit this message")
+        
+    message.message = request.content
+    await db.commit()
+    await db.refresh(message)
+    
+    return ChatMessageResponse.from_orm_model(message)
+
+@router.delete("/chats", status_code=204)
+async def clear_history(
+    db: AsyncSession = Depends(get_db),
+    authorization: str = Header(...),
+):
+    """
+    Delete all chat messages for the current user.
+    """
+    token = authorization.split(" ")[1]
+    current_user = await get_current_user(token=token, db=db)
+    
+    await db.execute(
+        ChatMessage.__table__.delete().where(ChatMessage.user_id == current_user.id)
+    )
+    await db.commit()
+    return 
