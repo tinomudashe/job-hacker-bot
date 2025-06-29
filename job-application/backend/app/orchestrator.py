@@ -1696,39 +1696,135 @@ Generate a complete, ready-to-customize resume that would be competitive in toda
         try:
             log.info(f"CV refinement requested for role: {target_role}")
             
-            # Use the generate_tailored_resume tool internally
-            # This ensures we use the modern, working system instead of the broken RAG
-            result = await generate_tailored_resume(
-                job_title=target_role,
-                company_name=company_name,
-                job_description=job_description or f"General {target_role} position requirements",
-                user_skills=""
+            # Get existing resume data
+            result = await db.execute(select(Resume).where(Resume.user_id == user.id))
+            db_resume = result.scalars().first()
+            
+            # Get user documents for context
+            doc_result = await db.execute(
+                select(Document).where(Document.user_id == user.id).order_by(Document.date_uploaded.desc())
+            )
+            documents = doc_result.scalars().all()
+            
+            # Build context from existing resume and documents
+            context = f"User: {user.first_name} {user.last_name}\n"
+            context += f"Email: {user.email}\n"
+            
+            if db_resume:
+                resume_data = ResumeData(**db_resume.data)
+                context += f"Current Resume Data:\n"
+                context += f"- Name: {resume_data.personalInfo.name}\n"
+                context += f"- Summary: {resume_data.personalInfo.summary}\n"
+                context += f"- Skills: {', '.join(resume_data.skills)}\n"
+                
+                if resume_data.experience:
+                    context += f"- Experience: {len(resume_data.experience)} positions\n"
+                    for exp in resume_data.experience[:3]:  # Latest 3
+                        context += f"  * {exp.jobTitle} at {exp.company} ({exp.dates})\n"
+                
+                if resume_data.education:
+                    context += f"- Education: {len(resume_data.education)} entries\n"
+                    for edu in resume_data.education[:2]:  # Latest 2
+                        context += f"  * {edu.degree} from {edu.institution}\n"
+            
+            # Add document context
+            if documents:
+                context += f"\nAdditional Documents: {len(documents)} files uploaded\n"
+                for doc in documents[:3]:  # Latest 3 documents
+                    if doc.content and len(doc.content) > 100:
+                        context += f"- {doc.name}: {doc.content[:200]}...\n"
+            
+            # Create the resume refinement chain
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            from langchain_core.prompts import ChatPromptTemplate
+            from langchain_core.output_parsers import StrOutputParser
+            
+            prompt = ChatPromptTemplate.from_template(
+                """You are an expert resume writer and career coach. Refine and enhance the existing CV/resume for the target role.
+
+USER CONTEXT:
+{context}
+
+TARGET ROLE:
+- Position: {target_role}
+- Company: {company_name}
+- Job Description: {job_description}
+
+INSTRUCTIONS:
+1. **Analyze Current CV**: Review the user's existing resume data and documents
+2. **Role-Specific Enhancement**: Tailor content specifically for {target_role} positions
+3. **ATS Optimization**: Ensure the refined CV passes Applicant Tracking Systems
+4. **Keyword Integration**: Include relevant keywords from the target role naturally
+5. **Professional Enhancement**: Improve language, format, and presentation
+6. **Achievement Focus**: Emphasize quantifiable results and impact
+7. **Industry Alignment**: Match industry standards and expectations
+
+**CV REFINEMENT APPROACH**:
+- Keep the user's existing experience and education but present it more effectively
+- Enhance the professional summary to target the specific role
+- Reorganize and optimize skills section for the target position  
+- Improve work experience descriptions with stronger action verbs and metrics
+- Ensure ATS compatibility with proper formatting and keywords
+- Add industry-specific terminology and competencies
+
+**OUTPUT FORMAT**:
+Create a complete, professionally refined CV that maintains the user's authentic experience while optimizing it for {target_role} roles. Structure with clear sections and professional formatting.
+
+Generate a refined CV that would significantly improve the user's chances for {target_role} positions."""
             )
             
-            # Add refinement-specific messaging
-            refinement_message = f"""## ✨ **CV Successfully Refined for {target_role} Roles!**
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-2.0-flash",
+                temperature=0.7,
+                top_p=0.9
+            )
+            
+            chain = prompt | llm | StrOutputParser()
+            
+            # Generate the refined resume
+            refined_resume = await chain.ainvoke({
+                "context": context,
+                "target_role": target_role,
+                "company_name": company_name or "target companies",
+                "job_description": job_description or f"General {target_role} position requirements"
+            })
+            
+            # Save the generated resume content to database
+            from uuid import uuid4
+            new_resume_record = GeneratedCoverLetter(  # Reusing table for now
+                id=str(uuid4()),
+                user_id=user.id,
+                content=refined_resume
+            )
+            db.add(new_resume_record)
+            await db.commit()
+            
+            return f"""## ✨ **CV Successfully Refined for {target_role} Roles!**
 
 🎯 **Your CV has been professionally enhanced and optimized for {target_role} positions.**
 
-{result}
+{refined_resume}
 
 ---
 
 ### 🚀 **Refinement Features Applied:**
 - **Role-Specific Optimization**: Tailored specifically for {target_role} positions
-- **Modern Generation System**: Used our latest AI-powered tools (not the old system)
 - **ATS Compatibility**: Optimized for Applicant Tracking Systems
 - **Industry Keywords**: Relevant terminology and skills highlighted
-- **Professional Formatting**: Clean, readable structure preferred by hiring managers
+- **Professional Enhancement**: Improved language, structure, and presentation
+- **Achievement Focus**: Quantified accomplishments and strong action verbs
+
+### 📥 **Download Options:**
+*A download button should appear to get your refined CV in multiple professional PDF styles (Modern, Classic, Minimal)*
 
 ### 💡 **Pro Tips:**
 - **Customize Further**: Feel free to edit specific sections for particular applications
 - **Multiple Versions**: Create different versions for different types of {target_role} roles
 - **Regular Updates**: Refine again as you gain new skills or target different companies
 
-**🎉 No more delays - your refined CV is ready immediately!**"""
-            
-            return refinement_message
+**🎉 Your refined CV is ready for {target_role} applications!**
+
+<!-- content_id={new_resume_record.id} -->"""
             
         except Exception as e:
             log.error(f"Error in CV refinement: {e}", exc_info=True)
@@ -1741,7 +1837,7 @@ I encountered an issue while refining your CV: {str(e)}
 2. **Upload Fresh CV**: Upload your current CV and I'll process it with the modern system
 3. **Build from Scratch**: I can create a new CV using "create resume from scratch for {target_role}"
 
-The modern tools are much more reliable than the old system!"""
+Please try one of these alternatives, and I'll help you create an outstanding CV!"""
 
     @tool
     async def get_cv_best_practices(
