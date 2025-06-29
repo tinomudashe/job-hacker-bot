@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  # Main application with browser automation
+  job-app-browser:
+    build:
+      context: .
+      dockerfile: Dockerfile.playwright
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:12345678@db:5432/jobapp
+      - GOOGLE_CLOUD_PROJECT=blogai-457111
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/app/job-bot-credentials.json
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+      - DISPLAY=:99
+    volumes:
+      - ./app/job-bot-credentials.json:/app/app/job-bot-credentials.json:ro
+      - playwright_cache:/ms-playwright
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Security context for browser automation
+    security_opt:
+      - seccomp:unconfined
+    shm_size: 2gb
+    # Capabilities needed for browser automation
+    cap_add:
+      - SYS_ADMIN
+
+  # PostgreSQL database
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=jobapp
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=12345678
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  # Redis for caching (optional but recommended)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  # Nginx reverse proxy (optional)
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - job-app-browser
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  playwright_cache: 

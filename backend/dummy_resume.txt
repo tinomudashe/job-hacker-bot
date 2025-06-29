@@ -1,0 +1,7 @@
+This is a dummy resume file for testing the document upload API.
+
+John Doe
+Software Engineer
+j.doe@example.com
+
+Skills: Python, FastAPI, SQLAlchemy, Docker 

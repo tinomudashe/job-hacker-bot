@@ -1,0 +1,31 @@
+{
+  "timestamp": 671053.842772041,
+  "system": {
+    "curl_available": true,
+    "wget_available": false,
+    "env_playwright_browsers_path": false,
+    "env_google_cloud_project": false,
+    "env_database_url": false,
+    "memory_gb": 16.0,
+    "disk_free_gb": 22.56
+  },
+  "playwright": {
+    "chromium": {
+      "available": true,
+      "working": true,
+      "version": "chromium"
+    },
+    "firefox": {
+      "available": true,
+      "working": true,
+      "version": "firefox"
+    },
+    "webkit": {
+      "available": true,
+      "working": true,
+      "version": "webkit"
+    }
+  },
+  "overall_compatible": true,
+  "quick_test_passed": true
+}
