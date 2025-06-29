@@ -193,4 +193,65 @@ async def clear_history(
         ChatMessage.__table__.delete().where(ChatMessage.user_id == current_user.id)
     )
     await db.commit()
-    return 
+    return
+
+@router.get("/messages/debug/orphaned", response_model=List[ChatMessageResponse])
+async def get_orphaned_messages(
+    db: AsyncSession = Depends(get_db),
+    authorization: str = Header(...),
+):
+    """
+    Debug endpoint: Get messages that have no page association (page_id is NULL).
+    These might be orphaned messages from before the page system was implemented
+    or due to bugs in message regeneration.
+    """
+    token = authorization.split(" ")[1]
+    current_user = await get_current_user(token=token, db=db)
+    
+    query = select(ChatMessage).where(
+        ChatMessage.user_id == current_user.id,
+        ChatMessage.page_id.is_(None)
+    ).order_by(ChatMessage.created_at.desc())
+    
+    result = await db.execute(query)
+    messages = result.scalars().all()
+    return [ChatMessageResponse.from_orm_model(msg) for msg in messages]
+
+@router.get("/messages/debug/by-page")
+async def get_messages_by_page(
+    db: AsyncSession = Depends(get_db),
+    authorization: str = Header(...),
+):
+    """
+    Debug endpoint: Get all messages grouped by page_id to understand message distribution.
+    """
+    token = authorization.split(" ")[1]
+    current_user = await get_current_user(token=token, db=db)
+    
+    from sqlalchemy import func
+    
+    # Get count of messages per page
+    query = select(
+        ChatMessage.page_id,
+        func.count(ChatMessage.id).label('message_count'),
+        func.min(ChatMessage.created_at).label('first_message'),
+        func.max(ChatMessage.created_at).label('last_message')
+    ).where(
+        ChatMessage.user_id == current_user.id
+    ).group_by(ChatMessage.page_id).order_by(ChatMessage.page_id)
+    
+    result = await db.execute(query)
+    page_stats = result.all()
+    
+    return {
+        "total_pages": len([p for p in page_stats if p.page_id is not None]),
+        "orphaned_messages": next((p.message_count for p in page_stats if p.page_id is None), 0),
+        "page_stats": [
+            {
+                "page_id": p.page_id,
+                "message_count": p.message_count,
+                "first_message": p.first_message.isoformat() if p.first_message else None,
+                "last_message": p.last_message.isoformat() if p.last_message else None,
+            } for p in page_stats
+        ]
+    } 

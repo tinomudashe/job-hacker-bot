@@ -12,12 +12,13 @@ from sqlalchemy import (
     Table,
     JSON,
 )
-from sqlalchemy.orm import relationship, declarative_base
+from sqlalchemy.orm import relationship, declarative_base, Mapped, mapped_column
+from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.sql import func
+from typing import List, Optional
 
-# Define the base class for declarative models
-Base = declarative_base()
+# Define the base class for declarative models with AsyncAttrs for proper async support
+Base = declarative_base(cls=AsyncAttrs)
 
 def generate_uuid():
     return str(uuid.uuid4())
@@ -62,6 +63,8 @@ class User(Base):
     generated_cover_letters = relationship("GeneratedCoverLetter", back_populates="user", cascade="all, delete-orphan")
     resume = relationship("Resume", back_populates="user", uselist=False, cascade="all, delete-orphan")
     pages = relationship("Page", back_populates="user", cascade="all, delete-orphan")
+    user_preferences = relationship("UserPreference", back_populates="user", cascade="all, delete-orphan")
+    user_behaviors = relationship("UserBehavior", back_populates="user", cascade="all, delete-orphan")
 
 class Document(Base):
     __tablename__ = "documents"
@@ -149,4 +152,26 @@ class Resume(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
 
-    user = relationship("User", back_populates="resume") 
+    user = relationship("User", back_populates="resume")
+
+class UserPreference(Base):
+    __tablename__ = 'user_preferences'
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey('users.id'), nullable=False)
+    preference_key = Column(String, nullable=False)
+    preference_value = Column(Text, nullable=False)  # JSON string
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+
+    user = relationship("User", back_populates="user_preferences")
+
+class UserBehavior(Base):
+    __tablename__ = 'user_behaviors'
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey('users.id'), nullable=False)
+    action_type = Column(String, nullable=False)  # e.g., 'job_search', 'cover_letter_generation', 'document_upload'
+    context = Column(JSON, nullable=True)  # JSON column with action context
+    success = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User", back_populates="user_behaviors") 

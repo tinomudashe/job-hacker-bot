@@ -25,6 +25,51 @@ const TOOL_CONFIG: ToolConfig[] = [
     craftMessage: (data) => `Please use the search_jobs tool with the query: \"${data.query}\"`,
   },
   {
+    name: "generate_tailored_resume",
+    display: "Generate Tailored Resume",
+    description: "Create a complete resume tailored to a specific job and company.",
+    fields: [
+      { name: "job_title", label: "Job Title", type: "text", required: true, placeholder: "e.g. Software Engineer" },
+      { name: "company_name", label: "Company Name", type: "text", placeholder: "e.g. Google (optional)" },
+      { name: "job_description", label: "Job Description", type: "textarea", rows: 6, placeholder: "Paste the full job description here for better tailoring..." },
+      { name: "user_skills", label: "Additional Skills to Highlight", type: "text", placeholder: "e.g. Python, React, AWS (optional)" },
+    ],
+    craftMessage: (data) => `Please use the generate_tailored_resume tool with job_title: "${data.job_title}", company_name: "${data.company_name}", job_description: "${data.job_description}", user_skills: "${data.user_skills}"`,
+  },
+  {
+    name: "create_resume_from_scratch",
+    display: "Create Resume from Scratch",
+    description: "Build a complete professional resume based on your career goals.",
+    fields: [
+      { name: "target_role", label: "Target Role", type: "text", required: true, placeholder: "e.g. Product Manager" },
+      { name: "experience_level", label: "Experience Level", type: "select", required: true, options: [
+        { value: "entry-level", label: "Entry Level (0-2 years)" },
+        { value: "mid-level", label: "Mid Level (3-7 years)" },
+        { value: "senior", label: "Senior (8-15 years)" },
+        { value: "executive", label: "Executive (15+ years)" }
+      ]},
+      { name: "industry", label: "Target Industry", type: "text", placeholder: "e.g. Technology, Healthcare (optional)" },
+      { name: "key_skills", label: "Key Skills", type: "text", placeholder: "e.g. Leadership, Data Analysis, Python" },
+    ],
+    craftMessage: (data) => `Please use the create_resume_from_scratch tool with target_role: "${data.target_role}", experience_level: "${data.experience_level}", industry: "${data.industry}", key_skills: "${data.key_skills}"`,
+  },
+  {
+    name: "enhance_resume_section",
+    display: "Enhance Resume Section",
+    description: "Improve a specific section of your resume with AI-powered enhancements.",
+    fields: [
+      { name: "section", label: "Section to Enhance", type: "select", required: true, options: [
+        { value: "summary", label: "Professional Summary" },
+        { value: "experience", label: "Work Experience" },
+        { value: "skills", label: "Skills" },
+        { value: "education", label: "Education" }
+      ]},
+      { name: "current_content", label: "Current Content", type: "textarea", rows: 4, placeholder: "Paste your current section content here..." },
+      { name: "job_description", label: "Target Job Description", type: "textarea", rows: 4, placeholder: "Paste job description to tailor the enhancement (optional)" },
+    ],
+    craftMessage: (data) => `Please use the enhance_resume_section tool with section: "${data.section}", current_content: "${data.current_content}", job_description: "${data.job_description}"`,
+  },
+  {
     name: "update_personal_information",
     display: "Update Personal Info",
     description: "Edit your resume's personal information section.",
@@ -49,6 +94,29 @@ const TOOL_CONFIG: ToolConfig[] = [
       { name: "description", label: "Description", type: "textarea", rows: 4, required: true },
     ],
     craftMessage: (data) => `Please use the add_work_experience tool with the following details: ${JSON.stringify(data)}`,
+  },
+  {
+    name: "generate_cover_letter_from_url",
+    display: "Generate Cover Letter from Job URL",
+    description: "Create a tailored cover letter from a job posting URL.",
+    fields: [
+      { name: "job_url", label: "Job Posting URL", type: "url", required: true, placeholder: "https://linkedin.com/jobs/view/..." },
+      { name: "user_skills", label: "Skills to Highlight", type: "text", placeholder: "e.g. Python, Leadership, Data Analysis (optional)" },
+      { name: "use_browser", label: "Use Browser Automation", type: "checkbox", defaultValue: true },
+    ],
+    craftMessage: (data) => `Please use the generate_cover_letter_from_url tool with job_url: "${data.job_url}", user_skills: "${data.user_skills}", use_browser: ${data.use_browser}`,
+  },
+  {
+    name: "generate_cover_letter",
+    display: "Generate Cover Letter Manually",
+    description: "Create a cover letter by providing job details manually.",
+    fields: [
+      { name: "job_title", label: "Job Title", type: "text", required: true, placeholder: "e.g. Software Engineer" },
+      { name: "company_name", label: "Company Name", type: "text", required: true, placeholder: "e.g. Google" },
+      { name: "job_description", label: "Job Description", type: "textarea", rows: 6, required: true, placeholder: "Paste the job description here..." },
+      { name: "user_skills", label: "Skills to Highlight", type: "text", placeholder: "e.g. Python, React, AWS (optional)" },
+    ],
+    craftMessage: (data) => `Please use the generate_cover_letter tool with job_title: "${data.job_title}", company_name: "${data.company_name}", job_description: "${data.job_description}", user_skills: "${data.user_skills}"`,
   },
   {
     name: "add_education",

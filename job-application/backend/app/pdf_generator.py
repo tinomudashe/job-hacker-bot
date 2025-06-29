@@ -17,7 +17,7 @@ try:
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch
     from reportlab.lib import colors
-    from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY, TA_RIGHT
     REPORTLAB_AVAILABLE = True
 except ImportError:
     try:
@@ -656,6 +656,89 @@ async def generate_pdf(
             
             # Generate PDF using ReportLab
             pdf_path = create_resume_pdf(resume_data, request.style, filename)
+            
+        else:
+            raise HTTPException(status_code=400, detail="Invalid content_type. Must be 'cover_letter' or 'resume'")
+        
+        # Return file response
+        return FileResponse(
+            path=pdf_path,
+            filename=f"{filename}.pdf",
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={filename}.pdf"}
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in PDF generation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/pdf/generate")
+async def generate_pdf_get(
+    content_type: str,
+    style: str = "modern",
+    content_id: Optional[str] = None,
+    company_name: Optional[str] = None,
+    job_title: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Generate a styled PDF for cover letter or resume using GET request (for direct links)."""
+    
+    try:
+        if not REPORTLAB_AVAILABLE:
+            raise HTTPException(
+                status_code=500, 
+                detail="PDF generation not available. Please install reportlab."
+            )
+        
+        filename = "document"
+        pdf_path = ""
+        
+        if content_type == "cover_letter":
+            # Get cover letter content
+            if content_id:
+                # Fetch from database
+                result = await db.execute(
+                    select(GeneratedCoverLetter).where(
+                        GeneratedCoverLetter.id == content_id,
+                        GeneratedCoverLetter.user_id == current_user.id
+                    )
+                )
+                cover_letter = result.scalars().first()
+                if not cover_letter:
+                    raise HTTPException(status_code=404, detail="Cover letter not found")
+                content = cover_letter.content
+            else:
+                raise HTTPException(status_code=400, detail="content_id required for cover letter")
+            
+            user_name = f"{current_user.first_name or ''} {current_user.last_name or ''}".strip() or "User"
+            filename = f"cover_letter_{company_name or 'document'}".replace(" ", "_")
+            
+            # Generate PDF using ReportLab
+            pdf_path = create_cover_letter_pdf(
+                content=content,
+                company_name=company_name or "",
+                job_title=job_title or "",
+                user_name=user_name,
+                style=style,
+                filename=filename
+            )
+            
+        elif content_type == "resume":
+            # Get resume data
+            result = await db.execute(
+                select(Resume).where(Resume.user_id == current_user.id)
+            )
+            resume = result.scalars().first()
+            
+            if not resume:
+                raise HTTPException(status_code=404, detail="Resume not found")
+            
+            resume_data = ResumeData(**resume.data)
+            filename = f"resume_{current_user.first_name or 'user'}".replace(" ", "_")
+            
+            # Generate PDF using ReportLab
+            pdf_path = create_resume_pdf(resume_data, style, filename)
             
         else:
             raise HTTPException(status_code=400, detail="Invalid content_type. Must be 'cover_letter' or 'resume'")

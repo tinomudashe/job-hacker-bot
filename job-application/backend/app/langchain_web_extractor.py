@@ -1,5 +1,6 @@
 import logging
 import re
+import asyncio
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -132,8 +133,8 @@ class LangChainWebExtractor:
             # Create documents
             documents = [Document(page_content=chunk) for chunk in chunks]
             
-            # Create vector store
-            vectorstore = FAISS.from_documents(documents, self.embeddings)
+            # Create vector store using async method
+            vectorstore = await FAISS.afrom_documents(documents, self.embeddings)
             
             # Search for relevant chunks
             relevant_docs = vectorstore.similarity_search(query, k=3)

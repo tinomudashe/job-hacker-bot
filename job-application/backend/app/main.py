@@ -17,6 +17,8 @@ from app.resume import router as resume_router
 from app.resume_generator import router as resume_generator_router
 from app.job_search import router as job_search_router
 from app.routers import jobs
+from app.routers.graph_rag_demo import router as graph_rag_demo_router
+from app.test_regenerate import router as test_regenerate_router
 from app.messages import router as messages_router
 from app.uploads import router as uploads_router
 from app.tts import router as tts_router
@@ -53,6 +55,8 @@ app.include_router(resume_router, prefix="/api", tags=["resume"])
 app.include_router(resume_generator_router, prefix="/api", tags=["resume-generator"])
 app.include_router(job_search_router, prefix="/api", tags=["job-search"])
 app.include_router(jobs.router)
+app.include_router(graph_rag_demo_router, prefix="/api", tags=["graph-rag-demo"])
+app.include_router(test_regenerate_router, prefix="/api", tags=["test-regenerate"])
 app.include_router(messages_router, prefix="/api", tags=["messages"])
 app.include_router(uploads_router, prefix="/api", tags=["uploads"])
 app.include_router(tts_router, prefix="/api", tags=["tts"])

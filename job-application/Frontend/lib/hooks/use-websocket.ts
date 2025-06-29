@@ -70,13 +70,7 @@ export const useWebSocket = (currentPageId?: string) => {
       return;
     }
 
-    // Fetch history first
-    setIsHistoryLoading(true);
-    const history = await fetchMessagesForPage(currentPageIdRef.current);
-    setMessages(history);
-    setIsHistoryLoading(false);
-
-    // Then connect to WebSocket
+    // Connect to WebSocket (history is handled by page change effect)
     const wsUrl = `${WS_URL}/api/ws/orchestrator?token=${token}`;
     const newSocket = new WebSocket(wsUrl);
     socketRef.current = newSocket;
@@ -94,10 +88,35 @@ export const useWebSocket = (currentPageId?: string) => {
       } catch {
         parsedContent = event.data;
       }
-      setMessages((prev) => [
-        ...prev,
-        { id: uuidv4(), content: parsedContent, isUser: false },
-      ]);
+      
+      console.log(`📨 [WebSocket] Received response - Content preview: "${typeof parsedContent === 'string' ? parsedContent.substring(0, 50) : JSON.stringify(parsedContent).substring(0, 50)}..."`);
+      
+      setMessages((prev) => {
+        console.log(`📨 [WebSocket] BEFORE adding AI response: ${prev.length} messages`);
+        
+        // 2025 DUPLICATE PREVENTION: Check if this exact message already exists
+        const contentString = typeof parsedContent === 'string' ? parsedContent : JSON.stringify(parsedContent);
+        const isDuplicate = prev.some(msg => 
+          !msg.isUser && 
+          (typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)) === contentString
+        );
+        
+        if (isDuplicate) {
+          console.log(`🚫 [WebSocket] DUPLICATE DETECTED - Message already exists, skipping`);
+          return prev; // Return existing messages without modification
+        }
+        
+        const newMessages = [
+          ...prev,
+          { id: uuidv4(), content: parsedContent, isUser: false },
+        ];
+        console.log(`📨 [WebSocket] AFTER adding AI response: ${newMessages.length} messages`);
+        console.log(`📨 [WebSocket] Last 3 messages:`, newMessages.slice(-3).map(m => ({
+          isUser: m.isUser,
+          preview: typeof m.content === 'string' ? m.content.substring(0, 30) : 'Object'
+        })));
+        return newMessages;
+      });
       setIsLoading(false);
     };
 
@@ -109,7 +128,7 @@ export const useWebSocket = (currentPageId?: string) => {
       setError("WebSocket connection failed.");
       isConnecting.current = false;
     };
-  }, [getToken, fetchMessagesForPage]);
+  }, [getToken]);
 
   // Effect to handle page changes
   useEffect(() => {
@@ -147,52 +166,59 @@ export const useWebSocket = (currentPageId?: string) => {
   }, [isLoaded, connect]);
 
   const sendMessage = useCallback(async (content: string) => {
-    let pageId = currentPageIdRef.current;
-    
-    console.log(`📤 [WebSocket] sendMessage called with content: "${content}"`);
-    console.log(`📤 [WebSocket] Current pageId: ${pageId}`);
-    console.log(`📤 [WebSocket] Current messages count: ${messages.length}`);
-    
-    // Create a new page if this is the first message and no page is selected
-    if (messages.length === 0 && !pageId) {
-      console.log(`📄 [WebSocket] Creating new page for first message`);
-      const token = await getToken();
-      if (!token) {
-        setError("Authentication token not found.");
-        return;
-      }
-      try {
-        const response = await fetch('/api/pages', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ first_message: content }),
-        });
-        
-        if (response.ok) {
-          const newPage = await response.json();
-          pageId = newPage.id;
-          currentPageIdRef.current = pageId;
-          console.log(`📄 [WebSocket] Created new page: ${pageId}`);
+    try {
+      let pageId = currentPageIdRef.current;
+      
+      console.log(`📤 [WebSocket] sendMessage called with content: "${content}"`);
+      console.log(`📤 [WebSocket] Current pageId: ${pageId}`);
+      console.log(`📤 [WebSocket] Current messages count: ${messages.length}`);
+      
+      // REVERTED: Simple page creation logic that was working
+      if (messages.length === 0 && !pageId) {
+        console.log(`📄 [WebSocket] Creating new page for first message`);
+        const token = await getToken();
+        if (!token) {
+          setError("Authentication token not found.");
+          return;
         }
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Unknown error";
-        setError(errorMessage);
+        
+        try {
+          const response = await fetch('/api/pages', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ first_message: content }),
+          });
+          
+          if (response.ok) {
+            const newPage = await response.json();
+            pageId = newPage.id;
+            currentPageIdRef.current = pageId;
+            console.log(`📄 [WebSocket] Created new page: ${pageId}`);
+          } else {
+            const errorData = await response.text();
+            throw new Error(`Failed to create page: ${response.status} - ${errorData}`);
+          }
+        } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : "Failed to create page";
+          console.error("Page creation error:", err);
+          setError(errorMessage);
+          return;
+        }
+      } else if (pageId) {
+        console.log(`📄 [WebSocket] Using existing page: ${pageId}`);
+      } else {
+        console.log(`⚠️ [WebSocket] No page ID and messages exist - this shouldn't happen!`);
       }
-    } else if (pageId) {
-      console.log(`📄 [WebSocket] Using existing page: ${pageId}`);
-    } else {
-      console.log(`⚠️ [WebSocket] No page ID and messages exist - this shouldn't happen!`);
-    }
 
-    if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
-      await connect(); // Reconnect if needed
-    }
+      // REVERTED: Simple WebSocket connection check
+      if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+        await connect(); // Reconnect if needed
+      }
 
-    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      try {
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
         // Send message with page context
         const messageData = {
           content,
@@ -201,17 +227,27 @@ export const useWebSocket = (currentPageId?: string) => {
         
         console.log(`📤 [WebSocket] Sending message data:`, messageData);
         socketRef.current.send(JSON.stringify(messageData));
-        setMessages((prev) => [
-          ...prev,
-          { id: uuidv4(), content, isUser: true },
-        ]);
+        
+        // Add user message to UI immediately
+        setMessages((prev) => {
+          console.log(`📤 [WebSocket] Adding user message to UI. Previous count: ${prev.length}`);
+          const newMessages = [
+            ...prev,
+            { id: uuidv4(), content, isUser: true },
+          ];
+          console.log(`📤 [WebSocket] New message count: ${newMessages.length}`);
+          return newMessages;
+        });
         setIsLoading(true);
-      } catch {
-        setError("Failed to send message.");
-        setIsLoading(false);
+        setError(null);
+      } else {
+        setError("Failed to connect to WebSocket.");
       }
-    } else {
-      setError("Failed to connect to WebSocket.");
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to send message";
+      console.error("Send message error:", err);
+      setError(errorMessage);
+      setIsLoading(false);
     }
   }, [connect, messages, getToken]);
 
@@ -262,62 +298,101 @@ export const useWebSocket = (currentPageId?: string) => {
 
   const editMessage = useCallback(async (id: string, newContent: string) => {
     const messageIndex = messages.findIndex((msg) => msg.id === id);
-    if (messageIndex === -1) return;
+    if (messageIndex === -1) {
+      console.warn(`Message with id ${id} not found for editing`);
+      toast.error("Message not found");
+      return;
+    }
 
     const originalMessages = [...messages];
-    const updatedMessages = messages.slice(0, messageIndex);
-    updatedMessages.push({ ...messages[messageIndex], content: newContent });
-    setMessages(updatedMessages);
+    const messagesToKeep = messages.slice(0, messageIndex);
+    const editedMessage = { ...messages[messageIndex], content: newContent };
+    const subsequentCount = originalMessages.length - messageIndex - 1;
+    
+    // Show preview immediately
+    const previewMessages = [...messagesToKeep, editedMessage];
+    setMessages(previewMessages);
 
-    toast("Fork conversation?", {
-      description: "This will remove all subsequent messages and continue from here.",
-      action: {
-        label: "Confirm",
-        onClick: async () => {
-          const token = await getToken();
-          if (!token) {
-            setError("Authentication token not found.");
-            setMessages(originalMessages);
-            return;
-          }
+    // REVERTED: Proper toast with confirmation and error handling
+    const editPromise = async () => {
+      const token = await getToken();
+      if (!token) {
+        throw new Error("Authentication token not available");
+      }
 
-          try {
-            await fetch(`/api/messages/${id}`, {
-              method: 'PUT',
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ content: newContent }),
-            });
+      console.log(`✏️ Editing message ${id} with new content: "${newContent.substring(0, 50)}..."`);
 
-            await fetch(`/api/messages/${id}?cascade=true&above=true`, {
-              method: 'DELETE',
-              headers: { 'Authorization': `Bearer ${token}` },
-            });
-
-            if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-              const messageData = {
-                content: newContent,
-                page_id: currentPageIdRef.current
-              };
-              socketRef.current.send(JSON.stringify(messageData));
-              setIsLoading(true);
-            }
-          } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : "Unknown error";
-            setError(errorMessage);
-            setMessages(originalMessages);
-          }
+      // Update message in database
+      const updateResponse = await fetch(`/api/messages/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({ content: newContent }),
+      });
+      
+      if (!updateResponse.ok) {
+        const errorData = await updateResponse.text();
+        throw new Error(`Failed to update message: ${updateResponse.status} - ${errorData}`);
+      }
+
+      // Delete subsequent messages if any exist
+      if (subsequentCount > 0) {
+        const deleteResponse = await fetch(`/api/messages/${id}?cascade=true&above=true`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        
+        if (!deleteResponse.ok) {
+          const errorData = await deleteResponse.text();
+          throw new Error(`Failed to delete subsequent messages: ${deleteResponse.status} - ${errorData}`);
+        }
+        console.log(`🗑️ Deleted ${subsequentCount} subsequent messages`);
+      }
+
+      // Enhanced WebSocket handling for continuing conversation
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        const messageData = {
+          content: newContent,
+          page_id: currentPageIdRef.current
+        };
+        
+        console.log(`📤 [EDIT] Sending edited message to continue conversation:`, messageData);
+        socketRef.current.send(JSON.stringify(messageData));
+        setIsLoading(true);
+        setError(null);
+      } else {
+        console.warn("⚠️ WebSocket not connected, cannot continue conversation");
+        throw new Error("Connection lost - message edited but conversation cannot continue automatically");
+      }
+      
+      console.log(`✅ Successfully edited message ${id}`);
+      return `Message edited successfully${subsequentCount > 0 ? ` (${subsequentCount} subsequent messages removed)` : ''}`;
+    };
+
+    toast.promise(editPromise(), {
+      loading: 'Saving changes...',
+      success: (data) => data,
+      error: (err) => {
+        console.error("Error editing message:", err);
+        setMessages(originalMessages); // Revert on error
+        return `Edit failed: ${err.message}`;
       },
-      onDismiss: () => setMessages(originalMessages),
     });
   }, [messages, getToken]);
 
   const regenerateMessage = useCallback(async (id: string) => {
     const messageIndex = messages.findIndex((msg) => msg.id === id);
-    if (messageIndex === -1) return;
+    if (messageIndex === -1) {
+      console.warn(`🔄 [Frontend] Message with id ${id} not found for regeneration`);
+      return;
+    }
+
+    console.log(`🔄 [Frontend] Regenerate requested for message ID: ${id}`);
+    console.log(`🔄 [Frontend] Message index: ${messageIndex}`);
+    console.log(`🔄 [Frontend] Total messages: ${messages.length}`);
+    console.log(`🔄 [Frontend] Current page ID: ${currentPageIdRef.current}`);
 
     // Find the last human message before the one being regenerated
     let lastHumanMessageIndex = -1;
@@ -328,10 +403,22 @@ export const useWebSocket = (currentPageId?: string) => {
       }
     }
     
-    if (lastHumanMessageIndex === -1) return;
+    if (lastHumanMessageIndex === -1) {
+      console.warn(`🔄 [Frontend] No human message found before index ${messageIndex}`);
+      return;
+    }
 
+    console.log(`🔄 [Frontend] Last human message index: ${lastHumanMessageIndex}`);
+    
     const messagesToRegenerate = messages.slice(0, lastHumanMessageIndex + 1);
-    setMessages(messagesToRegenerate);
+    console.log(`🔄 [Frontend] Keeping ${messagesToRegenerate.length} messages, removing ${messages.length - messagesToRegenerate.length} messages`);
+    
+    // CRITICAL: Set messages immediately and log the exact state
+    setMessages((prev) => {
+      console.log(`🔄 [Frontend] BEFORE regeneration: ${prev.length} messages`);
+      console.log(`🔄 [Frontend] SETTING TO: ${messagesToRegenerate.length} messages`);
+      return messagesToRegenerate;
+    });
 
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       const lastHumanMessage = messages[lastHumanMessageIndex];
@@ -341,9 +428,14 @@ export const useWebSocket = (currentPageId?: string) => {
           content: lastHumanMessage.content,
           page_id: currentPageIdRef.current
         };
+        console.log(`🔄 [Frontend] Sending regenerate data:`, regenerateData);
         socketRef.current.send(JSON.stringify(regenerateData));
         setIsLoading(true);
+      } else {
+        console.warn(`🔄 [Frontend] Last human message content is not a string:`, lastHumanMessage.content);
       }
+    } else {
+      console.error(`🔄 [Frontend] WebSocket not connected when trying to regenerate`);
     }
   }, [messages]);
 

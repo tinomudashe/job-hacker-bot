@@ -17,7 +17,8 @@ export type FormFieldType =
   | "date"
   | "file"
   | "textarea"
-  | "select";
+  | "select"
+  | "checkbox";
 
 export interface FormField {
   name: string;
@@ -31,9 +32,10 @@ export interface FormField {
   accept?: string;
   min?: number;
   max?: number;
+  defaultValue?: boolean;
 }
 
-type FormValue = string | number | File | null;
+type FormValue = string | number | File | boolean | null;
 
 interface DynamicFormProps {
   fields: FormField[];
@@ -58,7 +60,7 @@ export function DynamicForm({
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
-    const { name, value, type } = e.target;
+    const { name, value, type, checked } = e.target as HTMLInputElement;
     let finalValue: FormValue = value;
 
     if (type === "file") {
@@ -66,6 +68,8 @@ export function DynamicForm({
       finalValue = fileInput.files?.[0] || null;
     } else if (type === "number") {
       finalValue = value === "" ? null : Number(value);
+    } else if (type === "checkbox") {
+      finalValue = checked;
     }
 
     setFormData((prev) => ({
@@ -89,6 +93,14 @@ export function DynamicForm({
       value instanceof File ? value.name :
       value === null ? "" :
       String(value);
+    
+    // Initialize checkbox values with defaultValue
+    if (field.type === "checkbox" && formData[field.name] === undefined) {
+      setFormData(prev => ({
+        ...prev,
+        [field.name]: field.defaultValue || false
+      }));
+    }
 
     switch (field.type) {
       case "textarea":
@@ -122,6 +134,21 @@ export function DynamicForm({
           />
         );
 
+      case "checkbox":
+        return (
+          <div className="flex items-center space-x-2">
+            <Input
+              {...commonProps}
+              type="checkbox"
+              checked={Boolean(value)}
+              className="w-4 h-4"
+            />
+            <Label htmlFor={field.name} className="text-sm font-normal">
+              {field.label}
+            </Label>
+          </div>
+        );
+
       default:
         return (
           <Input
@@ -139,10 +166,12 @@ export function DynamicForm({
     <form onSubmit={handleSubmit} className="space-y-6">
       {fields.map((field) => (
         <div key={field.name} className="space-y-2">
-          <Label htmlFor={field.name}>
-            {field.label}
-            {field.required && <span className="text-destructive">*</span>}
-          </Label>
+          {field.type !== "checkbox" && (
+            <Label htmlFor={field.name}>
+              {field.label}
+              {field.required && <span className="text-destructive">*</span>}
+            </Label>
+          )}
           {renderField(field)}
           {field.helperText && (
             <p className="text-sm text-muted-foreground">{field.helperText}</p>

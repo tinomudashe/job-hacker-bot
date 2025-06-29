@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Dialog,
   DialogHeader,
@@ -12,7 +12,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@clerk/nextjs";
 import { toast } from "@/lib/toast";
-import { MessageSquare, Trash2, Calendar, X, AlertTriangle } from "lucide-react";
+import { MessageSquare, Trash2, Calendar, X, AlertTriangle, FileText, Paperclip } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Page {
@@ -35,14 +35,7 @@ export function PagesDialog({ isOpen, onClose, onSelectPage, currentPageId }: Pa
   const [showDeleteAll, setShowDeleteAll] = useState(false);
   const { getToken } = useAuth();
 
-  useEffect(() => {
-    if (isOpen) {
-      fetchPages();
-      setShowDeleteAll(false);
-    }
-  }, [isOpen]);
-
-  const fetchPages = async () => {
+  const fetchPages = useCallback(async () => {
     setIsLoading(true);
     try {
       const token = await getToken();
@@ -62,7 +55,14 @@ export function PagesDialog({ isOpen, onClose, onSelectPage, currentPageId }: Pa
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [getToken]);
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchPages();
+      setShowDeleteAll(false);
+    }
+  }, [isOpen, fetchPages]);
 
   const handleDeletePage = async (pageId: string, event: React.MouseEvent) => {
     event.stopPropagation();
@@ -141,54 +141,29 @@ export function PagesDialog({ isOpen, onClose, onSelectPage, currentPageId }: Pa
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogPortal>
-        <DialogOverlay className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
+        <DialogOverlay className="fixed inset-0 z-50 bg-black/70 dark:bg-black/80 backdrop-blur-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
         <DialogPrimitive.Content
-          className="fixed left-[50%] top-[50%] z-50 w-[90vw] max-w-lg h-[80vh] translate-x-[-50%] translate-y-[-50%] bg-background/80 backdrop-blur-xl backdrop-saturate-150 shadow-2xl rounded-3xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
+          className="fixed left-[50%] top-[50%] z-50 w-[92vw] max-w-md h-[85vh] translate-x-[-50%] translate-y-[-50%] backdrop-blur-3xl backdrop-saturate-200 shadow-2xl rounded-3xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 bg-white/95 border border-white/40 dark:bg-gray-950/95 dark:border-gray-800/50 flex flex-col"
           onPointerDownOutside={(e) => e.preventDefault()}
           onEscapeKeyDown={onClose}
-          style={{
-            background: 'linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05))',
-            backdropFilter: 'blur(20px)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.1)'
-          }}
         >
-          {/* Enhanced glass highlight with edge glow */}
-          <div 
-            className="absolute inset-0 rounded-3xl pointer-events-none"
-            style={{
-              background: 'linear-gradient(135deg, rgba(255,255,255,0.15) 0%, transparent 50%, rgba(255,255,255,0.05) 100%)',
-              border: '1px solid transparent',
-              backgroundClip: 'padding-box'
-            }}
-          />
-          
-          {/* Subtle edge glow */}
-          <div className="absolute inset-0 rounded-3xl pointer-events-none bg-gradient-to-b from-white/5 via-transparent to-transparent" />
+          {/* Enhanced glassmorphism effects */}
+          <div className="absolute inset-0 rounded-3xl pointer-events-none bg-gradient-to-br from-white/30 via-white/10 to-transparent dark:from-white/20 dark:via-white/5 dark:to-transparent" />
+          <div className="absolute inset-0 rounded-3xl pointer-events-none border border-white/50 dark:border-white/30" />
+          <div className="absolute inset-[1px] rounded-3xl pointer-events-none bg-gradient-to-b from-white/20 via-transparent to-transparent dark:from-white/10 dark:via-transparent dark:to-transparent" />
           
           {/* Header */}
           <DialogHeader 
-            className="flex-row items-center justify-between p-4 backdrop-blur-sm relative rounded-t-3xl"
-            style={{
-              borderBottom: '1px solid rgba(255,255,255,0.1)',
-              background: 'linear-gradient(90deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))'
-            }}
+            className="flex-shrink-0 flex-row items-center justify-between p-5 backdrop-blur-md relative rounded-t-3xl border-b border-gray-200/60 bg-gradient-to-r from-gray-50/90 to-white/70 dark:border-gray-700/60 dark:from-gray-900/90 dark:to-gray-950/70"
           >
             <DialogTitle className="flex items-center gap-3">
-              <div 
-                className="p-2 backdrop-blur-sm rounded-2xl relative"
-                style={{
-                  background: 'linear-gradient(135deg, rgba(59,130,246,0.1), rgba(139,92,246,0.1))',
-                  border: '1px solid rgba(59,130,246,0.2)',
-                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.1)'
-                }}
-              >
-                <MessageSquare className="h-5 w-5 text-primary" />
+              <div className="p-2.5 backdrop-blur-sm rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 border border-blue-300/40 shadow-lg dark:from-blue-400/20 dark:to-purple-400/20 dark:border-blue-600/40">
+                <MessageSquare className="h-5 w-5 text-blue-600 dark:text-blue-400" />
               </div>
               <div>
-                <h2 className="text-lg font-semibold">Conversations</h2>
-                <p className="text-sm text-muted-foreground">
-                  {pages.length} total
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Conversations</h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400 -mt-0.5">
+                  {pages.length > 5 ? `5 of ${pages.length} total` : `${pages.length} total`}
                 </p>
               </div>
             </DialogTitle>
@@ -197,55 +172,22 @@ export function PagesDialog({ isOpen, onClose, onSelectPage, currentPageId }: Pa
               variant="ghost"
               size="icon"
               onClick={onClose}
-              className="h-8 w-8 rounded-2xl relative transition-all duration-200 hover:scale-105"
-              style={{
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                backdropFilter: 'blur(10px)'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'rgba(255,255,255,0.1)'
-                e.currentTarget.style.border = '1px solid rgba(255,255,255,0.2)'
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
-                e.currentTarget.style.border = '1px solid rgba(255,255,255,0.1)'
-              }}
+              className="h-9 w-9 rounded-xl transition-all duration-200 hover:scale-105 bg-gray-100/90 border border-gray-200/70 backdrop-blur-sm hover:bg-gray-200/95 hover:border-gray-300/80 dark:bg-gray-800/90 dark:border-gray-700/70 dark:hover:bg-gray-700/95 dark:hover:border-gray-600/80"
             >
               <X className="h-4 w-4" />
             </Button>
           </DialogHeader>
 
           {/* Content */}
-          <div className="flex flex-col h-full">
+          <div className="flex flex-col flex-1 min-h-0">
             {/* Actions */}
             {pages.length > 0 && (
-              <div 
-                className="flex justify-end p-4 backdrop-blur-sm relative"
-                style={{
-                  borderBottom: '1px solid rgba(255,255,255,0.08)',
-                  background: 'linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.05))'
-                }}
-              >
+              <div className="flex-shrink-0 flex justify-end p-5 backdrop-blur-md relative border-b border-gray-200/50 bg-gradient-to-r from-gray-50/70 to-white/50 dark:border-gray-700/50 dark:from-gray-900/70 dark:to-gray-950/50">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => setShowDeleteAll(!showDeleteAll)}
-                  className="text-red-500 hover:text-red-600 rounded-2xl transition-all duration-200 hover:scale-105"
-                  style={{
-                    background: 'linear-gradient(135deg, rgba(239,68,68,0.05), rgba(239,68,68,0.02))',
-                    border: '1px solid rgba(239,68,68,0.2)',
-                    backdropFilter: 'blur(10px)',
-                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(239,68,68,0.1), rgba(239,68,68,0.05))'
-                    e.currentTarget.style.border = '1px solid rgba(239,68,68,0.3)'
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(239,68,68,0.05), rgba(239,68,68,0.02))'
-                    e.currentTarget.style.border = '1px solid rgba(239,68,68,0.2)'
-                  }}
+                  className="text-red-600 hover:text-red-700 rounded-xl transition-all duration-300 hover:scale-105 bg-gradient-to-br from-red-50/95 to-red-100/85 border-red-200/70 backdrop-blur-sm hover:from-red-100/95 hover:to-red-200/90 hover:border-red-300/80 hover:shadow-lg dark:text-red-400 dark:hover:text-red-300 dark:from-red-950/95 dark:to-red-900/85 dark:border-red-800/70 dark:hover:from-red-900/95 dark:hover:to-red-800/90 dark:hover:border-red-700/80 font-medium"
                 >
                   <Trash2 className="h-4 w-4 mr-2" />
                   Clear All
@@ -255,49 +197,38 @@ export function PagesDialog({ isOpen, onClose, onSelectPage, currentPageId }: Pa
 
             {/* Delete all confirmation */}
             {showDeleteAll && (
-              <div 
-                className="mx-4 mt-4 p-4 backdrop-blur-sm rounded-2xl relative"
-                style={{
-                  background: 'linear-gradient(135deg, rgba(239,68,68,0.1), rgba(239,68,68,0.05))',
-                  border: '1px solid rgba(239,68,68,0.2)',
-                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)'
-                }}
-              >
-                <div className="flex items-start gap-3">
-                  <div 
-                    className="p-1.5 rounded-xl"
-                    style={{
-                      background: 'rgba(239,68,68,0.2)',
-                      border: '1px solid rgba(239,68,68,0.3)'
-                    }}
-                  >
-                    <AlertTriangle className="h-4 w-4 text-red-500" />
+              <div className="flex-shrink-0 mx-5 mt-4 p-5 backdrop-blur-md rounded-2xl relative bg-gradient-to-br from-red-50/95 to-red-100/85 border border-red-200/70 shadow-lg dark:from-red-950/95 dark:to-red-900/85 dark:border-red-800/70">
+                <div className="flex items-start gap-4">
+                  <div className="p-2.5 rounded-xl bg-red-500/20 border border-red-300/40 backdrop-blur-sm shadow-sm dark:bg-red-400/20 dark:border-red-600/40">
+                    <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
                   </div>
                   <div className="flex-1">
-                    <h4 className="font-medium text-red-600 dark:text-red-400">Delete All Conversations?</h4>
-                    <p className="text-sm text-red-700/80 dark:text-red-300/80 mt-1">
-                      This will permanently delete all {pages.length} conversations.
+                    <h4 className="font-semibold text-red-800 dark:text-red-200 mb-1">Delete All Conversations?</h4>
+                    <p className="text-sm text-red-700/80 dark:text-red-300/80 leading-relaxed">
+                      This will permanently delete all {pages.length} conversations. This action cannot be undone.
                     </p>
-                    <div className="flex gap-2 mt-3">
+                    <div className="flex gap-3 mt-4">
                       <Button
                         size="sm"
                         variant="destructive"
                         onClick={handleDeleteAll}
                         disabled={isLoading}
-                        className="backdrop-blur-sm rounded-2xl"
+                        className="backdrop-blur-sm rounded-xl font-medium hover:scale-105 transition-all duration-200"
                       >
-                        {isLoading ? "Deleting..." : "Delete All"}
+                        {isLoading ? (
+                          <>
+                            <div className="animate-spin rounded-full h-3 w-3 border border-white/30 border-t-white mr-2" />
+                            Deleting...
+                          </>
+                        ) : (
+                          "Delete All"
+                        )}
                       </Button>
                       <Button
                         size="sm"
                         variant="outline"
                         onClick={() => setShowDeleteAll(false)}
-                        className="rounded-2xl"
-                        style={{
-                          background: 'rgba(255,255,255,0.05)',
-                          border: '1px solid rgba(255,255,255,0.2)',
-                          backdropFilter: 'blur(10px)'
-                        }}
+                        className="rounded-xl bg-white/80 border-gray-300/60 backdrop-blur-sm hover:bg-white/95 hover:border-gray-400/70 dark:bg-gray-800/80 dark:border-gray-600/60 dark:hover:bg-gray-700/95 dark:hover:border-gray-500/70 font-medium hover:scale-105 transition-all duration-200"
                       >
                         Cancel
                       </Button>
@@ -307,128 +238,205 @@ export function PagesDialog({ isOpen, onClose, onSelectPage, currentPageId }: Pa
               </div>
             )}
 
-            {/* Conversations list */}
-            <div className="flex-1 overflow-y-auto p-4">
+            {/* Conversations list with proper scrolling */}
+            <div className="flex-1 flex flex-col min-h-0">
+              <div className="flex-1 overflow-y-auto overscroll-contain scroll-smooth scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent dark:scrollbar-thumb-gray-600">
+                <div className="p-4 pb-12 pt-2 space-y-3">
               {isLoading ? (
-                <div className="flex items-center justify-center py-8">
+                <div className="flex items-center justify-center py-12">
                   <div className="text-center">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-                    <p className="text-sm text-muted-foreground">Loading conversations...</p>
+                    <div className="relative mb-6">
+                      <div className="animate-spin rounded-full h-10 w-10 border-2 border-blue-500/20 border-t-blue-500 mx-auto"></div>
+                      <div className="animate-pulse absolute inset-0 rounded-full bg-blue-500/10"></div>
+                    </div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 font-medium">Loading conversations...</p>
                   </div>
                 </div>
               ) : pages.length === 0 ? (
-                <div className="text-center py-8">
-                  <div 
-                    className="p-4 backdrop-blur-sm rounded-3xl inline-block mb-4 relative"
-                    style={{
-                      background: 'linear-gradient(135deg, rgba(59,130,246,0.05), rgba(139,92,246,0.05))',
-                      border: '1px solid rgba(59,130,246,0.1)',
-                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)'
-                    }}
-                  >
-                    <MessageSquare className="h-12 w-12 text-muted-foreground" />
+                <div className="text-center py-12">
+                  <div className="relative mb-6">
+                    <div className="p-5 backdrop-blur-sm rounded-3xl inline-block bg-gradient-to-br from-blue-500/10 to-purple-500/10 border border-blue-300/30 shadow-lg dark:from-blue-400/10 dark:to-purple-400/10 dark:border-blue-600/30">
+                      <MessageSquare className="h-12 w-12 text-blue-500 dark:text-blue-400" />
+                    </div>
                   </div>
-                  <h3 className="text-lg font-medium mb-2">No conversations yet</h3>
-                  <p className="text-sm text-muted-foreground">
-                    Start a new chat to create your first conversation.
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">No conversations yet</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 max-w-sm mx-auto leading-relaxed">
+                    Start chatting to create your first conversation. Your chat history will appear here.
                   </p>
+                  {/* Spacer for empty state */}
+                  <div className="h-8"></div>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {pages.map((page) => (
-                    <div
-                      key={page.id}
-                      className={cn(
-                        "group relative flex items-center justify-between p-3 rounded-2xl cursor-pointer transition-all duration-200 hover:scale-[1.02] backdrop-blur-sm",
-                        currentPageId === page.id 
-                          ? "shadow-lg" 
-                          : "hover:shadow-lg"
-                      )}
-                      style={{
-                        background: currentPageId === page.id
-                          ? 'linear-gradient(135deg, rgba(59,130,246,0.1), rgba(139,92,246,0.05))'
-                          : 'linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))',
-                        border: currentPageId === page.id
-                          ? '1px solid rgba(59,130,246,0.3)'
-                          : '1px solid rgba(255,255,255,0.1)',
-                        boxShadow: currentPageId === page.id
-                          ? 'inset 0 1px 0 rgba(255,255,255,0.1), 0 4px 6px -1px rgba(59,130,246,0.1)'
-                          : 'inset 0 1px 0 rgba(255,255,255,0.05)'
-                      }}
-                      onClick={() => {
-                        if (onSelectPage) {
-                          onSelectPage(page.id);
-                          onClose();
-                        }
-                      }}
-                      onMouseEnter={(e) => {
-                        if (currentPageId !== page.id) {
-                          e.currentTarget.style.background = 'linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04))'
-                          e.currentTarget.style.border = '1px solid rgba(255,255,255,0.2)'
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (currentPageId !== page.id) {
-                          e.currentTarget.style.background = 'linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))'
-                          e.currentTarget.style.border = '1px solid rgba(255,255,255,0.1)'
-                        }
-                      }}
-                    >
-                      {/* Enhanced glass highlight on hover */}
-                      <div 
-                        className="absolute inset-0 rounded-2xl pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                        style={{
-                          background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, transparent 50%, rgba(255,255,255,0.05) 100%)'
-                        }}
-                      />
-                      
-                      <div className="flex-1 min-w-0 relative z-10">
-                        <h3 className={cn(
-                          "font-medium truncate",
-                          currentPageId === page.id ? "text-primary" : "text-foreground"
-                        )}>
-                          {page.title}
-                        </h3>
-                        {page.created_at && (
-                          <div className="flex items-center gap-1 mt-1">
-                            <Calendar className="h-3 w-3 text-muted-foreground" />
-                            <span className="text-xs text-muted-foreground">
-                              {formatDate(page.created_at)}
-                            </span>
-                          </div>
+                <>
+                  {/* Show only first 5 conversations */}
+                  {pages.slice(0, 5).map((page) => {
+                    // Enhanced file attachment detection
+                    const isFileAttachment = page.title.includes('**File Attached:**') || 
+                      page.title.includes('CV/Resume uploaded') ||
+                      page.title.includes('📎') ||
+                      page.title.includes('📄');
+                    
+                    const getFileInfo = () => {
+                      if (page.title.includes('**File Attached:**')) {
+                        const fileName = page.title.split('**File Attached:**')[1]?.trim();
+                        return { type: 'file', fileName, icon: '📎' };
+                      }
+                      if (page.title.includes('CV/Resume uploaded')) {
+                        const fileName = page.title.split('**File:**')[1]?.split('\n')[0]?.trim() || 'CV/Resume';
+                        return { type: 'cv', fileName, icon: '📄' };
+                      }
+                      return null;
+                    };
+
+                    const fileInfo = getFileInfo();
+                    
+                    return (
+                      <div
+                        key={page.id}
+                        className={cn(
+                          "group relative rounded-2xl cursor-pointer transition-all duration-300 hover:scale-[1.02] backdrop-blur-md border shadow-lg overflow-hidden",
+                          currentPageId === page.id 
+                            ? isFileAttachment
+                              ? "bg-gradient-to-br from-purple-500/20 to-blue-500/20 border-purple-300/50 shadow-purple-500/20 dark:from-purple-400/20 dark:to-blue-400/20 dark:border-purple-600/50 dark:shadow-purple-800/20"
+                              : "bg-gradient-to-br from-blue-500/20 to-cyan-500/20 border-blue-300/50 shadow-blue-500/20 dark:from-blue-400/20 dark:to-cyan-400/20 dark:border-blue-600/50 dark:shadow-blue-800/20"
+                            : isFileAttachment
+                              ? "bg-gradient-to-br from-purple-50/90 to-blue-50/80 border-purple-200/50 hover:from-purple-100/95 hover:to-blue-100/85 hover:border-purple-300/60 hover:shadow-xl dark:from-purple-950/90 dark:to-blue-950/80 dark:border-purple-700/50 dark:hover:from-purple-900/95 dark:hover:to-blue-900/85 dark:hover:border-purple-600/60"
+                              : "bg-gradient-to-br from-gray-50/90 to-white/80 border-gray-200/50 hover:from-gray-100/95 hover:to-white/90 hover:border-gray-300/60 hover:shadow-xl dark:from-gray-900/90 dark:to-gray-800/80 dark:border-gray-700/50 dark:hover:from-gray-800/95 dark:hover:to-gray-700/85 dark:hover:border-gray-600/60"
                         )}
-                      </div>
-                      
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="opacity-0 group-hover:opacity-100 h-8 w-8 text-muted-foreground hover:text-red-500 rounded-2xl relative z-10 transition-all duration-200 hover:scale-110"
-                        style={{
-                          background: 'rgba(255,255,255,0.05)',
-                          border: '1px solid rgba(255,255,255,0.1)',
-                          backdropFilter: 'blur(10px)'
-                        }}
-                        onClick={(e) => handleDeletePage(page.id, e)}
-                        disabled={isDeleting === page.id}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = 'rgba(239,68,68,0.1)'
-                          e.currentTarget.style.border = '1px solid rgba(239,68,68,0.2)'
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background = 'rgba(255,255,255,0.05)'
-                          e.currentTarget.style.border = '1px solid rgba(255,255,255,0.1)'
+                        onClick={() => {
+                          console.log(`🔍 [PagesDialog] Clicked on page:`, {
+                            pageId: page.id,
+                            title: page.title,
+                            created: page.created_at
+                          });
+                          if (onSelectPage) {
+                            console.log(`📤 [PagesDialog] Calling onSelectPage with ID: ${page.id}`);
+                            onSelectPage(page.id);
+                            onClose();
+                          }
                         }}
                       >
-                        {isDeleting === page.id ? (
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-500" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                      </Button>
+                        {/* Enhanced glassmorphism highlight on hover */}
+                        <div className="absolute inset-0 rounded-2xl pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-br from-white/40 via-white/15 to-transparent dark:from-white/25 dark:via-white/8 dark:to-transparent" />
+                        
+                        <div className="flex items-start gap-4 p-4 relative z-10 overflow-hidden">
+                          {/* Icon/Avatar */}
+                          <div className={cn(
+                            "flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center shadow-md transition-all duration-300 group-hover:scale-110",
+                            isFileAttachment
+                              ? "bg-gradient-to-br from-purple-500 to-blue-500 text-white shadow-purple-500/25"
+                              : "bg-gradient-to-br from-gray-400 to-gray-600 text-white shadow-gray-500/25"
+                          )}>
+                            {fileInfo ? (
+                              <span className="text-lg">{fileInfo.icon}</span>
+                            ) : (
+                              <MessageSquare className="h-5 w-5" />
+                            )}
+                          </div>
+                          
+                          {/* Content */}
+                          <div className="flex-1 min-w-0">
+                            {isFileAttachment && fileInfo ? (
+                              <>
+                                <h3 className={cn(
+                                  "font-semibold text-sm mb-1 truncate",
+                                  currentPageId === page.id 
+                                    ? "text-purple-700 dark:text-purple-300" 
+                                    : "text-purple-600 dark:text-purple-400"
+                                )}>
+                                  File Attached: <span className="truncate">{fileInfo.fileName}</span>
+                                </h3>
+                                <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
+                                  {fileInfo.type === 'cv' ? 'CV/Resume uploaded' : 'Document attachment'}
+                                </p>
+                              </>
+                            ) : (
+                              <h3 className={cn(
+                                "font-medium text-sm leading-tight truncate",
+                                currentPageId === page.id 
+                                  ? "text-blue-700 dark:text-blue-300" 
+                                  : "text-gray-900 dark:text-gray-100"
+                              )}>
+                                {page.title}
+                              </h3>
+                            )}
+                            
+                            {page.created_at && (
+                              <div className="flex items-center gap-1.5 mt-2">
+                                <Calendar className="h-3 w-3 text-gray-500 dark:text-gray-400" />
+                                <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+                                  {formatDate(page.created_at)}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* Delete button */}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="opacity-0 group-hover:opacity-100 h-8 w-8 text-gray-400 hover:text-red-500 rounded-xl relative z-10 transition-all duration-300 hover:scale-110 bg-white/50 border border-gray-200/50 backdrop-blur-sm hover:bg-red-50/90 hover:border-red-200/60 dark:text-gray-500 dark:hover:text-red-400 dark:bg-gray-800/50 dark:border-gray-700/50 dark:hover:bg-red-950/80 dark:hover:border-red-800/60"
+                            onClick={(e) => handleDeletePage(page.id, e)}
+                            disabled={isDeleting === page.id}
+                          >
+                            {isDeleting === page.id ? (
+                              <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-red-500" />
+                            ) : (
+                              <Trash2 className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  
+                  {/* Message when there are more than 5 conversations */}
+                  {pages.length > 5 && (
+                    <div className="mt-4 mb-6 p-4 backdrop-blur-md rounded-2xl bg-gradient-to-br from-orange-50/95 to-yellow-50/85 border border-orange-200/70 shadow-lg dark:from-orange-950/95 dark:to-yellow-950/85 dark:border-orange-800/70">
+                      <div className="flex items-start gap-3">
+                        <div className="flex-shrink-0 p-2 rounded-lg bg-orange-500/20 border border-orange-300/40 backdrop-blur-sm dark:bg-orange-400/20 dark:border-orange-600/40">
+                          <AlertTriangle className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-semibold text-orange-800 dark:text-orange-200 mb-2">
+                            Too many conversations
+                          </h4>
+                          <p className="text-sm text-orange-700/80 dark:text-orange-300/80 leading-relaxed mb-3">
+                            Showing 5 of {pages.length} conversations. Please delete some conversations to see more and improve performance.
+                          </p>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setShowDeleteAll(true)}
+                            className="text-orange-600 hover:text-orange-700 rounded-lg transition-all duration-200 bg-orange-100/50 border-orange-200/50 hover:bg-orange-200/60 hover:border-orange-300/60 dark:text-orange-400 dark:hover:text-orange-300 dark:bg-orange-900/50 dark:border-orange-800/50 dark:hover:bg-orange-800/60 dark:hover:border-orange-700/60"
+                          >
+                            <Trash2 className="h-3 w-3 mr-2" />
+                            Delete Conversations
+                          </Button>
+                        </div>
+                      </div>
                     </div>
-                  ))}
+                  )}
+                </>
+              )}
+              
+              {/* End of conversations indicator - only show when there are conversations */}
+              {pages.length > 0 && (
+                <div className="flex flex-col items-center justify-center py-8 opacity-60 animate-pulse">
+                  <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+                    <div className="w-12 h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent dark:via-gray-600 animate-pulse"></div>
+                    <span className="font-medium tracking-wide">End of conversations</span>
+                    <div className="w-12 h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent dark:via-gray-600 animate-pulse"></div>
+                  </div>
+                  <div className="mt-3 flex space-x-1">
+                    <div className="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms', animationDuration: '1.5s' }}></div>
+                    <div className="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '200ms', animationDuration: '1.5s' }}></div>
+                    <div className="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '400ms', animationDuration: '1.5s' }}></div>
+                  </div>
                 </div>
               )}
+                </div>
+              </div>
             </div>
           </div>
         </DialogPrimitive.Content>

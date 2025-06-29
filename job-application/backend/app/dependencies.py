@@ -80,7 +80,7 @@ async def get_user_from_token_data(token_data: ClerkUser, db: AsyncSession) -> U
     return user
 
 
-async def get_current_user(token: str, db: AsyncSession = Depends(get_db)) -> User:
+async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> User:
     """
     Verify the auth token and get the current user.
     This is used for regular HTTP endpoints.
