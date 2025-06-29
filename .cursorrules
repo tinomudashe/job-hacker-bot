@@ -1,0 +1,118 @@
+# Job Hacker Bot - Cursor AI Rules
+
+## Project Overview
+
+This is an AI-powered job application assistant with modern React/Next.js frontend and FastAPI backend. The system uses Graph RAG for personalized responses and includes comprehensive job search, resume generation, and application management features.
+
+## Architecture
+
+- **Frontend**: React 18, Next.js 14, TypeScript, TailwindCSS, shadcn/ui components
+- **Backend**: FastAPI, Python 3.10+, SQLAlchemy, PostgreSQL, LangChain
+- **AI**: OpenAI GPT models, Graph RAG, Vector search, Enhanced memory system
+- **Communication**: WebSocket for real-time chat, REST APIs
+- **Authentication**: Clerk.js for user management
+
+## Code Style & Standards
+
+### TypeScript/React
+
+- Use TypeScript with strict mode enabled
+- Prefer functional components with hooks
+- Use shadcn/ui components consistently
+- Follow React 18 patterns (Suspense, Error Boundaries)
+- Use proper TypeScript types, avoid `any`
+- Prefer composition over inheritance
+- Use custom hooks for business logic
+
+### Python/FastAPI
+
+- Follow PEP 8 style guidelines
+- Use type hints extensively
+- Prefer async/await for all operations
+- Use Pydantic models for request/response validation
+- Follow dependency injection patterns
+- Use proper exception handling
+- Add comprehensive logging
+
+### File Organization
+
+- Components in `Frontend/components/` with clear naming
+- Hooks in `Frontend/lib/hooks/`
+- Backend routes in `backend/app/` organized by feature
+- Database models in `backend/app/models_db.py`
+- Tools and utilities in appropriate subdirectories
+
+## Development Guidelines
+
+### When making changes:
+
+1. **Understand Context**: Always read related files to understand the full context
+2. **Preserve Functionality**: Don't break existing working features
+3. **Test Thoroughly**: Ensure changes work with the WebSocket system
+4. **Follow Patterns**: Use existing patterns and conventions
+5. **Document Changes**: Add clear comments for complex logic
+
+### Key Areas to Be Careful With:
+
+- **WebSocket Message Handling**: Critical for real-time chat functionality
+- **Database Transactions**: Ensure proper commit/rollback patterns
+- **Agent Tools**: Maintain tool signatures and return formats
+- **Authentication**: Preserve security patterns
+- **Error Handling**: Maintain user-friendly error messages
+
+### Common Tasks:
+
+- Adding new tools: Follow the pattern in `backend/app/orchestrator.py`
+- UI components: Use shadcn/ui components and TailwindCSS
+- Database changes: Create proper Alembic migrations
+- API endpoints: Use FastAPI dependency injection
+
+### Performance Considerations:
+
+- Use React.memo() for expensive components
+- Implement proper database indexing
+- Use pagination for large datasets
+- Optimize WebSocket message frequency
+- Cache expensive operations
+
+### Security Best Practices:
+
+- Validate all inputs with Pydantic
+- Use proper authentication middleware
+- Sanitize database queries
+- Don't expose sensitive data in responses
+- Follow principle of least privilege
+
+## Testing Strategy
+
+- Write unit tests for critical business logic
+- Test WebSocket functionality thoroughly
+- Validate API endpoints with proper error cases
+- Test UI components with user interactions
+- Integration tests for key workflows
+
+## AI Integration Notes
+
+- The system uses Graph RAG for personalized responses
+- Memory system learns from user interactions
+- Agent tools provide specific job-related functionality
+- WebSocket handles real-time AI conversations
+- Maintain context across conversation turns
+
+## Debugging Tips
+
+- Use the VSCode debug configurations provided
+- Check WebSocket connection status for chat issues
+- Monitor database logs for transaction problems
+- Use browser dev tools for frontend debugging
+- Check FastAPI automatic docs at `/docs`
+
+## Common Issues & Solutions
+
+- **Duplicate Messages**: Check WebSocket message deduplication logic
+- **Database Locks**: Ensure proper transaction handling
+- **UI State Issues**: Verify React state management patterns
+- **Agent Errors**: Check tool signatures and error handling
+- **Authentication Issues**: Verify Clerk configuration
+
+Remember: This is a complex system with many interconnected parts. Always consider the full impact of changes and test thoroughly across the entire application flow.
