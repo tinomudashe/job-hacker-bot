@@ -1,0 +1,82 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "🚀 Backend (FastAPI)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/backend/app/main.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/backend",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/backend"
+      },
+      "args": [],
+      "justMyCode": false,
+      "autoReload": {
+        "enable": true
+      }
+    },
+    {
+      "name": "🎨 Frontend (Next.js)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/Frontend/node_modules/.bin/next",
+      "args": ["dev"],
+      "cwd": "${workspaceFolder}/Frontend",
+      "console": "integratedTerminal",
+      "env": {
+        "NODE_ENV": "development"
+      }
+    },
+    {
+      "name": "🔧 Backend Tests",
+      "type": "python",
+      "request": "launch",
+      "module": "pytest",
+      "cwd": "${workspaceFolder}/backend",
+      "args": ["-v", "--tb=short"],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/backend"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "🧪 Graph RAG Tests",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/backend/test_graph_rag_integration.py",
+      "cwd": "${workspaceFolder}/backend",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/backend"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "🔗 WebSocket Test Client",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/backend/ws_client.py",
+      "cwd": "${workspaceFolder}/backend",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/backend"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ],
+  "compounds": [
+    {
+      "name": "🚀 Full Stack (Frontend + Backend)",
+      "configurations": ["🚀 Backend (FastAPI)", "🎨 Frontend (Next.js)"],
+      "stopAll": true,
+      "presentation": {
+        "hidden": false,
+        "group": "fullstack",
+        "order": 1
+      }
+    }
+  ]
+}

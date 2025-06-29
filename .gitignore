@@ -50,7 +50,7 @@ ENV/
 .ENV/
 
 # IDE files
-.vscode/
+# .vscode/ - Allow VSCode settings for team collaboration and Cursor integration
 .idea/
 *.swp
 *.swo
