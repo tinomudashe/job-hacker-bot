@@ -18,9 +18,10 @@ export default function Home() {
     editMessage,
     regenerateMessage,
     startNewChat,
+    clearAllChats,
     stopGeneration,
     isLoading, 
-    error, 
+    error,
     isConnected,
     isHistoryLoading,
   } = useWebSocket(currentPageId);
@@ -62,7 +63,10 @@ export default function Home() {
   }, [isLoaded, user, fetchMostRecentPage]);
 
   const handleSelectPage = (pageId: string) => {
+    console.log(`📋 [page.tsx] handleSelectPage called with ID: ${pageId}`);
+    console.log(`📋 [page.tsx] Previous currentPageId: ${currentPageId}`);
     setCurrentPageId(pageId);
+    console.log(`📋 [page.tsx] Updated currentPageId to: ${pageId}`);
   };
 
   const handleNewChat = () => {
@@ -76,7 +80,7 @@ export default function Home() {
       <div className="flex flex-col flex-1">
         <Header 
           onNewChat={handleNewChat}
-          onClearChat={startNewChat}
+          onClearChat={clearAllChats}
           currentPageId={currentPageId}
           onSelectPage={handleSelectPage}
           isLoginPage={!isSignedIn}
@@ -94,7 +98,7 @@ export default function Home() {
               isLoading={isLoading}
               isHistoryLoading={isHistoryLoading || isLoadingRecentPage}
               isConnected={isConnected}
-              error={error}
+              error={error || undefined}
             />
           </SignedIn>
           <SignedOut>
