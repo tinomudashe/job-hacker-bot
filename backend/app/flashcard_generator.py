@@ -8,7 +8,17 @@ from fastapi import APIRouter, Body, HTTPException, UploadFile, File, Form, Depe
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
-from google.cloud import speech
+
+# Optional import for Google Cloud Speech - graceful fallback if not available
+try:
+    from google.cloud import speech
+    SPEECH_AVAILABLE = True
+except ImportError:
+    # Define placeholder for speech when not available
+    speech = None
+    SPEECH_AVAILABLE = False
+    print("⚠️  Google Cloud Speech module not available. Audio transcription will be disabled.")
+
 from app.db import get_db
 from app.models_db import User
 from app.dependencies import get_current_active_user
@@ -44,6 +54,12 @@ class FeedbackResponse(BaseModel):
 
 async def transcribe_audio(audio_file: UploadFile) -> str:
     """Transcribes an audio file using Google Cloud Speech-to-Text."""
+    if not SPEECH_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Audio transcription service unavailable. Google Cloud Speech module is not installed or configured."
+        )
+    
     try:
         client = speech.SpeechAsyncClient()
         
@@ -201,12 +217,19 @@ async def get_feedback_on_answer(
 ):
     """
     Provides feedback on a user's answer to a flashcard question.
-    Accepts either a text answer or a base64-encoded audio file.
+    Accepts either a text answer or audio file (if speech service is available).
     """
     if not text_answer and not audio_answer:
         raise HTTPException(status_code=400, detail="Either 'text_answer' or 'audio_answer' must be provided.")
     if text_answer and audio_answer:
         raise HTTPException(status_code=400, detail="Provide either 'text_answer' or 'audio_answer', not both.")
+    
+    # Check if audio is requested but speech service is unavailable
+    if audio_answer and not SPEECH_AVAILABLE:
+        raise HTTPException(
+            status_code=503, 
+            detail="Audio transcription service unavailable. Please provide a text answer instead."
+        )
 
     try:
         answer = ""

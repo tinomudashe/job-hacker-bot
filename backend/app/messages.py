@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List, Optional
@@ -6,7 +6,7 @@ import json
 
 from app.db import get_db
 from app.models_db import ChatMessage, User
-from app.dependencies import get_current_user
+from app.dependencies import get_current_active_user
 from pydantic import BaseModel, Field
 from datetime import datetime
 import uuid
@@ -45,15 +45,12 @@ class Chat(BaseModel):
 
 @router.get("/chats", response_model=List[Chat])
 async def get_chats(
-    db: AsyncSession = Depends(get_db),
-    authorization: str = Header(...),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Retrieve all chats for the current user.
     """
-    token = authorization.split(" ")[1]
-    current_user = await get_current_user(token=token, db=db)
-    
     result = await db.execute(
         select(ChatMessage)
         .where(ChatMessage.user_id == current_user.id)
@@ -77,16 +74,12 @@ async def get_chats(
 @router.get("/messages", response_model=List[ChatMessageResponse])
 async def get_messages(
     page_id: Optional[str] = Query(None, description="Filter messages by page ID"),
-    db: AsyncSession = Depends(get_db),
-    authorization: str = Header(...),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Retrieve chat messages for the current user, optionally filtered by page.
     """
-    # Token is expected to be "Bearer <token>"
-    token = authorization.split(" ")[1]
-    current_user = await get_current_user(token=token, db=db)
-    
     query = select(ChatMessage).where(ChatMessage.user_id == current_user.id)
     
     if page_id:
@@ -104,19 +97,16 @@ async def get_messages(
 @router.delete("/messages/{message_id}", status_code=204)
 async def delete_message(
     message_id: str,
-    db: AsyncSession = Depends(get_db),
-    authorization: str = Header(...),
     cascade: bool = False,
     above: bool = False,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Delete a specific message.
     If cascade is true, also deletes all subsequent messages in the conversation.
     If above is true, only deletes messages after the specified message.
     """
-    token = authorization.split(" ")[1]
-    current_user = await get_current_user(token=token, db=db)
-    
     result = await db.execute(
         select(ChatMessage).where(ChatMessage.id == message_id)
     )
@@ -152,15 +142,12 @@ async def delete_message(
 async def update_message(
     message_id: str,
     request: UpdateMessageRequest,
-    db: AsyncSession = Depends(get_db),
-    authorization: str = Header(...),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Update a specific message.
     """
-    token = authorization.split(" ")[1]
-    current_user = await get_current_user(token=token, db=db)
-    
     result = await db.execute(
         select(ChatMessage).where(ChatMessage.id == message_id)
     )
@@ -180,15 +167,12 @@ async def update_message(
 
 @router.delete("/chats", status_code=204)
 async def clear_history(
-    db: AsyncSession = Depends(get_db),
-    authorization: str = Header(...),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Delete all chat messages for the current user.
     """
-    token = authorization.split(" ")[1]
-    current_user = await get_current_user(token=token, db=db)
-    
     await db.execute(
         ChatMessage.__table__.delete().where(ChatMessage.user_id == current_user.id)
     )
@@ -197,17 +181,14 @@ async def clear_history(
 
 @router.get("/messages/debug/orphaned", response_model=List[ChatMessageResponse])
 async def get_orphaned_messages(
-    db: AsyncSession = Depends(get_db),
-    authorization: str = Header(...),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Debug endpoint: Get messages that have no page association (page_id is NULL).
     These might be orphaned messages from before the page system was implemented
     or due to bugs in message regeneration.
     """
-    token = authorization.split(" ")[1]
-    current_user = await get_current_user(token=token, db=db)
-    
     query = select(ChatMessage).where(
         ChatMessage.user_id == current_user.id,
         ChatMessage.page_id.is_(None)
@@ -219,15 +200,12 @@ async def get_orphaned_messages(
 
 @router.get("/messages/debug/by-page")
 async def get_messages_by_page(
-    db: AsyncSession = Depends(get_db),
-    authorization: str = Header(...),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Debug endpoint: Get all messages grouped by page_id to understand message distribution.
     """
-    token = authorization.split(" ")[1]
-    current_user = await get_current_user(token=token, db=db)
-    
     from sqlalchemy import func
     
     # Get count of messages per page

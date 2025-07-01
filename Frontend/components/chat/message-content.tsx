@@ -8,10 +8,11 @@ import remarkGfm from "remark-gfm";
 
 interface MessageContentProps {
   content: any;
+  isUser?: boolean;
 }
 
 // Custom link component for ReactMarkdown
-const LinkComponent = ({ href, children, ...props }: any) => {
+const LinkComponent = ({ href, children, isUser, ...props }: any) => {
   if (!href) return <span>{children}</span>;
 
   const handleClick = (e: React.MouseEvent) => {
@@ -32,7 +33,10 @@ const LinkComponent = ({ href, children, ...props }: any) => {
       href={href}
       onClick={handleClick}
       className={cn(
-        "text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200",
+        // Conditional styling based on message type
+        isUser
+          ? "text-white hover:text-yellow-200"
+          : "text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200",
         "underline hover:no-underline cursor-pointer transition-colors duration-200",
         "inline-flex items-center gap-1 break-all font-medium"
       )}
@@ -105,9 +109,11 @@ const detectContentType = (text: string) => {
 const AttachmentRenderer = ({
   filename,
   text,
+  isUser,
 }: {
   filename: string;
   text: string;
+  isUser?: boolean;
 }) => {
   // Extract user message if present
   const messageMatch = text.match(/\*\*Message:\*\* ([\s\S]+?)(?:\n|$)/);
@@ -141,7 +147,7 @@ const AttachmentRenderer = ({
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
-              a: LinkComponent,
+              a: (props: any) => <LinkComponent {...props} isUser={isUser} />,
             }}
           >
             {userMessage}
@@ -165,7 +171,7 @@ const AttachmentRenderer = ({
 };
 
 // Main content dispatcher
-export function MessageContent({ content }: MessageContentProps) {
+export function MessageContent({ content, isUser }: MessageContentProps) {
   if (!content) return null;
 
   const text = typeof content === "string" ? content : content.message || "";
@@ -176,7 +182,11 @@ export function MessageContent({ content }: MessageContentProps) {
 
   if (attachmentInfo) {
     return (
-      <AttachmentRenderer filename={attachmentInfo.filename} text={text} />
+      <AttachmentRenderer
+        filename={attachmentInfo.filename}
+        text={text}
+        isUser={isUser}
+      />
     );
   }
 
@@ -185,7 +195,7 @@ export function MessageContent({ content }: MessageContentProps) {
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={{
-        a: LinkComponent,
+        a: (props: any) => <LinkComponent {...props} isUser={isUser} />,
         // Enhanced paragraph styling
         p: ({ children, ...props }) => (
           <p className="mb-2 last:mb-0" {...props}>

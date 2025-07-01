@@ -3,8 +3,45 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
-from browser_use import Agent, Controller, Browser
-from browser_use.agent.views import ActionResult, AgentHistory
+
+# Optional import for browser automation - graceful fallback if not installed
+try:
+    from browser_use import Agent, Controller, Browser
+    from browser_use.agent.views import ActionResult, AgentHistory
+    BROWSER_USE_AVAILABLE = True
+except ImportError:
+    # Define placeholder classes when browser_use is not available
+    class Agent:
+        def __init__(self, **kwargs):
+            pass
+        async def run(self):
+            return None
+    
+    class Controller:
+        def __init__(self, **kwargs):
+            pass
+        def action(self, description):
+            def decorator(func):
+                return func
+            return decorator
+    
+    class Browser:
+        def __init__(self, **kwargs):
+            pass
+    
+    class ActionResult:
+        def __init__(self, **kwargs):
+            pass
+    
+    class AgentHistory:
+        def __init__(self):
+            self.history = []
+        def final_result(self):
+            return None
+    
+    BROWSER_USE_AVAILABLE = False
+    print("⚠️  browser_use module not available. Agent functionality will be limited.")
+
 from pydantic import BaseModel, HttpUrl, ValidationError
 import logging
 import json
@@ -134,6 +171,10 @@ async def run_application_agent(
     db: AsyncSession
 ):
     """Enhanced agent that uses uploaded CV and personalized user information"""
+    
+    if not BROWSER_USE_AVAILABLE:
+        logger.warning("Browser automation not available - browser_use module not installed")
+        return AgentHistory()  # Return empty result
     
     # Get user's CV information
     cv_info = await get_user_cv_info(user.id, db)
@@ -446,11 +487,21 @@ class ApplicationRequest(BaseModel):
 @router.post("/agent/test-apply", status_code=202)
 async def test_apply_for_job(request: ApplicationRequest):
     """Test endpoint without authentication - for debugging frontend issues"""
+    if not BROWSER_USE_AVAILABLE:
+        return {
+            "message": "⚠️ Agent endpoint accessible but browser automation unavailable.",
+            "job_url": str(request.job_url),
+            "status": "test_success_limited",
+            "note": "browser_use module not installed. Agent functionality will be limited.",
+            "browser_automation": False
+        }
+    
     return {
         "message": "✅ Agent endpoint is working! Graph RAG integration successful.",
         "job_url": str(request.job_url),
         "status": "test_success",
-        "note": "This is a test endpoint. Use /api/agent/apply with authentication for real applications."
+        "note": "This is a test endpoint. Use /api/agent/apply with authentication for real applications.",
+        "browser_automation": True
     }
 
 @router.post("/agent/apply", status_code=202)
@@ -463,6 +514,12 @@ async def apply_for_job(
     """
     Enhanced job application endpoint that uses uploaded CV and personalized user data
     """
+    
+    if not BROWSER_USE_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Browser automation service unavailable. The browser_use module is not installed. Please contact support."
+        )
     
     async def agent_task():
         async with async_session_maker() as db_session:

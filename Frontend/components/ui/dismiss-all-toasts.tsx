@@ -1,44 +1,77 @@
 "use client";
 
-import { X, Bell } from "lucide-react";
+import { Bell, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "./button";
-import { toast } from "@/lib/toast";
-import { useState, useEffect } from "react";
 
 export function DismissAllToasts() {
   const [hasToasts, setHasToasts] = useState(false);
 
-  // This is a simple approach - in a real app you might want to listen to toast events
+  // Check for toasts more efficiently and safely
   useEffect(() => {
     const checkToasts = () => {
-      const toastContainer = document.querySelector('[data-sonner-toaster]');
-      const toastCount = toastContainer?.children.length || 0;
-      setHasToasts(toastCount > 0);
+      try {
+        const toastContainer = document.querySelector("[data-sonner-toaster]");
+        const toasts =
+          toastContainer?.querySelectorAll("[data-sonner-toast]") || [];
+        const toastCount = toasts.length;
+        setHasToasts(toastCount > 0);
+      } catch (error) {
+        console.warn("Error checking toasts:", error);
+        setHasToasts(false);
+      }
     };
 
-    // Check periodically for toasts
-    const interval = setInterval(checkToasts, 1000);
-    checkToasts(); // Initial check
+    // Initial check
+    checkToasts();
 
-    return () => clearInterval(interval);
+    // Check periodically for toasts (reduced frequency to avoid interference)
+    const interval = setInterval(checkToasts, 2000);
+
+    // Also listen for DOM mutations to detect toast changes more efficiently
+    const observer = new MutationObserver(() => {
+      checkToasts();
+    });
+
+    const toastContainer = document.querySelector("[data-sonner-toaster]");
+    if (toastContainer) {
+      observer.observe(toastContainer, {
+        childList: true,
+        subtree: true,
+      });
+    }
+
+    return () => {
+      clearInterval(interval);
+      observer.disconnect();
+    };
   }, []);
 
   if (!hasToasts) return null;
+
+  const handleDismissAll = () => {
+    try {
+      // Use the native Sonner dismiss method
+      toast.dismiss();
+      setHasToasts(false);
+    } catch (error) {
+      console.error("Error dismissing all toasts:", error);
+    }
+  };
 
   return (
     <Button
       variant="ghost"
       size="sm"
-      onClick={() => {
-        toast.dismissAll();
-        setHasToasts(false);
-      }}
+      onClick={handleDismissAll}
       className="fixed bottom-4 right-4 z-50 bg-background/80 backdrop-blur-sm border border-border shadow-lg hover:shadow-xl transition-all duration-200"
       title="Dismiss all notifications (Ctrl+Shift+X)"
+      style={{ pointerEvents: "auto" }}
     >
       <Bell className="h-4 w-4 mr-2" />
       <X className="h-3 w-3" />
       <span className="ml-1 text-xs">Clear all</span>
     </Button>
   );
-} 
+}

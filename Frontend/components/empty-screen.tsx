@@ -1,41 +1,35 @@
-"use client"
+"use client";
 
-import { Button } from "@/components/ui/button"
-import { Sparkles, Briefcase, FileText, Brain, Building } from "lucide-react"
+import { Button } from "@/components/ui/button";
+import { Brain, Building, FileText, Sparkles } from "lucide-react";
 
 const exampleMessages = [
   {
-    heading: "Search jobs with browser automation",
-    message: "get detailed results from major job boards",
-    fullMessage: "Search for data analyst jobs in Poland using browser automation on LinkedIn",
-    icon: Briefcase,
-    gradient: "from-blue-500 to-cyan-500"
-  },
-  {
     heading: "Generate cover letter from URL",
-    message: "paste any job posting link",
-    fullMessage: "Generate a cover letter from this job URL: [paste LinkedIn, Indeed, or company career page URL here]",
+    message: "Paste any job link for a tailored cover letter",
+    fullMessage:
+      "Generate a cover letter from this job URL: [paste LinkedIn, Indeed, or company career page URL here]",
     icon: FileText,
-    gradient: "from-green-500 to-emerald-500"
+    color: "emerald",
   },
   {
     heading: "Find jobs on specific platforms",
-    message: "search LinkedIn, Indeed, Glassdoor directly",
-    fullMessage: "Find product manager jobs on Indeed in New York with browser automation",
+    message: "Search LinkedIn, Indeed, Glassdoor easily",
+    fullMessage: "Find product manager jobs on Indeed in New York",
     icon: Building,
-    gradient: "from-purple-500 to-pink-500"
+    color: "violet",
   },
   {
-    heading: "Create a resume PDF",
-    message: "with professional styling",
+    heading: "Create professional resume PDF",
+    message: "Download with beautiful formatting",
     fullMessage: "Download my resume as PDF with professional styling",
     icon: Brain,
-    gradient: "from-orange-500 to-red-500"
+    color: "amber",
   },
-]
+];
 
 interface EmptyScreenProps {
-  onSendMessage: (message: string) => void
+  onSendMessage: (message: string) => void;
 }
 
 export function EmptyScreen({ onSendMessage }: EmptyScreenProps) {
@@ -50,45 +44,60 @@ export function EmptyScreen({ onSendMessage }: EmptyScreenProps) {
           Hello there! 👋
         </h1>
         <p className="text-lg text-muted-foreground/80 leading-relaxed">
-          I'm your AI-powered job search assistant. Ready to help you find opportunities, 
-          craft perfect applications, and land your dream job!
+          I'm your AI-powered job search assistant. Ready to help you find
+          opportunities, craft perfect applications, and land your dream job!
         </p>
       </div>
 
       {/* Suggestion Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl w-full">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 max-w-5xl w-full">
         {exampleMessages.map((item, index) => {
           const IconComponent = item.icon;
+          const colorClasses = {
+            emerald: "bg-emerald-500 hover:bg-emerald-600",
+            violet: "bg-violet-500 hover:bg-violet-600",
+            amber: "bg-amber-500 hover:bg-amber-600",
+          }[item.color];
+
           return (
             <Button
               key={index}
               variant="ghost"
-              className="group relative h-auto p-6 text-left flex flex-col items-start rounded-2xl bg-background/50 backdrop-blur-sm border border-border/50 hover:border-border transition-all duration-300 hover:scale-[1.02] hover:shadow-xl overflow-hidden"
+              className="group relative h-[160px] p-6 text-left flex flex-col items-start justify-start rounded-2xl bg-background/70 backdrop-blur-xl border border-border/40 hover:border-border/70 hover:bg-background/85 transition-all duration-300 hover:scale-[1.01] hover:shadow-lg shadow-sm"
               onClick={() => onSendMessage(item.fullMessage)}
             >
-              {/* Background gradient overlay */}
-              <div className={`absolute inset-0 bg-gradient-to-br ${item.gradient} opacity-0 group-hover:opacity-5 transition-opacity duration-300`} />
-              
               {/* Icon */}
-              <div className={`flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br ${item.gradient} shadow-lg mb-4 group-hover:scale-110 transition-transform duration-300`}>
-                <IconComponent className="w-5 h-5 text-white" />
+              <div
+                className={`flex items-center justify-center w-12 h-12 rounded-xl ${colorClasses} shadow-md mb-4 transition-all duration-300 group-hover:scale-105 flex-shrink-0`}
+              >
+                <IconComponent className="w-6 h-6 text-white" />
               </div>
-              
+
               {/* Content */}
-              <div className="relative z-10">
-                <p className="text-base font-semibold text-foreground mb-1 group-hover:text-foreground/90 transition-colors">
+              <div className="flex-1 space-y-2 overflow-hidden">
+                <h3 className="text-lg font-semibold text-foreground leading-tight">
                   {item.heading}
-                </p>
-                <p className="text-sm text-muted-foreground/70 group-hover:text-muted-foreground transition-colors">
+                </h3>
+                <p className="text-sm text-muted-foreground/90 leading-relaxed">
                   {item.message}
                 </p>
               </div>
-              
-              {/* Hover arrow indicator */}
-              <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0">
-                <div className="w-6 h-6 rounded-full bg-foreground/10 flex items-center justify-center">
-                  <svg className="w-3 h-3 text-foreground/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+
+              {/* Subtle hover indicator */}
+              <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                <div className="w-6 h-6 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center">
+                  <svg
+                    className="w-3 h-3 text-foreground/60"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 5l7 7-7 7"
+                    />
                   </svg>
                 </div>
               </div>
@@ -104,5 +113,5 @@ export function EmptyScreen({ onSendMessage }: EmptyScreenProps) {
         </p>
       </div>
     </div>
-  )
-} 
+  );
+}

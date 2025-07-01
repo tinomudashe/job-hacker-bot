@@ -815,4 +815,35 @@ async def download_pdf(
     current_user: User = Depends(get_current_active_user)
 ):
     """Download a styled PDF for cover letter or resume. (Alias for /pdf/generate)"""
-    return await generate_pdf(request, db, current_user) 
+    return await generate_pdf(request, db, current_user)
+
+@router.get("/pdf/cover-letter/{cover_letter_id}")
+async def get_cover_letter(
+    cover_letter_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get a saved cover letter by ID for preview."""
+    
+    try:
+        result = await db.execute(
+            select(GeneratedCoverLetter).where(
+                GeneratedCoverLetter.id == cover_letter_id,
+                GeneratedCoverLetter.user_id == current_user.id
+            )
+        )
+        cover_letter = result.scalars().first()
+        
+        if not cover_letter:
+            raise HTTPException(status_code=404, detail="Cover letter not found")
+        
+        return {
+            "id": cover_letter.id,
+            "content": cover_letter.content,
+            "user_id": cover_letter.user_id,
+            "created_at": cover_letter.created_at.isoformat() if cover_letter.created_at else None
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching cover letter: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) 

@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { AlertCircle, ChevronDown, Loader2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { EmptyScreen } from "../empty-screen";
 import { ChatInput } from "./chat-input";
 import { ChatMessage } from "./chat-message";
@@ -215,48 +215,27 @@ export const ChatContainer = ({
   className,
 }: ChatContainerProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // Check if user is at the bottom
-  const checkIfAtBottom = () => {
-    if (!scrollContainerRef.current) return true;
-
-    const { scrollTop, scrollHeight, clientHeight } =
-      scrollContainerRef.current;
-    const threshold = 100; // pixels from bottom
-    return scrollHeight - scrollTop - clientHeight < threshold;
-  };
-
-  // Handle scroll events
+  // Keyboard shortcut for scroll to bottom (Ctrl/Cmd + End)
   useEffect(() => {
-    const scrollContainer = scrollContainerRef.current;
-    if (!scrollContainer) return;
-
-    const handleScroll = () => {
-      const isAtBottom = checkIfAtBottom();
-      setShowScrollToBottom(!isAtBottom && messages.length > 0);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "End") {
+        e.preventDefault();
+        scrollToBottom();
+      }
     };
 
-    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
-
-    // Initial check
-    handleScroll();
-
-    return () => {
-      scrollContainer.removeEventListener("scroll", handleScroll);
-    };
-  }, [messages]);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   useEffect(() => {
     if (!isHistoryLoading) {
       scrollToBottom();
-      // Hide the scroll button when auto-scrolling
-      setShowScrollToBottom(false);
     }
   }, [messages, isHistoryLoading]);
 
@@ -274,7 +253,6 @@ export const ChatContainer = ({
       )}
     >
       <div
-        ref={scrollContainerRef}
         className="flex-1 overflow-y-auto overflow-x-hidden pb-24 sm:pb-32 md:pb-36"
         style={{
           // Enhanced mobile scrolling
@@ -321,24 +299,6 @@ export const ChatContainer = ({
         )}
       </div>
 
-      {/* Scroll to Bottom Button */}
-      {showScrollToBottom && (
-        <div className="fixed bottom-20 sm:bottom-24 md:bottom-28 right-4 sm:right-6 z-10">
-          <button
-            onClick={scrollToBottom}
-            className={cn(
-              "flex items-center justify-center w-12 h-12 rounded-full shadow-lg transition-all duration-200",
-              "bg-blue-600 hover:bg-blue-700 text-white",
-              "hover:scale-110 active:scale-95",
-              "border border-white/20 backdrop-blur-sm"
-            )}
-            title="Scroll to latest message"
-          >
-            <ChevronDown className="w-5 h-5" />
-          </button>
-        </div>
-      )}
-
       <div
         className="fixed bottom-0 left-0 right-0 bg-transparent p-2 sm:p-3 md:p-4"
         style={{
@@ -348,6 +308,34 @@ export const ChatContainer = ({
         }}
       >
         <div className="max-w-2xl mx-auto">
+          {/* Scroll to Bottom Button - Above text input */}
+          {messages.length > 0 && (
+            <div className="mb-2 flex justify-center">
+              <button
+                onClick={scrollToBottom}
+                className={cn(
+                  "flex items-center justify-center w-10 h-10 rounded-2xl transition-all duration-300",
+                  // Enhanced glassmorphism styling
+                  "bg-gradient-to-br from-background/80 via-background/60 to-background/40",
+                  "hover:from-background/90 hover:via-background/80 hover:to-background/60",
+                  "backdrop-blur-2xl border border-white/20 dark:border-white/10",
+                  "hover:border-white/40 dark:hover:border-white/20",
+                  "shadow-2xl shadow-black/10 hover:shadow-black/20",
+                  "dark:shadow-white/5 dark:hover:shadow-white/10",
+                  "text-muted-foreground hover:text-foreground",
+                  "hover:scale-110 active:scale-95",
+                  // Glass reflection effect
+                  "relative overflow-hidden",
+                  "before:absolute before:inset-0 before:bg-gradient-to-br before:from-white/10 before:to-transparent before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-300"
+                )}
+                title="Scroll to latest message - Ctrl+End"
+                aria-label="Scroll to bottom"
+              >
+                <ChevronDown className="w-4 h-4 relative z-10" />
+              </button>
+            </div>
+          )}
+
           {error && (
             <div className="mb-2 sm:mb-3">
               <div className="flex items-center gap-1.5 rounded-xl bg-destructive/10 p-3 text-xs sm:text-sm text-destructive border border-destructive/20 shadow-lg backdrop-blur-sm">

@@ -983,8 +983,16 @@ export function ChatMessage({
       const requestBody: any = {
         content_type: contentDetection.type,
         style: style,
-        content_text: displayMessage,
       };
+
+      // Use content_id if available (saved content), otherwise use content_text (fallback)
+      if (contentId) {
+        requestBody.content_id = contentId;
+        console.log("🎯 Using content_id for PDF generation:", contentId);
+      } else {
+        requestBody.content_text = displayMessage;
+        console.log("📝 Using content_text as fallback for PDF generation");
+      }
 
       if (contentDetection.type === "cover_letter") {
         requestBody.company_name = contentDetection.companyName || "";
@@ -1551,13 +1559,15 @@ export function ChatMessage({
                       "w-auto min-w-0 max-w-full",
                       // Force URL wrapping
                       "[&_a]:break-all [&_a]:overflow-wrap-anywhere [&_a]:word-break-break-all",
-                      // Enhanced link styling
-                      "prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline prose-a:font-medium hover:prose-a:underline",
+                      // Enhanced link styling - conditional based on message type
+                      isUser
+                        ? "prose-a:text-white prose-a:no-underline prose-a:font-medium hover:prose-a:underline prose-a:decoration-white/80"
+                        : "prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline prose-a:font-medium hover:prose-a:underline prose-a:decoration-blue-600/80 dark:prose-a:decoration-blue-400/80",
                       // Enhanced code styling
                       "prose-code:bg-gray-100 dark:prose-code:bg-gray-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:font-mono"
                     )}
                   >
-                    <MessageContent content={displayContent} />
+                    <MessageContent content={displayContent} isUser={isUser} />
                   </div>
                 )}
               </div>
@@ -1588,13 +1598,15 @@ export function ChatMessage({
                   "w-auto min-w-0 max-w-full",
                   // Force URL wrapping
                   "[&_a]:break-all [&_a]:overflow-wrap-anywhere [&_a]:word-break-break-all",
-                  // Enhanced link styling
-                  "prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline prose-a:font-medium hover:prose-a:underline",
+                  // Enhanced link styling - conditional based on message type
+                  isUser
+                    ? "prose-a:text-white prose-a:no-underline prose-a:font-medium hover:prose-a:underline prose-a:decoration-white/80"
+                    : "prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline prose-a:font-medium hover:prose-a:underline prose-a:decoration-blue-600/80 dark:prose-a:decoration-blue-400/80",
                   // Enhanced code styling
                   "prose-code:bg-gray-100 dark:prose-code:bg-gray-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:font-mono"
                 )}
               >
-                <MessageContent content={displayContent} />
+                <MessageContent content={displayContent} isUser={isUser} />
 
                 {/* Enhanced Show More/Less Button */}
                 {shouldTruncate && (

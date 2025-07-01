@@ -207,25 +207,47 @@ export function PDFGenerationDialog({
           }),
         ]);
 
+        let profileData: any = null;
+        let resumeData: any = null;
+        let profileLoaded = false;
+        let resumeLoaded = false;
+
         if (profileResponse.ok) {
-          const profile = await profileResponse.json();
+          profileData = await profileResponse.json();
+          profileLoaded = !!(
+            profileData.first_name ||
+            profileData.last_name ||
+            profileData.name ||
+            profileData.email ||
+            profileData.phone
+          );
 
           // Populate personal info with user's profile data
           setPersonalInfo({
             fullName:
-              `${profile.first_name || ""} ${profile.last_name || ""}`.trim() ||
-              profile.name ||
+              `${profileData.first_name || ""} ${
+                profileData.last_name || ""
+              }`.trim() ||
+              profileData.name ||
               "",
-            email: profile.email || "",
-            phone: profile.phone || "",
-            address: profile.address || "",
-            linkedin: profile.linkedin || "",
+            email: profileData.email || "",
+            phone: profileData.phone || "",
+            address: profileData.address || "",
+            linkedin: profileData.linkedin || "",
             website: "", // No website field in user profile currently
           });
         }
 
         if (resumeResponse.ok) {
-          const resumeData = await resumeResponse.json();
+          resumeData = await resumeResponse.json();
+          resumeLoaded = !!(
+            (resumeData.personalInfo &&
+              (resumeData.personalInfo.name ||
+                resumeData.personalInfo.email)) ||
+            (resumeData.experience && resumeData.experience.length > 0) ||
+            (resumeData.education && resumeData.education.length > 0) ||
+            (resumeData.skills && resumeData.skills.length > 0)
+          );
 
           // Update personal info with resume data if available
           if (resumeData.personalInfo) {
@@ -273,15 +295,8 @@ export function PDFGenerationDialog({
           }
         }
 
-        // Check if we actually loaded any meaningful data
-        const hasLoadedData =
-          personalInfo.fullName ||
-          personalInfo.email ||
-          workExperience.some((exp) => exp.title) ||
-          education.some((edu) => edu.degree) ||
-          skillsArray.length > 0;
-
-        if (hasLoadedData) {
+        // Show appropriate toast message based on loaded data
+        if (profileLoaded || resumeLoaded) {
           toast.success("Personal information loaded from your profile");
         } else {
           toast.info(
@@ -435,15 +450,22 @@ export function PDFGenerationDialog({
       const selectedStyleData =
         PDF_STYLES.find((s) => s.key === selectedStyle) || PDF_STYLES[0];
 
-      const requestData = {
-        content_text: contentToUse.trim(),
-        content_id: null,
+      const requestData: any = {
         style: selectedStyle,
         colors: selectedStyleData.colors,
         company_name: editedCompanyName || "",
         job_title: editedJobTitle || "",
         content_type: contentType,
       };
+
+      // Use content_id if available (saved content), otherwise use content_text (fallback)
+      if (contentId) {
+        requestData.content_id = contentId;
+        console.log("🎯 PDF Dialog using content_id:", contentId);
+      } else {
+        requestData.content_text = contentToUse.trim();
+        console.log("📝 PDF Dialog using content_text as fallback");
+      }
 
       const response = await fetch("/api/pdf/generate", {
         method: "POST",
@@ -552,8 +574,16 @@ export function PDFGenerationDialog({
       // Store preview data in sessionStorage for the preview page
       sessionStorage.setItem("pdf_preview_data", JSON.stringify(previewData));
 
-      // Open preview in new tab
-      const previewUrl = `/preview?type=${contentType}&style=${selectedStyle}`;
+      // Open preview in new tab with content_id if available for cover letters
+      let previewUrl = `/preview?type=${contentType}&style=${selectedStyle}`;
+      if (contentType === "cover_letter" && contentId) {
+        previewUrl += `&content_id=${contentId}`;
+        console.log(
+          "🎯 Opening cover letter preview with content_id:",
+          contentId
+        );
+      }
+
       const newWindow = window.open(
         previewUrl,
         "_blank",

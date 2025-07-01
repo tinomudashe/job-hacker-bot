@@ -44,6 +44,7 @@ from langchain.tools.retriever import create_retriever_tool
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 from langchain.tools.render import render_text_description
 from app.enhanced_memory import EnhancedMemoryManager
+from app.internal_api import InternalAPI, make_internal_api_call
 
 # --- Configuration & Logging ---
 log = logging.getLogger(__name__)
@@ -449,7 +450,8 @@ When users mention their CV, resume, documents, experience, skills, or any file 
   * **URL-based generation**: Use generate_cover_letter_from_url tool
   * **Manual generation**: Use generate_cover_letter tool for provided job details
   * **ALWAYS CALL the tools** - Never just say you will generate without calling them
-  * **ALL cover letter responses MUST include [DOWNLOADABLE_COVER_LETTER] marker**
+      * **ALL cover letter responses MUST include [DOWNLOADABLE_COVER_LETTER] marker**
+    * **ALWAYS show the FULL cover letter content in the message, not just a summary**
 - Always encourage users to provide specific skills they want to highlight (optional)
 
 ## Response Format:
@@ -493,6 +495,13 @@ async def orchestrator_websocket(
 ):
     await websocket.accept()
     
+    # Store user data safely to avoid lazy loading issues in tools
+    user_id = user.id
+    user_email = user.email
+    user_name = user.name or f"{user.first_name or ''} {user.last_name or ''}".strip() or "User"
+    
+    log.info(f"WebSocket orchestrator connected for user: {user_id}")
+    
     # --- Initialize Advanced Memory Manager ---
     try:
         from app.advanced_memory import AdvancedMemoryManager, create_memory_tools
@@ -522,9 +531,9 @@ async def orchestrator_websocket(
             memory_tools = []
     
     # --- Fetch User Documents & Vector Store ---
-    doc_result = await db.execute(select(Document.name).where(Document.user_id == user.id))
+    doc_result = await db.execute(select(Document.name).where(Document.user_id == user_id))
     user_documents = doc_result.scalars().all()
-    vector_store = await get_user_vector_store(user.id, db)
+    vector_store = await get_user_vector_store(user_id, db)
     retriever = vector_store.as_retriever() if vector_store else None
 
     # --- Helper Functions for Intelligent Extraction ---
@@ -600,11 +609,18 @@ async def orchestrator_websocket(
 
     # --- Helper & Tool Definitions ---
     async def get_or_create_resume():
-        result = await db.execute(select(Resume).where(Resume.user_id == user.id))
+        result = await db.execute(select(Resume).where(Resume.user_id == user_id))
         db_resume = result.scalars().first()
 
         if db_resume and db_resume.data:
-            return db_resume, ResumeData(**db_resume.data)
+            # Import the fix function from resume.py
+            from app.resume import fix_resume_data_structure
+            # Fix missing ID fields in existing data before validation
+            fixed_data = fix_resume_data_structure(db_resume.data)
+            # Update the database with fixed data
+            db_resume.data = fixed_data
+            await db.commit()
+            return db_resume, ResumeData(**fixed_data)
         
         # Create default personal info with user's Clerk data if available
         default_personal_info = PersonalInfo(
@@ -622,7 +638,7 @@ async def orchestrator_websocket(
             education=[], 
             skills=[]
         )
-        new_db_resume = Resume(user_id=user.id, data=new_resume_data.dict())
+        new_db_resume = Resume(user_id=user_id, data=new_resume_data.dict())
         db.add(new_db_resume)
         await db.commit()
         await db.refresh(new_db_resume)
@@ -709,13 +725,13 @@ async def orchestrator_websocket(
                     log.warning("Browser Use Cloud returned no results, trying Google Cloud API...")
                     # Use real Google Cloud Talent API if project is configured, otherwise use debug mode
                     use_real_api = bool(os.getenv('GOOGLE_CLOUD_PROJECT'))
-                    results = await search_jobs(search_request, user.id, debug=not use_real_api)
+                    results = await search_jobs(search_request, user_id, debug=not use_real_api)
                     
             except Exception as e:
                 log.warning(f"Browser Use Cloud failed in basic search: {e}, trying Google Cloud API...")
             # Use real Google Cloud Talent API if project is configured, otherwise use debug mode
             use_real_api = bool(os.getenv('GOOGLE_CLOUD_PROJECT'))
-            results = await search_jobs(search_request, user.id, debug=not use_real_api)
+            results = await search_jobs(search_request, user_id, debug=not use_real_api)
             
             if not results:
                 return f"🔍 No jobs found for '{search_query}' in {location or 'Poland'}.\n\n💡 **Tip**: Try asking me to 'search for {search_query} jobs using browser automation' for more comprehensive results from LinkedIn, Indeed, and other major job boards!"
@@ -796,48 +812,470 @@ async def orchestrator_websocket(
         return "✅ Personal information updated successfully."
 
     @tool
+    async def update_user_profile(
+        first_name: Optional[str] = None,
+        last_name: Optional[str] = None,
+        phone: Optional[str] = None,
+        address: Optional[str] = None,
+        linkedin: Optional[str] = None,
+        preferred_language: Optional[str] = None,
+        date_of_birth: Optional[str] = None,
+        profile_headline: Optional[str] = None,
+        skills: Optional[str] = None
+    ) -> str:
+        """
+        Update comprehensive user profile information in database.
+        
+        This tool updates the main user profile AND synchronizes with resume data.
+        Use this for complete profile updates with exact field variables.
+        
+        Args:
+            first_name: User's first name
+            last_name: User's last name  
+            phone: Phone number (e.g., "+48 123 456 789")
+            address: Full address or location (e.g., "Warsaw, Poland")
+            linkedin: LinkedIn profile URL (e.g., "https://linkedin.com/in/username")
+            preferred_language: Preferred language (e.g., "English", "Polish")
+            date_of_birth: Date of birth (e.g., "1990-01-15")
+            profile_headline: Professional headline/summary
+            skills: Comma-separated skills (e.g., "Python, React, AWS, Docker")
+        
+        Returns:
+            Success message with updated fields
+        """
+        try:
+            updated_fields = []
+            
+            # Update user profile fields
+            if first_name is not None:
+                user.first_name = first_name
+                updated_fields.append(f"First name: {first_name}")
+            
+            if last_name is not None:
+                user.last_name = last_name
+                updated_fields.append(f"Last name: {last_name}")
+            
+            if phone is not None:
+                user.phone = phone
+                updated_fields.append(f"Phone: {phone}")
+                
+            if address is not None:
+                user.address = address
+                updated_fields.append(f"Address: {address}")
+                
+            if linkedin is not None:
+                user.linkedin = linkedin
+                updated_fields.append(f"LinkedIn: {linkedin}")
+                
+            if preferred_language is not None:
+                user.preferred_language = preferred_language
+                updated_fields.append(f"Language: {preferred_language}")
+                
+            if date_of_birth is not None:
+                user.date_of_birth = date_of_birth
+                updated_fields.append(f"Date of birth: {date_of_birth}")
+                
+            if profile_headline is not None:
+                user.profile_headline = profile_headline
+                updated_fields.append(f"Headline: {profile_headline}")
+                
+            if skills is not None:
+                user.skills = skills
+                updated_fields.append(f"Skills: {skills}")
+            
+            # Also update the user's name field for consistency
+            if first_name or last_name:
+                full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+                if full_name:
+                    user.name = full_name
+                    updated_fields.append(f"Full name: {full_name}")
+            
+            # Synchronize with resume data
+            db_resume, resume_data = await get_or_create_resume()
+            
+            # Update resume personal info to match profile
+            if first_name or last_name:
+                resume_data.personalInfo.name = user.name
+            if user.email:
+                resume_data.personalInfo.email = user.email
+            if phone:
+                resume_data.personalInfo.phone = phone
+            if linkedin:
+                resume_data.personalInfo.linkedin = linkedin
+            if address:
+                resume_data.personalInfo.location = address
+            if profile_headline:
+                resume_data.personalInfo.summary = profile_headline
+            
+            # Update skills in resume if provided
+            if skills:
+                skills_list = [skill.strip() for skill in skills.split(",") if skill.strip()]
+                resume_data.skills = skills_list
+            
+            # Save changes
+            db_resume.data = resume_data.dict()
+            await db.commit()
+            
+            if updated_fields:
+                return f"✅ **Profile Updated Successfully!**\n\nUpdated fields:\n" + "\n".join(f"• {field}" for field in updated_fields)
+            else:
+                return "ℹ️ No changes provided. Please specify which fields to update."
+                
+        except Exception as e:
+            await db.rollback()
+            log.error(f"Error updating user profile: {e}")
+            return f"❌ Error updating profile: {str(e)}"
+
+    @tool
+    async def update_user_profile_comprehensive(
+        first_name: Optional[str] = None,
+        last_name: Optional[str] = None,
+        phone: Optional[str] = None,
+        address: Optional[str] = None,
+        linkedin: Optional[str] = None,
+        preferred_language: Optional[str] = None,
+        date_of_birth: Optional[str] = None,
+        profile_headline: Optional[str] = None,
+        skills: Optional[str] = None,
+        email: Optional[str] = None
+    ) -> str:
+        """🔧 COMPREHENSIVE PROFILE UPDATE TOOL
+        
+        Updates both user profile database AND resume data for complete consistency.
+        
+        Args:
+            first_name: User's first name
+            last_name: User's last name  
+            phone: Phone number (e.g., "+1-555-123-4567")
+            address: Full address or location (e.g., "San Francisco, CA")
+            linkedin: LinkedIn profile URL or username
+            preferred_language: Preferred language (e.g., "English", "Polish")
+            date_of_birth: Date of birth (e.g., "1990-01-15")
+            profile_headline: Professional headline/summary
+            skills: Comma-separated skills (e.g., "Python, React, AWS")
+            email: Email address (usually auto-populated from auth)
+            
+        Updates:
+            ✅ User profile in database (for forms, applications)
+            ✅ Resume data structure (for PDF generation)
+            ✅ Maintains data consistency across the app
+            
+        Returns:
+            Success message with details of what was updated
+        """
+        try:
+            updated_fields = []
+            
+            # 1. Update User Profile in Database
+            profile_updates = {}
+            
+            if first_name is not None:
+                user.first_name = first_name.strip()
+                profile_updates['first_name'] = first_name.strip()
+                updated_fields.append(f"First name: {first_name}")
+                
+            if last_name is not None:
+                user.last_name = last_name.strip()
+                profile_updates['last_name'] = last_name.strip()
+                updated_fields.append(f"Last name: {last_name}")
+                
+            if phone is not None:
+                user.phone = phone.strip()
+                profile_updates['phone'] = phone.strip()
+                updated_fields.append(f"Phone: {phone}")
+                
+            if address is not None:
+                user.address = address.strip()
+                profile_updates['address'] = address.strip()
+                updated_fields.append(f"Address: {address}")
+                
+            if linkedin is not None:
+                linkedin_clean = linkedin.strip()
+                if linkedin_clean and not linkedin_clean.startswith('http'):
+                    if not linkedin_clean.startswith('linkedin.com'):
+                        linkedin_clean = f"https://linkedin.com/in/{linkedin_clean}"
+                    else:
+                        linkedin_clean = f"https://{linkedin_clean}"
+                user.linkedin = linkedin_clean
+                profile_updates['linkedin'] = linkedin_clean
+                updated_fields.append(f"LinkedIn: {linkedin_clean}")
+                
+            if preferred_language is not None:
+                user.preferred_language = preferred_language.strip()
+                profile_updates['preferred_language'] = preferred_language.strip()
+                updated_fields.append(f"Language: {preferred_language}")
+                
+            if date_of_birth is not None:
+                user.date_of_birth = date_of_birth.strip()
+                profile_updates['date_of_birth'] = date_of_birth.strip()
+                updated_fields.append(f"Date of birth: {date_of_birth}")
+                
+            if profile_headline is not None:
+                user.profile_headline = profile_headline.strip()
+                profile_updates['profile_headline'] = profile_headline.strip()
+                updated_fields.append(f"Headline: {profile_headline}")
+                
+            if skills is not None:
+                user.skills = skills.strip()
+                profile_updates['skills'] = skills.strip()
+                updated_fields.append(f"Skills: {skills}")
+                
+            if email is not None:
+                user.email = email.strip()
+                profile_updates['email'] = email.strip()
+                updated_fields.append(f"Email: {email}")
+            
+            # 2. Update Resume Data Structure for consistency
+            db_resume, resume_data = await get_or_create_resume()
+            
+            # Map profile fields to resume personal info
+            resume_updates = {}
+            
+            if first_name or last_name:
+                full_name = f"{first_name or user.first_name or ''} {last_name or user.last_name or ''}".strip()
+                if full_name:
+                    resume_data.personalInfo.name = full_name
+                    resume_updates['name'] = full_name
+                    
+            if email:
+                resume_data.personalInfo.email = email.strip()
+                resume_updates['email'] = email.strip()
+            elif user.email:
+                resume_data.personalInfo.email = user.email
+                resume_updates['email'] = user.email
+                
+            if phone:
+                resume_data.personalInfo.phone = phone.strip()
+                resume_updates['phone'] = phone.strip()
+                
+            if address:
+                resume_data.personalInfo.location = address.strip()
+                resume_updates['location'] = address.strip()
+                
+            if linkedin:
+                resume_data.personalInfo.linkedin = linkedin_clean
+                resume_updates['linkedin'] = linkedin_clean
+                
+            if profile_headline:
+                resume_data.personalInfo.summary = profile_headline.strip()
+                resume_updates['summary'] = profile_headline.strip()
+                
+            if skills:
+                # Update both skills string and skills array in resume
+                skills_list = [skill.strip() for skill in skills.split(',') if skill.strip()]
+                resume_data.skills = skills_list
+                resume_updates['skills'] = skills_list
+            
+            # 3. Commit all changes
+            db_resume.data = resume_data.dict()
+            await db.commit()
+            
+            if not updated_fields:
+                return "ℹ️ No profile updates were provided. Please specify which fields you'd like to update."
+            
+            # 4. Format success message
+            success_message = "✅ **Profile Updated Successfully!**\n\n"
+            success_message += "**Updated Fields:**\n"
+            for field in updated_fields:
+                success_message += f"• {field}\n"
+                
+            success_message += "\n**✨ Changes Applied To:**\n"
+            success_message += "• User profile database (for job applications)\n"
+            success_message += "• Resume data structure (for PDF generation)\n"
+            success_message += "• Vector search index (for AI assistance)\n"
+            
+            if profile_updates:
+                success_message += f"\n**🔄 Database Profile Updates:** {len(profile_updates)} fields\n"
+            if resume_updates:
+                success_message += f"**📄 Resume Data Updates:** {len(resume_updates)} fields\n"
+                
+            success_message += "\n💡 Your profile is now fully synchronized across all features!"
+            
+            log.info(f"Profile updated for user {user_id}: {updated_fields}")
+            return success_message
+            
+        except Exception as e:
+            await db.rollback()
+            log.error(f"Error updating user profile: {e}", exc_info=True)
+            return f"❌ Error updating profile: {str(e)}. Please try again or contact support."
+
+    @tool
     async def add_work_experience(
         job_title: str,
         company: str,
-        dates: str,
-        description: str
+        start_date: str,
+        end_date: Optional[str] = None,
+        location: Optional[str] = None,
+        employment_type: Optional[str] = None,
+        description: str = "",
+        achievements: Optional[str] = None,
+        technologies_used: Optional[str] = None,
+        is_current_job: bool = False
     ) -> str:
-        """Appends one work-experience entry to the resume."""
-        db_resume, resume_data = await get_or_create_resume()
+        """
+        Add comprehensive work experience entry to resume with detailed variables.
+        
+        Args:
+            job_title: Position title (e.g., "Senior Software Engineer", "Marketing Manager")
+            company: Company name (e.g., "Google", "Microsoft", "Startup Inc.")
+            start_date: Start date (e.g., "January 2022", "2022-01", "Jan 2022")
+            end_date: End date (e.g., "December 2023", "Present", "Current") - optional if current job
+            location: Work location (e.g., "Warsaw, Poland", "Remote", "San Francisco, CA")
+            employment_type: Type of employment (e.g., "Full-time", "Part-time", "Contract", "Internship")
+            description: Main job responsibilities and duties
+            achievements: Key achievements and accomplishments (optional)
+            technologies_used: Technologies, tools, languages used (optional)
+            is_current_job: True if this is current position (sets end_date to "Present")
+        
+        Returns:
+            Success message with added experience details
+        """
+        try:
+            db_resume, resume_data = await get_or_create_resume()
 
-        new_experience = Experience(
-            id=str(uuid.uuid4()),
-            jobTitle=job_title,
-            company=company,
-            dates=dates,
-            description=description,
-        )
-        resume_data.experience.append(new_experience)
+            # Format dates
+            if is_current_job:
+                end_date = "Present"
+            
+            date_range = f"{start_date} - {end_date}" if end_date else start_date
+            
+            # Build comprehensive description
+            full_description = description
+            
+            if achievements:
+                full_description += f"\n\nKey Achievements:\n{achievements}"
+            
+            if technologies_used:
+                full_description += f"\n\nTechnologies: {technologies_used}"
+            
+            if location:
+                full_description += f"\n\nLocation: {location}"
+                
+            if employment_type:
+                full_description += f"\nEmployment Type: {employment_type}"
 
-        db_resume.data = resume_data.dict()
-        await db.commit()
-        return "✅ Work experience added successfully."
+            new_experience = Experience(
+                id=str(uuid.uuid4()),
+                jobTitle=job_title,
+                company=company,
+                dates=date_range,
+                description=full_description.strip(),
+            )
+            resume_data.experience.append(new_experience)
+
+            db_resume.data = resume_data.dict()
+            await db.commit()
+            
+            return f"""✅ **Work Experience Added Successfully!**
+
+**Position:** {job_title}
+**Company:** {company}
+**Duration:** {date_range}
+{f"**Location:** {location}" if location else ""}
+{f"**Type:** {employment_type}" if employment_type else ""}
+
+Your resume now has {len(resume_data.experience)} work experience entries."""
+            
+        except Exception as e:
+            await db.rollback()
+            log.error(f"Error adding work experience: {e}")
+            return f"❌ Error adding work experience: {str(e)}"
 
     @tool
     async def add_education(
         degree: str,
         institution: str,
-        dates: str
+        start_year: str,
+        end_year: Optional[str] = None,
+        location: Optional[str] = None,
+        field_of_study: Optional[str] = None,
+        gpa: Optional[str] = None,
+        honors: Optional[str] = None,
+        relevant_coursework: Optional[str] = None,
+        thesis_project: Optional[str] = None,
+        is_current: bool = False
     ) -> str:
-        """Appends one education entry to the resume."""
-        db_resume, resume_data = await get_or_create_resume()
+        """
+        Add comprehensive education entry to resume with detailed variables.
+        
+        Args:
+            degree: Degree type and level (e.g., "Bachelor of Science", "Master of Engineering", "PhD")
+            institution: School/University name (e.g., "University of Warsaw", "MIT", "Stanford University")
+            start_year: Start year (e.g., "2018", "September 2018")
+            end_year: End year (e.g., "2022", "May 2022", "Expected 2025") - optional if current
+            location: Institution location (e.g., "Warsaw, Poland", "Cambridge, MA, USA")
+            field_of_study: Major/specialization (e.g., "Computer Science", "Mechanical Engineering")
+            gpa: Grade Point Average (e.g., "3.8/4.0", "First Class Honours", "Magna Cum Laude")
+            honors: Academic honors and awards (e.g., "Dean's List", "Summa Cum Laude")
+            relevant_coursework: Key courses taken (e.g., "Machine Learning, Database Systems, Software Engineering")
+            thesis_project: Thesis or major project title and description
+            is_current: True if currently studying (sets end_year to "Present" or "Expected")
+        
+        Returns:
+            Success message with added education details
+        """
+        try:
+            db_resume, resume_data = await get_or_create_resume()
 
-        new_education = Education(
-            id=str(uuid.uuid4()),
-            degree=degree,
-            institution=institution,
-            dates=dates,
-        )
-        resume_data.education.append(new_education)
+            # Format dates
+            if is_current:
+                if "expected" not in (end_year or "").lower():
+                    end_year = f"Expected {end_year}" if end_year else "Present"
+            
+            date_range = f"{start_year} - {end_year}" if end_year else start_year
+            
+            # Build degree title with field of study
+            full_degree = degree
+            if field_of_study:
+                full_degree += f" in {field_of_study}"
+            
+            # Build comprehensive description
+            description_parts = []
+            
+            if location:
+                description_parts.append(f"Location: {location}")
+                
+            if gpa:
+                description_parts.append(f"GPA: {gpa}")
+                
+            if honors:
+                description_parts.append(f"Honors: {honors}")
+                
+            if relevant_coursework:
+                description_parts.append(f"Relevant Coursework: {relevant_coursework}")
+                
+            if thesis_project:
+                description_parts.append(f"Thesis/Project: {thesis_project}")
+            
+            full_description = "\n".join(description_parts) if description_parts else ""
 
-        db_resume.data = resume_data.dict()
-        await db.commit()
-        return "✅ Education entry added successfully."
+            new_education = Education(
+                id=str(uuid.uuid4()),
+                degree=full_degree,
+                institution=institution,
+                dates=date_range,
+                description=full_description
+            )
+            resume_data.education.append(new_education)
+
+            db_resume.data = resume_data.dict()
+            await db.commit()
+            
+            return f"""✅ **Education Added Successfully!**
+
+**Degree:** {full_degree}
+**Institution:** {institution}
+**Duration:** {date_range}
+{f"**Location:** {location}" if location else ""}
+{f"**GPA:** {gpa}" if gpa else ""}
+{f"**Honors:** {honors}" if honors else ""}
+
+Your resume now has {len(resume_data.education)} education entries."""
+            
+        except Exception as e:
+            await db.rollback()
+            log.error(f"Error adding education: {e}")
+            return f"❌ Error adding education: {str(e)}"
 
     @tool
     async def set_skills(skills: List[str]) -> str:
@@ -849,10 +1287,293 @@ async def orchestrator_websocket(
         return "✅ Skills updated successfully."
 
     @tool
+    async def manage_skills_comprehensive(
+        technical_skills: Optional[str] = None,
+        programming_languages: Optional[str] = None,
+        frameworks_libraries: Optional[str] = None,
+        databases: Optional[str] = None,
+        cloud_platforms: Optional[str] = None,
+        tools_software: Optional[str] = None,
+        soft_skills: Optional[str] = None,
+        languages_spoken: Optional[str] = None,
+        certifications: Optional[str] = None,
+        replace_all: bool = False
+    ) -> str:
+        """
+        Comprehensive skills management with categorization and exact variables.
+        
+        Args:
+            technical_skills: General technical skills (e.g., "Machine Learning, Data Analysis, Web Development")
+            programming_languages: Programming languages (e.g., "Python, JavaScript, Java, C++, SQL")
+            frameworks_libraries: Frameworks and libraries (e.g., "React, Django, TensorFlow, pandas")
+            databases: Database systems (e.g., "PostgreSQL, MongoDB, Redis, MySQL")
+            cloud_platforms: Cloud services (e.g., "AWS, Google Cloud, Azure, Docker, Kubernetes")
+            tools_software: Tools and software (e.g., "Git, VS Code, Jupyter, Figma, Photoshop")
+            soft_skills: Interpersonal skills (e.g., "Leadership, Communication, Problem Solving")
+            languages_spoken: Spoken languages (e.g., "English (Native), Polish (Fluent), Spanish (Basic)")
+            certifications: Professional certifications (e.g., "AWS Solutions Architect, PMP, Google Analytics")
+            replace_all: If True, replaces all skills. If False, adds to existing skills.
+        
+        Returns:
+            Success message with updated skills breakdown
+        """
+        try:
+            db_resume, resume_data = await get_or_create_resume()
+            
+            # Collect all skills into categorized list
+            all_skills = []
+            skill_categories = []
+            
+            if technical_skills:
+                tech_list = [skill.strip() for skill in technical_skills.split(",") if skill.strip()]
+                all_skills.extend(tech_list)
+                skill_categories.append(f"Technical Skills: {len(tech_list)} skills")
+            
+            if programming_languages:
+                prog_list = [skill.strip() for skill in programming_languages.split(",") if skill.strip()]
+                all_skills.extend(prog_list)
+                skill_categories.append(f"Programming Languages: {len(prog_list)} languages")
+            
+            if frameworks_libraries:
+                framework_list = [skill.strip() for skill in frameworks_libraries.split(",") if skill.strip()]
+                all_skills.extend(framework_list)
+                skill_categories.append(f"Frameworks & Libraries: {len(framework_list)} items")
+            
+            if databases:
+                db_list = [skill.strip() for skill in databases.split(",") if skill.strip()]
+                all_skills.extend(db_list)
+                skill_categories.append(f"Databases: {len(db_list)} systems")
+            
+            if cloud_platforms:
+                cloud_list = [skill.strip() for skill in cloud_platforms.split(",") if skill.strip()]
+                all_skills.extend(cloud_list)
+                skill_categories.append(f"Cloud Platforms: {len(cloud_list)} platforms")
+            
+            if tools_software:
+                tools_list = [skill.strip() for skill in tools_software.split(",") if skill.strip()]
+                all_skills.extend(tools_list)
+                skill_categories.append(f"Tools & Software: {len(tools_list)} tools")
+            
+            if soft_skills:
+                soft_list = [skill.strip() for skill in soft_skills.split(",") if skill.strip()]
+                all_skills.extend(soft_list)
+                skill_categories.append(f"Soft Skills: {len(soft_list)} skills")
+            
+            if languages_spoken:
+                lang_list = [skill.strip() for skill in languages_spoken.split(",") if skill.strip()]
+                all_skills.extend(lang_list)
+                skill_categories.append(f"Languages: {len(lang_list)} languages")
+            
+            if certifications:
+                cert_list = [skill.strip() for skill in certifications.split(",") if skill.strip()]
+                all_skills.extend(cert_list)
+                skill_categories.append(f"Certifications: {len(cert_list)} certifications")
+            
+            # Update skills in resume
+            if replace_all or not resume_data.skills:
+                resume_data.skills = all_skills
+                action = "replaced"
+            else:
+                # Add to existing skills, avoiding duplicates
+                existing_skills = set(resume_data.skills)
+                new_skills = [skill for skill in all_skills if skill not in existing_skills]
+                resume_data.skills.extend(new_skills)
+                action = "added"
+            
+            # Also update user profile skills field for consistency
+            user.skills = ", ".join(resume_data.skills)
+            
+            db_resume.data = resume_data.dict()
+            await db.commit()
+            
+            result_message = f"✅ **Skills {action.title()} Successfully!**\n\n"
+            
+            if skill_categories:
+                result_message += "**Updated Categories:**\n" + "\n".join(f"• {cat}" for cat in skill_categories)
+                result_message += f"\n\n**Total Skills:** {len(resume_data.skills)}"
+            else:
+                result_message += "No skills provided to update."
+            
+            return result_message
+            
+        except Exception as e:
+            await db.rollback()
+            log.error(f"Error managing skills: {e}")
+            return f"❌ Error updating skills: {str(e)}"
+
+    @tool
+    async def add_project(
+        project_name: str,
+        description: str,
+        technologies_used: Optional[str] = None,
+        project_url: Optional[str] = None,
+        github_url: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        team_size: Optional[str] = None,
+        role: Optional[str] = None
+    ) -> str:
+        """
+        Add a project entry to resume with detailed variables.
+        
+        Args:
+            project_name: Name of the project (e.g., "E-commerce Platform", "Mobile App")
+            description: Project description and your contributions
+            technologies_used: Technologies used (e.g., "React, Node.js, PostgreSQL, AWS")
+            project_url: Live project URL (e.g., "https://myproject.com")
+            github_url: GitHub repository URL (e.g., "https://github.com/user/project")
+            start_date: Start date (e.g., "January 2023", "2023-01")
+            end_date: End date (e.g., "March 2023", "Ongoing")
+            team_size: Team size (e.g., "Solo project", "Team of 4", "5 developers")
+            role: Your role (e.g., "Lead Developer", "Full-stack Developer", "Frontend Developer")
+        
+        Returns:
+            Success message with project details
+        """
+        try:
+            db_resume, resume_data = await get_or_create_resume()
+            
+            # Ensure projects list exists
+            if not hasattr(resume_data, 'projects') or resume_data.projects is None:
+                resume_data.projects = []
+            
+            # Build comprehensive project description
+            full_description = description
+            
+            details = []
+            if role:
+                details.append(f"Role: {role}")
+            if team_size:
+                details.append(f"Team Size: {team_size}")
+            if technologies_used:
+                details.append(f"Technologies: {technologies_used}")
+            if project_url:
+                details.append(f"Live URL: {project_url}")
+            if github_url:
+                details.append(f"GitHub: {github_url}")
+            
+            if details:
+                full_description += "\n\n" + "\n".join(details)
+            
+            # Format dates
+            date_info = ""
+            if start_date:
+                date_info = start_date
+                if end_date:
+                    date_info += f" - {end_date}"
+                elif end_date != "Ongoing":
+                    date_info += " - Present"
+            
+            new_project = {
+                "id": str(uuid.uuid4()),
+                "title": project_name,
+                "description": full_description,
+                "dates": date_info,
+                "technologies": technologies_used or "",
+                "url": project_url or "",
+                "github": github_url or ""
+            }
+            
+            resume_data.projects.append(new_project)
+            db_resume.data = resume_data.dict()
+            await db.commit()
+            
+            return f"""✅ **Project Added Successfully!**
+
+**Project:** {project_name}
+{f"**Duration:** {date_info}" if date_info else ""}
+{f"**Role:** {role}" if role else ""}
+{f"**Technologies:** {technologies_used}" if technologies_used else ""}
+{f"**Live URL:** {project_url}" if project_url else ""}
+
+Your resume now has {len(resume_data.projects)} projects."""
+            
+        except Exception as e:
+            await db.rollback()
+            log.error(f"Error adding project: {e}")
+            return f"❌ Error adding project: {str(e)}"
+
+    @tool
+    async def add_certification(
+        certification_name: str,
+        issuing_organization: str,
+        issue_date: Optional[str] = None,
+        expiration_date: Optional[str] = None,
+        credential_id: Optional[str] = None,
+        credential_url: Optional[str] = None,
+        description: Optional[str] = None
+    ) -> str:
+        """
+        Add a certification entry to resume with detailed variables.
+        
+        Args:
+            certification_name: Name of certification (e.g., "AWS Solutions Architect", "Google Analytics Certified")
+            issuing_organization: Organization that issued it (e.g., "Amazon Web Services", "Google")
+            issue_date: When received (e.g., "January 2023", "2023-01")
+            expiration_date: When expires (e.g., "January 2026", "Does not expire")
+            credential_id: Certification ID/number
+            credential_url: URL to verify certification
+            description: Additional details about the certification
+        
+        Returns:
+            Success message with certification details
+        """
+        try:
+            db_resume, resume_data = await get_or_create_resume()
+            
+            # Ensure certifications list exists
+            if not hasattr(resume_data, 'certifications') or resume_data.certifications is None:
+                resume_data.certifications = []
+            
+            # Build certification details
+            cert_details = []
+            if issue_date:
+                cert_details.append(f"Issued: {issue_date}")
+            if expiration_date:
+                cert_details.append(f"Expires: {expiration_date}")
+            if credential_id:
+                cert_details.append(f"Credential ID: {credential_id}")
+            if credential_url:
+                cert_details.append(f"Verify: {credential_url}")
+            if description:
+                cert_details.append(f"Description: {description}")
+            
+            full_description = "\n".join(cert_details) if cert_details else ""
+            
+            new_certification = {
+                "id": str(uuid.uuid4()),
+                "name": certification_name,
+                "issuer": issuing_organization,
+                "date": issue_date or "",
+                "description": full_description,
+                "url": credential_url or "",
+                "credentialId": credential_id or ""
+            }
+            
+            resume_data.certifications.append(new_certification)
+            db_resume.data = resume_data.dict()
+            await db.commit()
+            
+            return f"""✅ **Certification Added Successfully!**
+
+**Certification:** {certification_name}
+**Issuer:** {issuing_organization}
+{f"**Issued:** {issue_date}" if issue_date else ""}
+{f"**Expires:** {expiration_date}" if expiration_date else ""}
+{f"**Credential ID:** {credential_id}" if credential_id else ""}
+
+Your resume now has {len(resume_data.certifications)} certifications."""
+            
+        except Exception as e:
+            await db.rollback()
+            log.error(f"Error adding certification: {e}")
+            return f"❌ Error adding certification: {str(e)}"
+
+    @tool
     async def list_documents() -> str:
         """Lists the documents available to the user."""
         result = await db.execute(
-            select(Document.name).where(Document.user_id == user.id)
+            select(Document.name).where(Document.user_id == user_id)
         )
         documents = result.scalars().all()
         if not documents:
@@ -866,7 +1587,7 @@ async def orchestrator_websocket(
             # Search for document in database by name (case-insensitive partial match)
             doc_result = await db.execute(
                 select(Document).where(
-                    Document.user_id == user.id,
+                    Document.user_id == user_id,
                     Document.name.ilike(f"%{filename}%")
                 )
             )
@@ -1341,11 +2062,11 @@ async def orchestrator_websocket(
             user_first_name = user.first_name or "there"
             
             # Return simple text response with downloadable marker (much faster)
-            return f"""[DOWNLOADABLE_COVER_LETTER]
+            return f"""Hey {user_first_name}!
 
-## 🎉 **Hey {user_first_name}! Your cover letter for {job_details.company} is ready!**
+Your cover letter for the **{job_details.title}** position at **{job_details.company}** is ready!I've crafted a personalized cover letter for you, highlighting your relevant skills and experience based on the job description from the URL you provided.
 
-I've created a personalized cover letter for the **{job_details.title}** position at **{job_details.company}** in {job_details.location}.
+[DOWNLOADABLE_COVER_LETTER]
 
 {cover_letter_text}
 
@@ -1357,7 +2078,7 @@ I've created a personalized cover letter for the **{job_details.title}** positio
 - Specific connection to the job requirements
 - Professional closing that shows enthusiasm
 
-**📥 Ready to download?** Click the download button (📥) above to get your cover letter in different styles - Modern, Classic, or Minimal. You can preview and make any tweaks before downloading.
+**📥 Ready to download?** Click the download button (📥) that appears on this message to get your cover letter in different styles - Modern, Classic, or Minimal. You can preview and make any tweaks before downloading.
 
 <!-- content_id={new_cover_letter.id} company_name={job_details.company} job_title={job_details.title} -->"""
             
@@ -1563,11 +2284,11 @@ I've created a personalized cover letter for the **{job_details.title}** positio
             user_first_name = user.first_name or "there"
             
             # Return simple text response with downloadable marker (much faster)
-            return f"""[DOWNLOADABLE_COVER_LETTER]
+            return f"""Hey {user_first_name}!
 
-## 🎉 **Hey {user_first_name}! Your cover letter for {company_name} is ready!**
+Your cover letter for the **{job_title}** position at **{company_name}** is ready! I've crafted a personalized cover letter for you, highlighting your relevant skills and experience.
 
-I've crafted a personalized cover letter for the **{job_title}** position. Here's what I created for you:
+[DOWNLOADABLE_COVER_LETTER]
 
 {cover_letter_text}
 
@@ -1579,7 +2300,7 @@ I've crafted a personalized cover letter for the **{job_title}** position. Here'
 - Highlights your most relevant skills and experience
 - Professional tone that shows genuine interest
 
-**📥 Ready to download?** Click the download button (📥) above to get your cover letter in different professional styles. You can preview and customize before downloading!
+**📥 Ready to download?** Click the download button (📥) that appears on this message to get your cover letter in different professional styles. You can preview and customize before downloading!
 
 <!-- content_id={new_cover_letter.id} company_name={company_name} job_title={job_title} -->"""
             
@@ -3629,7 +4350,7 @@ Provide specific, time-bound, measurable actions that create a clear path to the
         try:
             # Get user documents for extraction
             doc_result = await db.execute(
-                select(Document).where(Document.user_id == user.id).order_by(Document.date_created.desc())
+                select(Document).where(Document.user_id == user_id).order_by(Document.date_created.desc())
             )
             documents = doc_result.scalars().all()
             
@@ -3720,7 +4441,7 @@ Extract EVERYTHING from the document content and return the complete JSON:"""
                     return f"❌ Failed to parse extracted information. Raw response: {extracted_json[:300]}..."
             
             # Get current user record
-            result = await db.execute(select(User).where(User.id == user.id))
+            result = await db.execute(select(User).where(User.id == user_id))
             db_user = result.scalars().first()
             
             if not db_user:
@@ -3759,7 +4480,7 @@ Extract EVERYTHING from the document content and return the complete JSON:"""
             
             # Create or update comprehensive resume data structure
             try:
-                resume_result = await db.execute(select(Resume).where(Resume.user_id == user.id))
+                resume_result = await db.execute(select(Resume).where(Resume.user_id == user_id))
                 db_resume = resume_result.scalars().first()
                 
                 # Create comprehensive resume data structure
@@ -3788,7 +4509,7 @@ Extract EVERYTHING from the document content and return the complete JSON:"""
                 else:
                     # Create new resume record
                     new_resume = Resume(
-                        user_id=user.id,
+                        user_id=user_id,
                         data=comprehensive_resume_data
                     )
                     db.add(new_resume)
@@ -3851,6 +4572,349 @@ Extract EVERYTHING from the document content and return the complete JSON:"""
             return f"❌ Sorry, I encountered an error while extracting your profile information: {str(e)}. Please try again."
 
     @tool
+    async def get_authenticated_user_data(endpoint: str = "/api/users/me") -> str:
+        """
+        Access protected user endpoints using the authenticated WebSocket user.
+        
+        Args:
+            endpoint: The API endpoint to access (e.g., '/api/users/me', '/api/resume', '/api/users/me/documents')
+        
+        Returns:
+            JSON data from the protected endpoint
+        """
+        try:
+            # Use the internal API to access protected endpoints with the authenticated user
+            data = await make_internal_api_call(endpoint, user, db)
+            
+            # Format the response nicely for the user
+            if endpoint == "/api/users/me":
+                return f"""✅ **User Profile Data Retrieved**
+
+**👤 Profile Information:**
+- **Name**: {data.get('name', 'Not provided')}
+- **Email**: {data.get('email', 'Not provided')}
+- **Phone**: {data.get('phone', 'Not provided')}
+- **Location**: {data.get('address', 'Not provided')}
+- **LinkedIn**: {data.get('linkedin', 'Not provided')}
+- **Skills**: {data.get('skills', 'Not provided')}
+- **Profile Headline**: {data.get('profile_headline', 'Not provided')}
+
+**🔧 Account Details:**
+- **User ID**: {data.get('id')}
+- **Status**: {'Active' if data.get('active') else 'Inactive'}
+- **External ID**: {data.get('external_id', 'Not provided')}
+
+<!-- raw_data={json.dumps(data)} -->"""
+                
+            elif endpoint == "/api/resume":
+                personal_info = data.get('personalInfo', {})
+                experience_count = len(data.get('experience', []))
+                education_count = len(data.get('education', []))
+                skills_count = len(data.get('skills', []))
+                
+                return f"""✅ **Resume Data Retrieved**
+
+**📋 Resume Summary:**
+- **Name**: {personal_info.get('name', 'Not provided')}
+- **Email**: {personal_info.get('email', 'Not provided')}
+- **Phone**: {personal_info.get('phone', 'Not provided')}
+- **Location**: {personal_info.get('location', 'Not provided')}
+- **Summary**: {personal_info.get('summary', 'Not provided')}
+
+**📊 Resume Sections:**
+- **Work Experience**: {experience_count} entries
+- **Education**: {education_count} entries  
+- **Skills**: {skills_count} skills listed
+- **Projects**: {len(data.get('projects', []))} projects
+- **Certifications**: {len(data.get('certifications', []))} certifications
+
+<!-- raw_data={json.dumps(data)} -->"""
+                
+            elif endpoint == "/api/users/me/documents":
+                doc_count = len(data)
+                doc_types = list(set(doc.get('type', 'unknown') for doc in data))
+                
+                return f"""✅ **Documents Retrieved**
+
+**📄 Document Summary:**
+- **Total Documents**: {doc_count}
+- **Document Types**: {', '.join(doc_types) if doc_types else 'None'}
+
+**📋 Recent Documents:**
+{chr(10).join([f"• {doc.get('name', 'Unnamed')} ({doc.get('type', 'unknown')}) - {doc.get('date_created', 'No date')[:10]}" for doc in data[:5]])}
+
+<!-- raw_data={json.dumps(data)} -->"""
+                
+            else:
+                return f"""✅ **Data Retrieved from {endpoint}**
+
+{json.dumps(data, indent=2)}
+
+<!-- raw_data={json.dumps(data)} -->"""
+                
+        except Exception as e:
+            return f"❌ **Error accessing {endpoint}**: {str(e)}"
+
+    @tool
+    async def search_web_for_advice(
+        query: str,
+        context: Optional[str] = None
+    ) -> str:
+        """
+        Search the web for up-to-date information, advice, and guidance.
+        
+        Use this tool when providing career advice, industry insights, latest trends,
+        or any information that requires current, real-time data from the internet.
+        
+        Args:
+            query: The search query for current information (e.g., "latest software engineering trends", 
+                  "how to negotiate salary in tech", "remote work best practices")
+            context: Optional context about why this search is needed (e.g., "user asking for interview tips")
+        
+        Returns:
+            Current information and insights from web search results
+        """
+        try:
+            import httpx
+            import json
+            from urllib.parse import quote_plus
+            
+            # Format search query for better results with current year
+            from datetime import datetime
+            current_year = datetime.now().year
+            
+            if context:
+                search_query = f"{query} {context} {current_year}"
+            else:
+                search_query = f"{query} {current_year}"
+            
+            log.info(f"🔍 Web search for advice: '{search_query}'")
+            
+            # Use DuckDuckGo search (no API key needed)
+            encoded_query = quote_plus(search_query)
+            search_url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+            
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            
+            async with httpx.AsyncClient(timeout=15.0, headers=headers) as client:
+                response = await client.get(search_url, follow_redirects=True)
+                
+                if response.status_code != 200:
+                    return f"❌ Unable to fetch current information for '{query}' at the moment. I'll provide guidance based on established best practices instead."
+                
+                # Parse search results (basic HTML parsing)
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Extract search result snippets
+                results = []
+                result_links = soup.find_all('a', class_='result__a')[:5]  # Get first 5 results
+                
+                for link in result_links:
+                    title = link.get_text(strip=True)
+                    if title and len(title) > 10:  # Valid title
+                        # Find the snippet for this result
+                        result_container = link.find_parent('div', class_='result__body') or link.find_parent('div')
+                        if result_container:
+                            snippet_elem = result_container.find('a', class_='result__snippet')
+                            snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
+                            
+                            if snippet and len(snippet) > 20:
+                                results.append(f"**{title}**\n{snippet}")
+                
+                if not results:
+                    return f"❌ No current information found for '{query}'. I'll provide general guidance based on my knowledge instead."
+                
+                search_results = "\n\n".join(results[:3])  # Use top 3 results
+                
+                # Format the results for career/advice context
+                formatted_response = f"""🌐 **Latest Information on: {query}**
+
+Based on current web search results:
+
+{search_results}
+
+💡 **How this applies to your situation:**
+This up-to-date information can help inform your career decisions and strategies. Consider how these current trends and insights align with your professional goals and background."""
+                
+                log.info(f"✅ Web search completed for advice query: '{query}' - found {len(results)} results")
+                return formatted_response
+            
+        except Exception as e:
+            log.error(f"Error in web search for advice: {e}", exc_info=True)
+            return f"❌ Unable to fetch current information for '{query}' at the moment. Let me provide guidance based on established best practices instead."
+
+    @tool
+    async def get_current_time_and_date() -> str:
+        """
+        Get the current date, time, and timezone information.
+        
+        Use this tool when you need to provide time-sensitive advice, 
+        reference current events, or understand temporal context for user requests.
+        
+        Returns:
+            Current date, time, day of week, and timezone information
+        """
+        try:
+            from datetime import datetime
+            import pytz
+            
+            # Get current UTC time
+            utc_now = datetime.utcnow()
+            
+            # Get current local time (assuming server timezone)
+            local_now = datetime.now()
+            
+            # Format the information
+            current_info = f"""🕐 **Current Date & Time Information:**
+
+**📅 Date:** {local_now.strftime('%A, %B %d, %Y')}
+**🕒 Time:** {local_now.strftime('%I:%M %p')} (Local)
+**🌍 UTC Time:** {utc_now.strftime('%I:%M %p UTC')}
+**📆 Day of Week:** {local_now.strftime('%A')}
+**🗓️ Week of Year:** Week {local_now.isocalendar()[1]}
+**🌅 Quarter:** Q{(local_now.month - 1) // 3 + 1} {local_now.year}
+
+**💡 Context for Advice:**
+- Current season: {'Winter' if local_now.month in [12, 1, 2] else 'Spring' if local_now.month in [3, 4, 5] else 'Summer' if local_now.month in [6, 7, 8] else 'Fall'}
+- Business hours context: {'Business hours' if 9 <= local_now.hour <= 17 else 'After hours'}
+- This is helpful for timing job applications, interview scheduling, and understanding market cycles."""
+            
+            log.info(f"✅ Provided current time/date context: {local_now.strftime('%Y-%m-%d %H:%M')}")
+            return current_info
+            
+        except Exception as e:
+            log.error(f"Error getting current time/date: {e}")
+            return f"❌ Unable to retrieve current date/time information: {str(e)}"
+    
+    @tool
+    async def get_user_location_context() -> str:
+        """
+        Get the user's location and relevant context for career advice.
+        
+        Use this tool to understand the user's geographic context for job market advice,
+        salary expectations, industry presence, and location-specific career guidance.
+        
+        Returns:
+            User's location information and relevant career market context
+        """
+        try:
+            # Get user's location from profile
+            user_location = user.address if hasattr(user, 'address') and user.address else None
+            
+            if not user_location:
+                return """📍 **Location Information:**
+
+**Current Location:** Not specified in profile
+**Recommendation:** Consider updating your profile with your location for more targeted job and salary advice.
+
+**💡 How to Update:**
+You can tell me: "Update my location to [City, Country]" and I'll update your profile."""
+            
+            # Basic location parsing and context
+            location_parts = user_location.split(',')
+            city = location_parts[0].strip() if len(location_parts) > 0 else ""
+            country = location_parts[-1].strip() if len(location_parts) > 1 else ""
+            
+            # Provide context based on known locations
+            location_context = ""
+            if "Poland" in country or "warsaw" in city.lower() or "krakow" in city.lower() or "gdansk" in city.lower():
+                location_context = """
+**🇵🇱 Poland Career Context:**
+- Strong tech hub with growing startup ecosystem
+- Major companies: CD Projekt, Allegro, LiveChat, Asseco
+- Average tech salaries: 8,000-20,000 PLN/month for developers
+- Work permit friendly for EU citizens
+- Growing remote work opportunities
+- Major tech cities: Warsaw, Krakow, Gdansk, Wroclaw"""
+            
+            elif "Germany" in country or "berlin" in city.lower() or "munich" in city.lower():
+                location_context = """
+**🇩🇪 Germany Career Context:**
+- Largest tech market in Europe
+- Strong engineering and automotive sectors
+- Average tech salaries: €50,000-€90,000+ annually
+- Blue Card available for skilled workers
+- Excellent work-life balance culture
+- Major tech hubs: Berlin, Munich, Hamburg, Frankfurt"""
+            
+            elif "Remote" in user_location or "remote" in user_location.lower():
+                location_context = """
+**🌍 Remote Work Context:**
+- Access to global job market
+- Salary ranges vary by company location and policy
+- Consider timezone overlaps for team collaboration
+- Growing demand across all industries
+- Important to specify preferred time zones and regions"""
+            
+            else:
+                location_context = f"""
+**🌐 {country} Career Context:**
+- Consider local job market conditions and salary ranges
+- Research major companies and industries in your area
+- Networking opportunities through local tech meetups
+- Remote work may expand your opportunities globally"""
+            
+            location_info = f"""📍 **Your Location Context:**
+
+**Current Location:** {user_location}
+**City:** {city}
+**Country/Region:** {country}
+{location_context}
+
+**💡 Location-Aware Advice:**
+I can now provide location-specific salary guidance, job market insights, and career advice tailored to your geographic area."""
+            
+            log.info(f"✅ Provided location context for user in: {user_location}")
+            return location_info
+            
+        except Exception as e:
+            log.error(f"Error getting user location context: {e}")
+            return f"❌ Unable to retrieve location information: {str(e)}"
+    
+    @tool
+    async def update_user_location(
+        location: str
+    ) -> str:
+        """
+        Update the user's location in their profile.
+        
+        Args:
+            location: New location (e.g., "Warsaw, Poland", "Berlin, Germany", "Remote")
+        
+        Returns:
+            Success message with updated location context
+        """
+        try:
+            # Update user's address field
+            user.address = location.strip()
+            
+            # Also update resume data for consistency
+            db_resume, resume_data = await get_or_create_resume()
+            resume_data.personalInfo.location = location.strip()
+            db_resume.data = resume_data.dict()
+            
+            await db.commit()
+            
+            # Get updated location context
+            updated_context = await get_user_location_context()
+            
+            return f"""✅ **Location Updated Successfully!**
+
+**New Location:** {location}
+
+{updated_context}
+
+**📄 Profile Sync:** Your resume and profile have been updated with the new location."""
+            
+        except Exception as e:
+            await db.rollback()
+            log.error(f"Error updating user location: {e}")
+            return f"❌ Error updating location: {str(e)}"
+
+    @tool
     async def check_and_fix_resume_data_structure() -> str:
         """Check and fix the resume data structure in database to ensure PDF dialog can access it.
         
@@ -3862,7 +4926,7 @@ Extract EVERYTHING from the document content and return the complete JSON:"""
         """
         try:
             # Check current resume data
-            result = await db.execute(select(Resume).where(Resume.user_id == user.id))
+            result = await db.execute(select(Resume).where(Resume.user_id == user_id))
             db_resume = result.scalars().first()
             
             if not db_resume:
@@ -3932,7 +4996,7 @@ Extract EVERYTHING from the document content and return the complete JSON:"""
                 }
                 
                 new_resume = Resume(
-                    user_id=user.id,
+                    user_id=user_id,
                     data=default_resume_data
                 )
                 db.add(new_resume)
@@ -4019,6 +5083,7 @@ Your resume database record is now properly structured. Try clicking a download 
         
         # 🎯 PROFILE MANAGEMENT TOOLS
         extract_and_populate_profile_from_documents,  # Extract real info from documents
+        get_authenticated_user_data,  # Access protected endpoints via WebSocket auth
         
         # 🔗 COVER LETTER TOOLS (SEPARATE FROM CV TOOLS) 🔗
         generate_cover_letter_from_url,
@@ -4026,8 +5091,12 @@ Your resume database record is now properly structured. Try clicking a download 
         
         # 📋 PROFILE & DATA MANAGEMENT TOOLS
         update_personal_information,
-        add_work_experience,
-        add_education,
+        update_user_profile,  # NEW: Comprehensive user profile updates
+        manage_skills_comprehensive,  # NEW: Advanced skills management with categories
+        add_work_experience,  # ENHANCED: Now with detailed variables
+        add_education,  # ENHANCED: Now with detailed variables
+        add_project,  # NEW: Project management with detailed variables
+        add_certification,  # NEW: Certification management
         set_skills,
         
         # 🔍 DOCUMENT & SEARCH TOOLS
@@ -4036,6 +5105,7 @@ Your resume database record is now properly structured. Try clicking a download 
         analyze_specific_document,  # Specific document analysis tool
         list_documents,
         read_document,
+        search_web_for_advice,  # NEW: Web search for up-to-date advice and information
         
         # 🎯 JOB SEARCH TOOLS (PRIORITY ORDER)
         search_jobs_linkedin_api,  # ⭐ PRIMARY: Direct LinkedIn API access
@@ -4047,6 +5117,11 @@ Your resume database record is now properly structured. Try clicking a download 
         get_salary_negotiation_advice,  # Salary negotiation guide
         create_career_development_plan,  # Career planning tool,
         check_and_fix_resume_data_structure,  # Resume data structure check tool
+        
+        # 🕐 CONTEXT AWARENESS TOOLS
+        get_current_time_and_date,  # NEW: Current date/time awareness for temporal context
+        get_user_location_context,  # NEW: User location and market context
+        update_user_location,  # NEW: Update user location in profile
     ]
     
     # Add advanced memory tools if available
@@ -4073,9 +5148,21 @@ Your resume database record is now properly structured. Try clicking a download 
         if user.email:
             user_context_parts.append(f"Email: {user.email}")
         
+        # Add location context
+        if hasattr(user, 'address') and user.address:
+            user_context_parts.append(f"Location: {user.address}")
+        else:
+            user_context_parts.append("Location: Not specified (recommend calling get_user_location_context)")
+        
+        # Add current time context
+        from datetime import datetime
+        current_time = datetime.now()
+        user_context_parts.append(f"Current Time: {current_time.strftime('%A, %B %d, %Y at %I:%M %p')}")
+        user_context_parts.append(f"Session Context: {'Business hours' if 9 <= current_time.hour <= 17 else 'After hours'}")
+        
         # Get user's resume data from database
         try:
-            result = await db.execute(select(Resume).where(Resume.user_id == user.id))
+            result = await db.execute(select(Resume).where(Resume.user_id == user_id))
             db_resume = result.scalars().first()
             
             if db_resume:
@@ -4100,7 +5187,7 @@ Your resume database record is now properly structured. Try clicking a download 
         # Get uploaded documents count
         try:
             doc_count_result = await db.execute(
-                select(Document).where(Document.user_id == user.id)
+                select(Document).where(Document.user_id == user_id)
             )
             documents = doc_count_result.scalars().all()
             if documents:
@@ -4135,12 +5222,14 @@ Your resume database record is now properly structured. Try clicking a download 
 - Use cover letter tools that auto-access profile data
 - Use CV refinement tools that pull from database
 - Access resume data automatically through tools
+- Use search_web_for_advice for current industry trends, salary info, interview tips, and up-to-date career guidance
 
 ### ✅ FOR COVER LETTERS:
 - Ask ONLY for: job URL OR (company name + job title + job description)
 - NEVER ask for user's background - tools access this automatically
 - ALWAYS CALL generate_cover_letter or generate_cover_letter_from_url tools
 - ALL cover letter responses MUST include [DOWNLOADABLE_COVER_LETTER] marker for download button
+- ALWAYS show the FULL cover letter content in the message, not just a summary
 
 ### ✅ FOR CV/RESUME WORK:
 - Use refine_cv_for_role for CV enhancement requests
@@ -4156,10 +5245,32 @@ Your resume database record is now properly structured. Try clicking a download 
 - ALWAYS ensure ALL variables are populated (name, email, phone, location, LinkedIn, skills, education, experience, projects, certifications) so PDF dialog has NO empty fields
 - NEVER generate resumes/CVs with placeholder data - always extract real data first
 
-Remember: You are an intelligent assistant with full access to {user_name}'s data. Use your tools confidently!"""
+### ✅ FOR WEB SEARCH & CURRENT INFORMATION:
+- Use search_web_for_advice when user asks for current trends, market conditions, or recent developments
+- Search for up-to-date salary information, industry insights, or interview preparation tips
+- Get current information about companies, technologies, or career advice
+- Examples: "latest remote work trends", "current software engineer salary ranges", "interview tips for tech companies"
+- ALWAYS use web search for questions that require recent, current, or trending information
+- DO NOT use web search for job searching - use existing job search tools instead
+
+### ✅ FOR LOCATION & TIME AWARENESS:
+- Use get_user_location_context to understand user's job market and provide location-specific advice
+- Use get_current_time_and_date for time-sensitive recommendations (e.g., application timing, business hours)
+- Consider location when discussing salary ranges, cost of living, and job market conditions
+- Use update_user_location when user mentions moving or changing location
+- Provide timezone-aware advice for remote work and international opportunities
+- Examples: "Poland tech salaries", "best time to apply for jobs", "remote work from your location"
+
+### ✅ FOR CONTEXTUAL CAREER ADVICE:
+- Always consider user's current location when providing salary guidance or job market insights
+- Use time context for application timing, interview scheduling, and career planning advice
+- Combine location + time + web search for comprehensive, current, and relevant career guidance
+- Adapt advice based on local business culture and market conditions
+
+Remember: You are an intelligent assistant with full access to {user_name}'s data, current location context, real-time information, AND current web information. Use your tools confidently!"""
         
         master_agent = create_master_agent(tools, user_documents, enhanced_system_prompt)
-        log.info(f"Created master agent with user context for {user_name} (user {user.id})")
+        log.info(f"Created master agent with user context for {user_name} (user {user_id})")
         
     except Exception as e:
         log.warning(f"Failed to create enhanced context agent, falling back to basic: {e}")
@@ -4200,7 +5311,7 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
             await db.rollback()  # Ensure clean transaction state
             history_records = await db.execute(
                 select(ChatMessage)
-                .where(ChatMessage.user_id == user.id)
+                .where(ChatMessage.user_id == user_id)
                 .where(ChatMessage.page_id.is_(None))
                 .order_by(ChatMessage.created_at)
             )
@@ -4237,7 +5348,7 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                 if message_data.get("type") == "clear_context":
                     current_chat_history = []
                     current_loaded_page_id = None
-                    log.info(f"Chat context cleared for user {user.id}")
+                    log.info(f"Chat context cleared for user {user_id}")
                     continue
                 elif message_data.get("type") == "switch_page":
                     # Handle explicit page switching from frontend
@@ -4337,7 +5448,7 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                                     # Now save the new regenerated message
                                     new_message = ChatMessage(
                                         id=ai_message_id,
-                                        user_id=user.id,
+                                        user_id=user_id,
                                         message=agent_response,
                                         is_user_message=False,
                                         page_id=regenerate_page_id
@@ -4376,7 +5487,7 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                             try:
                                 page_history = await db.execute(
                                     select(ChatMessage)
-                                    .where(ChatMessage.user_id == user.id)
+                                    .where(ChatMessage.user_id == user_id)
                                     .where(ChatMessage.page_id == page_id)
                                     .order_by(ChatMessage.created_at)
                                 )
@@ -4416,7 +5527,7 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                 user_message_id = str(uuid.uuid4())
                 db.add(ChatMessage(
                     id=user_message_id,
-                    user_id=user.id,
+                    user_id=user_id,
                     page_id=page_id,
                     message=message_content,
                     is_user_message=True
@@ -4491,7 +5602,7 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                 ai_message_id = str(uuid.uuid4())
                 db.add(ChatMessage(
                     id=ai_message_id,
-                    user_id=user.id,
+                    user_id=user_id,
                     page_id=page_id,
                     message=result,
                     is_user_message=False
@@ -4506,9 +5617,9 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
             current_chat_history.append(AIMessage(id=ai_message_id, content=result))
             
     except WebSocketDisconnect:
-        log.info(f"WebSocket disconnected for user {user.id}")
+        log.info(f"WebSocket disconnected for user {user_id}")
     except Exception as e:
-        log.error(f"WebSocket error for user {user.id}: {e}")
+        log.error(f"WebSocket error for user {user_id}: {e}")
         try:
             await websocket.send_text(f"An error occurred: {str(e)}")
         except Exception:

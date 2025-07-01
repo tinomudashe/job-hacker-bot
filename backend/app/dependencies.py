@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, Query, status, WebSocket
+from fastapi import Depends, HTTPException, Query, status, WebSocket, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 import logging
@@ -12,7 +12,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token", auto_error=False)
 
 
 def create_valid_email(user_id: str) -> str:
@@ -39,6 +39,44 @@ def create_valid_email(user_id: str) -> str:
     clean_id = clean_id[:20]
     
     return f"user_{clean_id}@example.com"
+
+
+def extract_token_from_request(request: Request, token_from_header: Optional[str] = None) -> Optional[str]:
+    """
+    Extract Clerk token from either Authorization header or cookies.
+    
+    Args:
+        request: FastAPI request object
+        token_from_header: Token from OAuth2 scheme (Authorization header)
+    
+    Returns:
+        Token string or None if not found
+    """
+    # First try the Authorization header
+    if token_from_header:
+        return token_from_header
+    
+    # Then try cookies (common Clerk cookie names)
+    clerk_cookie_names = [
+        '__session',  # Common Clerk session cookie
+        '__clerk_session',
+        'clerk-session',
+        '__clerk_token',
+    ]
+    
+    for cookie_name in clerk_cookie_names:
+        token = request.cookies.get(cookie_name)
+        if token:
+            logger.info(f"Found token in cookie: {cookie_name}")
+            return token
+    
+    # Try to extract from custom Authorization header formats
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        return auth_header[7:]  # Remove "Bearer " prefix
+    
+    logger.warning("No authentication token found in request")
+    return None
 
 
 async def get_user_from_token_data(token_data: ClerkUser, db: AsyncSession) -> User:
@@ -80,13 +118,29 @@ async def get_user_from_token_data(token_data: ClerkUser, db: AsyncSession) -> U
     return user
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> User:
+async def get_current_user(
+    request: Request,
+    token: Optional[str] = Depends(oauth2_scheme), 
+    db: AsyncSession = Depends(get_db)
+) -> User:
     """
     Verify the auth token and get the current user.
     This is used for regular HTTP endpoints.
+    Now supports both Authorization header and cookie-based authentication.
     """
     try:
-        clerk_user: ClerkUser = await verify_token(token)
+        # Extract token from various sources
+        auth_token = extract_token_from_request(request, token)
+        
+        if not auth_token:
+            logger.warning("No authentication token found")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Not authenticated",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        clerk_user: ClerkUser = await verify_token(auth_token)
         if not clerk_user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -112,7 +166,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
             await db.commit()
             await db.refresh(user)
             
+        logger.info(f"Successfully authenticated user: {user.external_id}")
         return user
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
         logger.error(f"Error in get_current_user: {e}")
         raise HTTPException(
