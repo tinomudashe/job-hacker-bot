@@ -1,15 +1,56 @@
 "use client";
 
-import { cn } from '@/lib/utils';
+import { Sparkles } from "lucide-react";
+import { AIProgressIndicator } from "./ai-progress-indicator";
 
-export function LoadingMessage() {
+interface LoadingMessageProps {
+  progressType?:
+    | "thinking"
+    | "searching"
+    | "generating"
+    | "processing"
+    | "downloading"
+    | "browser_automation"
+    | "job_search"
+    | "linkedin_api";
+  customMessage?: string;
+  onCancel?: () => void;
+}
+
+export function LoadingMessage({
+  progressType = "thinking",
+  customMessage,
+  onCancel,
+}: LoadingMessageProps) {
   return (
-    <div className="flex items-center gap-2 py-4">
-      <div className="flex items-center justify-center gap-1.5">
-        <span className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce [animation-delay:-0.3s]" />
-        <span className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce [animation-delay:-0.15s]" />
-        <span className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce" />
+    <div className="flex items-start gap-3 py-2">
+      {/* Polished AI Avatar */}
+      <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-primary/10 to-primary/5 flex items-center justify-center mt-0.5 border border-primary/10">
+        <Sparkles className="w-3.5 h-3.5 text-primary/70" />
+      </div>
+
+      {/* Progress Content */}
+      <div className="flex-1 min-w-0 mt-1">
+        <AIProgressIndicator
+          isLoading={true}
+          progressType={progressType}
+          progressText={customMessage}
+          onCancel={onCancel}
+        />
       </div>
     </div>
   );
-} 
+}
+
+// Minimalist version for backwards compatibility
+export function SimpleLoadingMessage() {
+  return (
+    <div className="flex items-center gap-2 py-1">
+      <div className="flex items-center justify-center gap-1">
+        <span className="h-1 w-1 rounded-full bg-muted-foreground/60 animate-pulse [animation-delay:-0.3s]" />
+        <span className="h-1 w-1 rounded-full bg-muted-foreground/60 animate-pulse [animation-delay:-0.15s]" />
+        <span className="h-1 w-1 rounded-full bg-muted-foreground/60 animate-pulse" />
+      </div>
+    </div>
+  );
+}

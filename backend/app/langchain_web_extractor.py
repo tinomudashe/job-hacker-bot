@@ -32,7 +32,7 @@ class LangChainWebExtractor:
     """Lightweight web extraction using LangChain WebBrowser approach."""
     
     def __init__(self):
-        self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0.1)
+        self.llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0.1)
         self.embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,

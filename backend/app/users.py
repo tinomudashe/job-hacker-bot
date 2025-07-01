@@ -186,7 +186,7 @@ async def get_profile(
         "profile_headline": getattr(db_user, "profile_headline", None),
         "skills": getattr(db_user, "skills", None),
         "profile_picture_url": getattr(db_user, "profile_picture_url", None),
-        "email": db_user.email,
+        "email": db_user.email or f"{db_user.id[:8]}@noemail.com",  # Provide unique default if None
         "picture": db_user.picture,
         "active": db_user.active,
         "preferences": db_user.preferences,

@@ -20,7 +20,7 @@ class User(BaseModel):
     profile_headline: Optional[str] = None
     skills: Optional[str] = None
     profile_picture_url: Optional[str] = None
-    email: EmailStr
+    email: Optional[EmailStr] = None
     picture: Optional[str] = None
     active: bool = True
     preferences: Optional[UserPreferences] = None

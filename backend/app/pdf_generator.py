@@ -805,4 +805,14 @@ async def preview_html(
         
     except Exception as e:
         logger.error(f"Error in HTML preview: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Alias endpoint for backward compatibility
+@router.post("/pdf/download")
+async def download_pdf(
+    request: PDFGenerationRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Download a styled PDF for cover letter or resume. (Alias for /pdf/generate)"""
+    return await generate_pdf(request, db, current_user) 

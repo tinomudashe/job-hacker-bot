@@ -4,6 +4,7 @@ from pydantic import BaseModel, EmailStr, HttpUrl
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+import uuid
 
 from app.db import get_db
 from app.models_db import User, Resume
@@ -11,6 +12,30 @@ from app.dependencies import get_current_active_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# --- Helper Functions ---
+
+def fix_resume_data_structure(data: Dict) -> Dict:
+    """
+    Ensures resume data has proper structure with required ID fields.
+    Adds missing IDs to experience and education entries.
+    """
+    if not isinstance(data, dict):
+        return data
+    
+    # Fix experience entries
+    if 'experience' in data and isinstance(data['experience'], list):
+        for exp in data['experience']:
+            if isinstance(exp, dict) and 'id' not in exp:
+                exp['id'] = str(uuid.uuid4())
+    
+    # Fix education entries  
+    if 'education' in data and isinstance(data['education'], list):
+        for edu in data['education']:
+            if isinstance(edu, dict) and 'id' not in edu:
+                edu['id'] = str(uuid.uuid4())
+    
+    return data
 
 # --- Pydantic Models to match Frontend ---
 
@@ -62,7 +87,9 @@ async def get_resume_data(
     resume = result.scalars().first()
 
     if resume:
-        return ResumeData(**resume.data)
+        # Fix data structure to ensure required IDs exist
+        fixed_data = fix_resume_data_structure(resume.data)
+        return ResumeData(**fixed_data)
         
     # Return a default empty structure if no resume data is found
     return ResumeData(
@@ -90,12 +117,16 @@ async def update_resume_data(
     )
     db_resume = result.scalars().first()
 
+    # Convert to dict and ensure proper structure
+    resume_dict = resume_data.dict()
+    fixed_data = fix_resume_data_structure(resume_dict)
+
     if db_resume:
-        db_resume.data = resume_data.dict()
+        db_resume.data = fixed_data
     else:
         db_resume = Resume(
             user_id=current_user.id,
-            data=resume_data.dict()
+            data=fixed_data
         )
         db.add(db_resume)
     

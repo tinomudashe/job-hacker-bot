@@ -1,31 +1,29 @@
-"use client"
+"use client";
 
-import * as React from "react"
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { 
-  FileText, 
-  Download, 
-  Edit3, 
-  Sparkles,
-  Loader2,
-  ExternalLink,
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { toast } from "@/lib/toast";
+import { useAuth } from "@clerk/nextjs";
+import {
   Briefcase,
+  Download,
+  Edit3,
+  ExternalLink,
+  FileText,
   User,
-  X
-} from "lucide-react"
-import { useAuth } from "@clerk/nextjs"
-import { toast } from "@/lib/toast"
+  X,
+} from "lucide-react";
+import * as React from "react";
 
 interface CoverLetterDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  initialContent?: string
-  companyName?: string
-  jobTitle?: string
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  initialContent?: string;
+  companyName?: string;
+  jobTitle?: string;
 }
 
 // Enhanced style options with better colors
@@ -36,23 +34,23 @@ const PDF_STYLES = [
     description: "Clean design with blue accents",
     colors: {
       primary: "#2563eb",
-      secondary: "#1e40af", 
+      secondary: "#1e40af",
       accent: "#3b82f6",
       background: "#ffffff",
-      text: "#1f2937"
-    }
+      text: "#1f2937",
+    },
   },
   {
     key: "professional",
-    name: "Professional", 
+    name: "Professional",
     description: "Traditional business layout",
     colors: {
       primary: "#374151",
       secondary: "#1f2937",
       accent: "#6b7280",
       background: "#ffffff",
-      text: "#111827"
-    }
+      text: "#111827",
+    },
   },
   {
     key: "creative",
@@ -63,24 +61,24 @@ const PDF_STYLES = [
       secondary: "#5b21b6",
       accent: "#a855f7",
       background: "#ffffff",
-      text: "#1f2937"
-    }
-  }
-]
+      text: "#1f2937",
+    },
+  },
+];
 
 export function CoverLetterDialog({
   open,
   onOpenChange,
   initialContent = "",
   companyName = "",
-  jobTitle = ""
+  jobTitle = "",
 }: CoverLetterDialogProps) {
-  const [selectedStyle, setSelectedStyle] = React.useState("modern")
-  const [editedContent, setEditedContent] = React.useState(initialContent)
-  const [editedCompanyName, setEditedCompanyName] = React.useState(companyName)
-  const [editedJobTitle, setEditedJobTitle] = React.useState(jobTitle)
-  const [isGenerating, setIsGenerating] = React.useState(false)
-  const [isMobile, setIsMobile] = React.useState(false)
+  const [selectedStyle, setSelectedStyle] = React.useState("modern");
+  const [editedContent, setEditedContent] = React.useState(initialContent);
+  const [editedCompanyName, setEditedCompanyName] = React.useState(companyName);
+  const [editedJobTitle, setEditedJobTitle] = React.useState(jobTitle);
+  const [isGenerating, setIsGenerating] = React.useState(false);
+  const [isMobile, setIsMobile] = React.useState(false);
 
   // Personal information fields
   const [personalInfo, setPersonalInfo] = React.useState({
@@ -89,113 +87,115 @@ export function CoverLetterDialog({
     phone: "",
     address: "",
     linkedin: "",
-    website: ""
-  })
+    website: "",
+  });
 
   // Collapsible sections state
   const [expandedSections, setExpandedSections] = React.useState({
     personalInfo: true,
-    content: true
-  })
+    content: true,
+  });
 
   const toggleSection = (section: keyof typeof expandedSections) => {
-    setExpandedSections(prev => ({
+    setExpandedSections((prev) => ({
       ...prev,
-      [section]: !prev[section]
-    }))
-  }
+      [section]: !prev[section],
+    }));
+  };
 
-  const { getToken } = useAuth()
+  const { getToken } = useAuth();
 
   // Handle mobile detection
   React.useEffect(() => {
     const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768)
-    }
-    
-    checkMobile()
-    window.addEventListener('resize', checkMobile)
-    
-    return () => window.removeEventListener('resize', checkMobile)
-  }, [])
+      setIsMobile(window.innerWidth < 768);
+    };
+
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   // Improved modal scroll lock
   React.useEffect(() => {
-    if (!open) return
+    if (!open) return;
 
-    const originalScrollY = window.scrollY
+    const originalScrollY = window.scrollY;
     const originalBodyStyle = {
       overflow: document.body.style.overflow,
       position: document.body.style.position,
       top: document.body.style.top,
       width: document.body.style.width,
-    }
+    };
 
-    document.body.style.overflow = 'hidden'
-    document.body.style.scrollbarGutter = 'stable'
-    document.body.classList.add('modal-open')
+    document.body.style.overflow = "hidden";
+    document.body.style.scrollbarGutter = "stable";
+    document.body.classList.add("modal-open");
 
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
     if (isIOS) {
-      document.body.style.position = 'fixed'
-      document.body.style.top = `-${originalScrollY}px`
-      document.body.style.width = '100%'
+      document.body.style.position = "fixed";
+      document.body.style.top = `-${originalScrollY}px`;
+      document.body.style.width = "100%";
     }
 
     const preventDefault = (e: TouchEvent) => {
-      const target = e.target as Element
-      const isWithinModal = target.closest('[data-radix-dialog-content]')
-      const isScrollableContent = target.closest('textarea, input, [role="textbox"]') || 
-                                 target.closest('[data-scrollable="true"]')
-      
-      if (!isWithinModal && !isScrollableContent) {
-        e.preventDefault()
-      }
-    }
+      const target = e.target as Element;
+      const isWithinModal = target.closest("[data-radix-dialog-content]");
+      const isScrollableContent =
+        target.closest('textarea, input, [role="textbox"]') ||
+        target.closest('[data-scrollable="true"]');
 
-    document.addEventListener('touchmove', preventDefault, { passive: false })
+      if (!isWithinModal && !isScrollableContent) {
+        e.preventDefault();
+      }
+    };
+
+    document.addEventListener("touchmove", preventDefault, { passive: false });
 
     return () => {
-      document.body.style.overflow = originalBodyStyle.overflow
-      document.body.style.position = originalBodyStyle.position
-      document.body.style.top = originalBodyStyle.top
-      document.body.style.width = originalBodyStyle.width
-      document.body.style.scrollbarGutter = ''
-      document.body.classList.remove('modal-open')
-      
+      document.body.style.overflow = originalBodyStyle.overflow;
+      document.body.style.position = originalBodyStyle.position;
+      document.body.style.top = originalBodyStyle.top;
+      document.body.style.width = originalBodyStyle.width;
+      document.body.style.scrollbarGutter = "";
+      document.body.classList.remove("modal-open");
+
       if (isIOS) {
-        window.scrollTo(0, originalScrollY)
+        window.scrollTo(0, originalScrollY);
       }
-      
-      document.removeEventListener('touchmove', preventDefault)
-    }
-  }, [open])
+
+      document.removeEventListener("touchmove", preventDefault);
+    };
+  }, [open]);
 
   // Initialize content
   React.useEffect(() => {
     if (initialContent && !editedContent) {
-      setEditedContent(initialContent)
+      setEditedContent(initialContent);
     }
-  }, [initialContent])
+  }, [initialContent]);
 
   const handleDownload = async () => {
-    if (isGenerating) return
-    
-    setIsGenerating(true)
-    
+    if (isGenerating) return;
+
+    setIsGenerating(true);
+
     try {
-      const token = await getToken()
+      const token = await getToken();
       if (!token) {
-        throw new Error("Please sign in to download PDFs")
+        throw new Error("Please sign in to download PDFs");
       }
-      
-      const contentToUse = getCombinedContent()
+
+      const contentToUse = getCombinedContent();
       if (!contentToUse || contentToUse.trim().length === 0) {
-        throw new Error("Please add some content before downloading")
+        throw new Error("Please add some content before downloading");
       }
-      
-      const selectedStyleData = PDF_STYLES.find(s => s.key === selectedStyle) || PDF_STYLES[0]
-      
+
+      const selectedStyleData =
+        PDF_STYLES.find((s) => s.key === selectedStyle) || PDF_STYLES[0];
+
       const requestData = {
         content_text: contentToUse.trim(),
         content_id: null,
@@ -203,85 +203,98 @@ export function CoverLetterDialog({
         colors: selectedStyleData.colors,
         company_name: editedCompanyName || "",
         job_title: editedJobTitle || "",
-        content_type: "cover_letter"
-      }
+        content_type: "cover_letter",
+      };
 
-      const response = await fetch('/api/pdf/download', {
-        method: 'POST',
+      const response = await fetch("/api/pdf/generate", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(requestData)
-      })
+        body: JSON.stringify(requestData),
+      });
 
       if (!response.ok) {
-        let errorMessage = 'Failed to generate PDF'
+        let errorMessage = "Failed to generate PDF";
         try {
-          const responseContentType = response.headers.get('content-type')
-          if (responseContentType && responseContentType.includes('application/json')) {
-            const errorData = await response.json()
-            errorMessage = errorData.detail || errorData.message || errorData.error || errorMessage
+          const responseContentType = response.headers.get("content-type");
+          if (
+            responseContentType &&
+            responseContentType.includes("application/json")
+          ) {
+            const errorData = await response.json();
+            errorMessage =
+              errorData.detail ||
+              errorData.message ||
+              errorData.error ||
+              errorMessage;
           } else {
-            const errorText = await response.text()
-            errorMessage = errorText || `HTTP ${response.status}: ${response.statusText}`
+            const errorText = await response.text();
+            errorMessage =
+              errorText || `HTTP ${response.status}: ${response.statusText}`;
           }
         } catch (parseError) {
-          errorMessage = `Server error (${response.status}): ${response.statusText}`
+          errorMessage = `Server error (${response.status}): ${response.statusText}`;
         }
-        throw new Error(errorMessage)
+        throw new Error(errorMessage);
       }
 
-      const responseContentType = response.headers.get('content-type')
-      if (!responseContentType || !responseContentType.includes('application/pdf')) {
-        throw new Error("Server did not return a PDF file")
+      const responseContentType = response.headers.get("content-type");
+      if (
+        !responseContentType ||
+        !responseContentType.includes("application/pdf")
+      ) {
+        throw new Error("Server did not return a PDF file");
       }
 
-      const blob = await response.blob()
+      const blob = await response.blob();
       if (blob.size === 0) {
-        throw new Error("Received empty PDF file")
+        throw new Error("Received empty PDF file");
       }
-      
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.style.display = 'none'
-      a.href = url
-      
-      const fileName = `cover-letter-${selectedStyle}-${new Date().toISOString().split('T')[0]}.pdf`
-      a.download = fileName
-      
-      document.body.appendChild(a)
-      a.click()
-      window.URL.revokeObjectURL(url)
-      document.body.removeChild(a)
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.style.display = "none";
+      a.href = url;
+
+      const fileName = `cover-letter-${selectedStyle}-${
+        new Date().toISOString().split("T")[0]
+      }.pdf`;
+      a.download = fileName;
+
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
 
       toast.success(`Cover letter downloaded successfully!`, {
-        description: `File: ${fileName}`
-      })
-      
+        description: `File: ${fileName}`,
+      });
     } catch (error) {
-      console.error('Download error:', error)
-      
-      let userMessage = 'Failed to download PDF'
+      console.error("Download error:", error);
+
+      let userMessage = "Failed to download PDF";
       if (error instanceof Error) {
-        userMessage = error.message
+        userMessage = error.message;
       }
-      
-      toast.error(userMessage)
+
+      toast.error(userMessage);
     } finally {
-      setIsGenerating(false)
+      setIsGenerating(false);
     }
-  }
+  };
 
   const handlePreview = () => {
     try {
-      const contentToUse = getCombinedContent()
+      const contentToUse = getCombinedContent();
       if (!contentToUse || contentToUse.trim().length === 0) {
-        throw new Error("Please add some content before previewing")
+        throw new Error("Please add some content before previewing");
       }
-      
-      const selectedStyleData = PDF_STYLES.find(s => s.key === selectedStyle) || PDF_STYLES[0]
-      
+
+      const selectedStyleData =
+        PDF_STYLES.find((s) => s.key === selectedStyle) || PDF_STYLES[0];
+
       const previewData = {
         content: contentToUse.trim(),
         style: selectedStyle,
@@ -289,63 +302,71 @@ export function CoverLetterDialog({
         company_name: editedCompanyName || "",
         job_title: editedJobTitle || "",
         content_type: "cover_letter",
-        personal_info: personalInfo
-      }
+        personal_info: personalInfo,
+      };
 
-      sessionStorage.setItem('pdf_preview_data', JSON.stringify(previewData))
-      
-      const previewUrl = `/preview?type=cover_letter&style=${selectedStyle}`
-      const newWindow = window.open(previewUrl, '_blank', 'noopener,noreferrer')
-      
+      sessionStorage.setItem("pdf_preview_data", JSON.stringify(previewData));
+
+      const previewUrl = `/preview?type=cover_letter&style=${selectedStyle}`;
+      const newWindow = window.open(
+        previewUrl,
+        "_blank",
+        "noopener,noreferrer"
+      );
+
       if (newWindow) {
-        newWindow.focus()
-        toast.success("Preview opened in new tab")
+        newWindow.focus();
+        toast.success("Preview opened in new tab");
       } else {
-        toast.error("Please allow popups to view the preview")
+        toast.error("Please allow popups to view the preview");
       }
-      
     } catch (error) {
-      console.error('Preview error:', error)
-      
-      let userMessage = 'Failed to open preview'
-      if (error instanceof Error) {
-        userMessage = error.message
-      }
-      
-      toast.error(userMessage)
-    }
-  }
+      console.error("Preview error:", error);
 
-  const selectedStyleData = PDF_STYLES.find(s => s.key === selectedStyle) || PDF_STYLES[0]
-  
+      let userMessage = "Failed to open preview";
+      if (error instanceof Error) {
+        userMessage = error.message;
+      }
+
+      toast.error(userMessage);
+    }
+  };
+
+  const selectedStyleData =
+    PDF_STYLES.find((s) => s.key === selectedStyle) || PDF_STYLES[0];
+
   // Check if content is valid
   const isContentValid = React.useMemo(() => {
-    return editedContent && editedContent.trim().length > 0
-  }, [editedContent])
+    return editedContent && editedContent.trim().length > 0;
+  }, [editedContent]);
 
   // Combine all content for PDF generation
   const getCombinedContent = () => {
-    let combined = ""
+    let combined = "";
 
     // Personal Information
-    if (Object.values(personalInfo).some(val => val.trim().length > 0)) {
-      combined += "**Personal Information**\n\n"
-      if (personalInfo.fullName) combined += `**Name:** ${personalInfo.fullName}\n`
-      if (personalInfo.email) combined += `**Email:** ${personalInfo.email}\n`
-      if (personalInfo.phone) combined += `**Phone:** ${personalInfo.phone}\n`
-      if (personalInfo.address) combined += `**Address:** ${personalInfo.address}\n`
-      if (personalInfo.linkedin) combined += `**LinkedIn:** ${personalInfo.linkedin}\n`
-      if (personalInfo.website) combined += `**Website:** ${personalInfo.website}\n`
-      combined += "\n---\n\n"
+    if (Object.values(personalInfo).some((val) => val.trim().length > 0)) {
+      combined += "**Personal Information**\n\n";
+      if (personalInfo.fullName)
+        combined += `**Name:** ${personalInfo.fullName}\n`;
+      if (personalInfo.email) combined += `**Email:** ${personalInfo.email}\n`;
+      if (personalInfo.phone) combined += `**Phone:** ${personalInfo.phone}\n`;
+      if (personalInfo.address)
+        combined += `**Address:** ${personalInfo.address}\n`;
+      if (personalInfo.linkedin)
+        combined += `**LinkedIn:** ${personalInfo.linkedin}\n`;
+      if (personalInfo.website)
+        combined += `**Website:** ${personalInfo.website}\n`;
+      combined += "\n---\n\n";
     }
 
     // Cover letter content
     if (editedContent.trim()) {
-      combined += editedContent
+      combined += editedContent;
     }
 
-    return combined.trim()
-  }
+    return combined.trim();
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -368,7 +389,7 @@ export function CoverLetterDialog({
                 </p>
               </div>
             </div>
-            
+
             {/* Right: Close Button */}
             <Button
               variant="ghost"
@@ -392,7 +413,7 @@ export function CoverLetterDialog({
               <ExternalLink className="h-4 w-4" />
               <span>Preview</span>
             </Button>
-            
+
             <Button
               onClick={handleDownload}
               disabled={isGenerating || !isContentValid}
@@ -452,7 +473,7 @@ export function CoverLetterDialog({
                   <ExternalLink className="h-4 w-4" />
                   <span>Preview</span>
                 </Button>
-                
+
                 <Button
                   onClick={handleDownload}
                   disabled={isGenerating || !isContentValid}
@@ -481,7 +502,7 @@ export function CoverLetterDialog({
                   <X className="h-4 w-4" />
                 </Button>
               </div>
-              
+
               {!isContentValid && (
                 <p className="text-xs text-gray-500 dark:text-gray-400 text-right font-medium">
                   Add content to enable actions
@@ -496,11 +517,11 @@ export function CoverLetterDialog({
           <div className="px-4 sm:px-6">
             <div className="flex overflow-x-auto scrollbar-hide -mb-px">
               <button
-                onClick={() => toggleSection('personalInfo')}
+                onClick={() => toggleSection("personalInfo")}
                 className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition-colors min-w-0 ${
                   expandedSections.personalInfo
-                    ? 'border-blue-500 text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-400'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                    ? "border-blue-500 text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-400"
+                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300"
                 }`}
               >
                 <User className="h-4 w-4 flex-shrink-0" />
@@ -508,11 +529,11 @@ export function CoverLetterDialog({
               </button>
 
               <button
-                onClick={() => toggleSection('content')}
+                onClick={() => toggleSection("content")}
                 className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition-colors min-w-0 ${
                   expandedSections.content
-                    ? 'border-teal-500 text-teal-600 bg-teal-50 dark:bg-teal-900/20 dark:text-teal-400'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                    ? "border-teal-500 text-teal-600 bg-teal-50 dark:bg-teal-900/20 dark:text-teal-400"
+                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300"
                 }`}
               >
                 <Edit3 className="h-4 w-4 flex-shrink-0" />
@@ -523,12 +544,14 @@ export function CoverLetterDialog({
         </div>
 
         {/* Main Content */}
-        <div className="flex-1 overflow-auto scrollbar-thin" data-scrollable="true">
+        <div
+          className="flex-1 overflow-auto scrollbar-thin"
+          data-scrollable="true"
+        >
           <div className="h-full flex flex-col">
             {/* Content Editor */}
             <div className="flex-1 p-3 sm:p-6 bg-gradient-to-br from-gray-50/30 via-white/20 to-gray-100/30 dark:from-gray-900/30 dark:via-gray-800/20 dark:to-gray-900/40 backdrop-blur-sm">
               <div className="max-w-4xl mx-auto space-y-4 sm:space-y-6">
-                
                 {/* Job Details Section */}
                 {expandedSections.personalInfo && (
                   <div className="bg-white/60 dark:bg-gray-800/60 backdrop-blur-md rounded-xl p-4 sm:p-6 shadow-lg border border-white/30 dark:border-gray-700/50">
@@ -574,7 +597,12 @@ export function CoverLetterDialog({
                           <Input
                             placeholder="John Doe"
                             value={personalInfo.fullName}
-                            onChange={(e) => setPersonalInfo({...personalInfo, fullName: e.target.value})}
+                            onChange={(e) =>
+                              setPersonalInfo({
+                                ...personalInfo,
+                                fullName: e.target.value,
+                              })
+                            }
                             className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
                           />
                         </div>
@@ -586,7 +614,12 @@ export function CoverLetterDialog({
                             placeholder="john.doe@email.com"
                             type="email"
                             value={personalInfo.email}
-                            onChange={(e) => setPersonalInfo({...personalInfo, email: e.target.value})}
+                            onChange={(e) =>
+                              setPersonalInfo({
+                                ...personalInfo,
+                                email: e.target.value,
+                              })
+                            }
                             className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
                           />
                         </div>
@@ -597,7 +630,12 @@ export function CoverLetterDialog({
                           <Input
                             placeholder="+1 (555) 123-4567"
                             value={personalInfo.phone}
-                            onChange={(e) => setPersonalInfo({...personalInfo, phone: e.target.value})}
+                            onChange={(e) =>
+                              setPersonalInfo({
+                                ...personalInfo,
+                                phone: e.target.value,
+                              })
+                            }
                             className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
                           />
                         </div>
@@ -610,7 +648,12 @@ export function CoverLetterDialog({
                           <Input
                             placeholder="City, State, Country"
                             value={personalInfo.address}
-                            onChange={(e) => setPersonalInfo({...personalInfo, address: e.target.value})}
+                            onChange={(e) =>
+                              setPersonalInfo({
+                                ...personalInfo,
+                                address: e.target.value,
+                              })
+                            }
                             className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
                           />
                         </div>
@@ -621,7 +664,12 @@ export function CoverLetterDialog({
                           <Input
                             placeholder="linkedin.com/in/johndoe"
                             value={personalInfo.linkedin}
-                            onChange={(e) => setPersonalInfo({...personalInfo, linkedin: e.target.value})}
+                            onChange={(e) =>
+                              setPersonalInfo({
+                                ...personalInfo,
+                                linkedin: e.target.value,
+                              })
+                            }
                             className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
                           />
                         </div>
@@ -632,7 +680,12 @@ export function CoverLetterDialog({
                           <Input
                             placeholder="johndoe.com"
                             value={personalInfo.website}
-                            onChange={(e) => setPersonalInfo({...personalInfo, website: e.target.value})}
+                            onChange={(e) =>
+                              setPersonalInfo({
+                                ...personalInfo,
+                                website: e.target.value,
+                              })
+                            }
                             className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
                           />
                         </div>
@@ -656,35 +709,47 @@ export function CoverLetterDialog({
                       onChange={(e) => setEditedContent(e.target.value)}
                       placeholder={`Dear Hiring Manager,
 
-I am writing to express my strong interest in the ${editedJobTitle || '[Job Title]'} position at ${editedCompanyName || '[Company Name]'}. With my background in [Your Field] and [X] years of experience, I am confident that I would be a valuable addition to your team.
+I am writing to express my strong interest in the ${
+                        editedJobTitle || "[Job Title]"
+                      } position at ${
+                        editedCompanyName || "[Company Name]"
+                      }. With my background in [Your Field] and [X] years of experience, I am confident that I would be a valuable addition to your team.
 
 In my previous role at [Previous Company], I successfully [Key Achievement]. This experience has equipped me with [Relevant Skills] that directly align with the requirements of this position.
 
-I am particularly drawn to ${editedCompanyName || '[Company Name]'} because [Reason for Interest in Company]. I am excited about the opportunity to contribute to [Specific Project/Goal] and help drive [Company Objective].
+I am particularly drawn to ${
+                        editedCompanyName || "[Company Name]"
+                      } because [Reason for Interest in Company]. I am excited about the opportunity to contribute to [Specific Project/Goal] and help drive [Company Objective].
 
 Thank you for considering my application. I look forward to discussing how my skills and experience can contribute to your team's success.
 
 Sincerely,
-${personalInfo.fullName || '[Your Name]'}`}
+${personalInfo.fullName || "[Your Name]"}`}
                       rows={18}
                       data-scrollable="true"
                       className="resize-none text-sm sm:text-base px-3 sm:px-4 py-2.5 sm:py-3 leading-relaxed min-h-[400px] sm:min-h-[500px] focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/40 transition-all duration-200 cursor-text scrollbar-thin backdrop-blur-sm bg-white/50 dark:bg-gray-900/50"
-                      style={{ 
-                        fontSize: isMobile ? '16px' : undefined,
-                        lineHeight: '1.6',
-                        resize: 'none',
-                        overflowY: 'auto'
+                      style={{
+                        fontSize: isMobile ? "16px" : undefined,
+                        lineHeight: "1.6",
+                        resize: "none",
+                        overflowY: "auto",
                       }}
                       onFocus={(e) => {
                         setTimeout(() => {
-                          e.target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          e.target.scrollIntoView({
+                            behavior: "smooth",
+                            block: "center",
+                          });
                         }, 100);
                       }}
                     />
                     <div className="mt-2 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
                       <div className="flex items-center gap-4">
                         <span>{editedContent.length} characters</span>
-                        <span>~{Math.ceil(editedContent.split(' ').length / 250)} pages</span>
+                        <span>
+                          ~{Math.ceil(editedContent.split(" ").length / 250)}{" "}
+                          pages
+                        </span>
                       </div>
                       <div className="hidden sm:flex items-center gap-2 text-xs text-gray-400">
                         <span>**bold**</span>
@@ -694,13 +759,11 @@ ${personalInfo.fullName || '[Your Name]'}`}
                     </div>
                   </div>
                 )}
-
               </div>
             </div>
           </div>
         </div>
-
       </DialogContent>
     </Dialog>
-  )
-} 
+  );
+}

@@ -1,12 +1,12 @@
 "use client";
 
-import React, { useRef, useEffect, useState } from 'react';
-import { ChatMessage } from './chat-message';
-import { ChatInput } from './chat-input';
 import { cn } from "@/lib/utils";
-import { AlertCircle, Loader2, ChevronDown } from "lucide-react";
-import { EmptyScreen } from '../empty-screen';
-import { LoadingMessage } from './loading-message';
+import { AlertCircle, ChevronDown, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { EmptyScreen } from "../empty-screen";
+import { ChatInput } from "./chat-input";
+import { ChatMessage } from "./chat-message";
+import { LoadingMessage } from "./loading-message";
 
 interface Message {
   id: string;
@@ -29,33 +29,205 @@ interface ChatContainerProps {
   className?: string;
 }
 
-export const ChatContainer = ({ 
-  messages, 
-  onSendMessage, 
+// Helper function to detect what the AI is doing based on the conversation
+function getProgressType(
+  messages: any[]
+):
+  | "thinking"
+  | "searching"
+  | "generating"
+  | "processing"
+  | "downloading"
+  | "browser_automation"
+  | "job_search"
+  | "linkedin_api" {
+  if (messages.length === 0) return "thinking";
+
+  const lastUserMessage =
+    [...messages]
+      .reverse()
+      .find((m) => m.isUser)
+      ?.content?.toLowerCase() || "";
+  const lastFewMessages = [...messages]
+    .slice(-3)
+    .map((m) =>
+      typeof m.content === "string" ? m.content : JSON.stringify(m.content)
+    )
+    .join(" ")
+    .toLowerCase();
+
+  // LinkedIn API indicators - check for fast job search patterns (highest priority)
+  if (
+    lastUserMessage.includes("linkedin") ||
+    lastUserMessage.includes("software intern") ||
+    lastUserMessage.includes("intern") ||
+    lastFewMessages.includes("linkedin api") ||
+    lastFewMessages.includes("direct linkedin") ||
+    (lastUserMessage.includes("job") &&
+      (lastUserMessage.includes("search") ||
+        lastUserMessage.includes("find") ||
+        lastUserMessage.includes("software")))
+  ) {
+    return "linkedin_api";
+  }
+
+  // Browser automation indicators - check for comprehensive job search patterns
+  if (
+    lastUserMessage.includes("comprehensive") ||
+    lastUserMessage.includes("detailed job search") ||
+    lastUserMessage.includes("browser automation") ||
+    lastFewMessages.includes("browser use cloud") ||
+    lastFewMessages.includes("cloud browser") ||
+    lastFewMessages.includes("browser automation") ||
+    lastFewMessages.includes("live preview")
+  ) {
+    return "browser_automation";
+  }
+
+  // Regular job search indicators
+  if (
+    lastUserMessage.includes("job") ||
+    lastUserMessage.includes("search") ||
+    lastUserMessage.includes("find") ||
+    lastUserMessage.includes("employment") ||
+    lastUserMessage.includes("opportunities") ||
+    lastUserMessage.includes("career") ||
+    lastUserMessage.includes("position") ||
+    lastUserMessage.includes("work")
+  ) {
+    return "job_search";
+  }
+
+  // Content generation indicators
+  if (
+    lastUserMessage.includes("generate") ||
+    lastUserMessage.includes("create") ||
+    lastUserMessage.includes("write") ||
+    lastUserMessage.includes("cover letter") ||
+    lastUserMessage.includes("resume") ||
+    lastUserMessage.includes("cv") ||
+    lastUserMessage.includes("refine") ||
+    lastUserMessage.includes("enhance") ||
+    lastUserMessage.includes("improve") ||
+    lastUserMessage.includes("tailor")
+  ) {
+    return "generating";
+  }
+
+  // Document processing indicators
+  if (
+    lastUserMessage.includes("analyze") ||
+    lastUserMessage.includes("document") ||
+    lastUserMessage.includes("file") ||
+    lastUserMessage.includes("upload") ||
+    lastUserMessage.includes("extract") ||
+    lastUserMessage.includes("review")
+  ) {
+    return "processing";
+  }
+
+  // Download indicators
+  if (
+    lastUserMessage.includes("download") ||
+    lastUserMessage.includes("pdf") ||
+    lastUserMessage.includes("export") ||
+    lastUserMessage.includes("save")
+  ) {
+    return "downloading";
+  }
+
+  return "thinking";
+}
+
+function getCustomProgressMessage(messages: any[]): string | undefined {
+  if (messages.length === 0) return undefined;
+
+  const lastUserMessage =
+    [...messages]
+      .reverse()
+      .find((m) => m.isUser)
+      ?.content?.toLowerCase() || "";
+  const lastFewMessages = [...messages]
+    .slice(-3)
+    .map((m) =>
+      typeof m.content === "string" ? m.content : JSON.stringify(m.content)
+    )
+    .join(" ")
+    .toLowerCase();
+
+  // Browser automation specific messages
+  if (
+    lastFewMessages.includes("browser automation") ||
+    lastFewMessages.includes("browser use cloud") ||
+    (lastUserMessage.includes("job") &&
+      (lastUserMessage.includes("gdynia") ||
+        lastUserMessage.includes("poland")))
+  ) {
+    if (lastUserMessage.includes("software")) {
+      return "🌐 Using cloud browser automation to find software engineering jobs in Gdynia...";
+    } else if (lastUserMessage.includes("poland")) {
+      return "🌐 Comprehensive browser search across job boards in Poland...";
+    } else {
+      return "🌐 Advanced browser automation extracting detailed job information...";
+    }
+  }
+
+  // Job search messages
+  if (
+    lastUserMessage.includes("software engineer") ||
+    lastUserMessage.includes("developer")
+  ) {
+    return "🔍 Scanning for software engineering opportunities...";
+  }
+  if (
+    lastUserMessage.includes("poland") ||
+    lastUserMessage.includes("gdynia")
+  ) {
+    return "📍 Searching job market in Poland...";
+  }
+  if (lastUserMessage.includes("job")) {
+    return "💼 Finding the perfect job matches...";
+  }
+
+  // CV/Resume generation
+  if (lastUserMessage.includes("cv") || lastUserMessage.includes("resume")) {
+    return "📝 Crafting your professional profile...";
+  }
+  if (lastUserMessage.includes("cover letter")) {
+    return "✍️ Writing your compelling cover letter...";
+  }
+
+  return undefined;
+}
+
+export const ChatContainer = ({
+  messages,
+  onSendMessage,
   onDeleteMessage,
   onEditMessage,
   onRegenerateMessage,
   user,
   onStopGeneration,
-  isLoading, 
+  isLoading,
   isHistoryLoading,
-  isConnected, 
-  error, 
-  className 
+  isConnected,
+  error,
+  className,
 }: ChatContainerProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   // Check if user is at the bottom
   const checkIfAtBottom = () => {
     if (!scrollContainerRef.current) return true;
-    
-    const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+
+    const { scrollTop, scrollHeight, clientHeight } =
+      scrollContainerRef.current;
     const threshold = 100; // pixels from bottom
     return scrollHeight - scrollTop - clientHeight < threshold;
   };
@@ -70,13 +242,13 @@ export const ChatContainer = ({
       setShowScrollToBottom(!isAtBottom && messages.length > 0);
     };
 
-    scrollContainer.addEventListener('scroll', handleScroll, { passive: true });
-    
+    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
+
     // Initial check
     handleScroll();
 
     return () => {
-      scrollContainer.removeEventListener('scroll', handleScroll);
+      scrollContainer.removeEventListener("scroll", handleScroll);
     };
   }, [messages]);
 
@@ -89,26 +261,30 @@ export const ChatContainer = ({
   }, [messages, isHistoryLoading]);
 
   const handleSelectJob = (job: any) => {
-    onSendMessage(`I'm interested in the ${job.title} position at ${job.company}.`);
+    onSendMessage(
+      `I'm interested in the ${job.title} position at ${job.company}.`
+    );
   };
 
   return (
-    <div className={cn(
-      "flex flex-col h-full bg-background relative overflow-hidden",
-      className
-    )}>
-      <div 
+    <div
+      className={cn(
+        "flex flex-col h-full bg-background relative overflow-hidden",
+        className
+      )}
+    >
+      <div
         ref={scrollContainerRef}
         className="flex-1 overflow-y-auto overflow-x-hidden pb-24 sm:pb-32 md:pb-36"
         style={{
           // Enhanced mobile scrolling
-          WebkitOverflowScrolling: 'touch',
-          overscrollBehavior: 'contain',
-          scrollBehavior: 'smooth',
+          WebkitOverflowScrolling: "touch",
+          overscrollBehavior: "contain",
+          scrollBehavior: "smooth",
           // Prevent horizontal scroll on mobile
-          touchAction: 'pan-y',
+          touchAction: "pan-y",
           // Better momentum scrolling on iOS
-          scrollSnapType: 'none',
+          scrollSnapType: "none",
         }}
       >
         {isHistoryLoading ? (
@@ -129,7 +305,13 @@ export const ChatContainer = ({
                 onRegenerate={onRegenerateMessage}
               />
             ))}
-            {isLoading && <LoadingMessage />}
+            {isLoading && (
+              <LoadingMessage
+                progressType={getProgressType(messages)}
+                customMessage={getCustomProgressMessage(messages)}
+                onCancel={onStopGeneration}
+              />
+            )}
             <div ref={messagesEndRef} className="h-4" />
           </div>
         ) : (
@@ -156,13 +338,13 @@ export const ChatContainer = ({
           </button>
         </div>
       )}
-      
-      <div 
-        className="fixed bottom-0 left-0 right-0 bg-transparent p-2 sm:p-3 md:p-4" 
-        style={{ 
-          paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))',
+
+      <div
+        className="fixed bottom-0 left-0 right-0 bg-transparent p-2 sm:p-3 md:p-4"
+        style={{
+          paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))",
           // Prevent input from being affected by scrolling
-          touchAction: 'none'
+          touchAction: "none",
         }}
       >
         <div className="max-w-2xl mx-auto">
@@ -185,4 +367,4 @@ export const ChatContainer = ({
       </div>
     </div>
   );
-}; 
+};

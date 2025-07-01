@@ -4158,7 +4158,7 @@ Your resume database record is now properly structured. Try clicking a download 
 
 Remember: You are an intelligent assistant with full access to {user_name}'s data. Use your tools confidently!"""
         
-        master_agent = create_master_agent(tools, user_documents, enhanced_system_prompt)
+            master_agent = create_master_agent(tools, user_documents, enhanced_system_prompt)
         log.info(f"Created master agent with user context for {user_name} (user {user.id})")
         
     except Exception as e:
@@ -4316,7 +4316,7 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                                 await websocket.send_text(agent_response)
                                 
                                 # Update chat history with LangChain format
-                                ai_message_id = str(uuid.uuid4())
+                            ai_message_id = str(uuid.uuid4())
                                 current_chat_history.append(AIMessage(id=ai_message_id, content=agent_response))
                                 
                                 # Save to database with proper page_id - DELETE OLD AI MESSAGE FIRST
@@ -4336,18 +4336,18 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                                     
                                     # Now save the new regenerated message
                                     new_message = ChatMessage(
-                                        id=ai_message_id,
-                                        user_id=user.id,
+                                id=ai_message_id,
+                                user_id=user.id,
                                         message=agent_response,
                                         is_user_message=False,
                                         page_id=regenerate_page_id
                                     )
                                     db.add(new_message)
-                                    await db.commit()
+                            await db.commit()
                                     log.info(f"🔄 Regenerated message saved to database with page_id: {regenerate_page_id}")
-                                except Exception as save_error:
+                        except Exception as save_error:
                                     log.error(f"🔄 Error saving regenerated message: {save_error}")
-                                    await db.rollback()
+                            await db.rollback()
                             else:
                                 log.error("🔄 Master agent returned invalid response format")
                                 await websocket.send_text("I apologize, but I encountered an issue generating a response. Please try again.")
