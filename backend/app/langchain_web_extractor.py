@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain.tools import Tool
 from langchain.schema import Document
-from langchain.vectorstores import FAISS
+from langchain_community.vectorstores import FAISS
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,17 @@ class LangChainWebExtractor:
             length_function=len,
         )
     
+    def _normalize_url(self, url: str) -> str:
+        """Normalize URL by adding protocol if missing."""
+        if not url:
+            return url
+        
+        # If URL doesn't start with http:// or https://, add https://
+        if not url.startswith(('http://', 'https://')):
+            return f"https://{url}"
+        
+        return url
+    
     async def extract_job_from_url(self, url: str, query: str = "") -> Optional[LightweightJobExtraction]:
         """
         Extract job information from URL using LangChain WebBrowser approach.
@@ -52,12 +63,14 @@ class LangChainWebExtractor:
             LightweightJobExtraction object or None if failed
         """
         try:
-            logger.info(f"Starting lightweight extraction for: {url}")
+            # Normalize URL - add protocol if missing
+            normalized_url = self._normalize_url(url)
+            logger.info(f"Starting lightweight extraction for: {normalized_url}")
             
             # Step 1: Fetch and clean content
-            raw_content = await self._fetch_content(url)
+            raw_content = await self._fetch_content(normalized_url)
             if not raw_content:
-                logger.warning(f"Failed to fetch content from {url}")
+                logger.warning(f"Failed to fetch content from {normalized_url}")
                 return None
             
             # Step 2: If query is provided, use vector search approach
@@ -68,7 +81,7 @@ class LangChainWebExtractor:
                 relevant_content = raw_content[:4000]  # Limit for LLM context
             
             # Step 3: Extract structured job information
-            job_extraction = await self._extract_job_details(url, relevant_content)
+            job_extraction = await self._extract_job_details(normalized_url, relevant_content)
             
             if job_extraction:
                 job_extraction.raw_content = raw_content[:1000]  # Store sample for debugging

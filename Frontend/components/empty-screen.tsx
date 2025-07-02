@@ -41,7 +41,7 @@ export function EmptyScreen({ onSendMessage }: EmptyScreenProps) {
           <Sparkles className="w-8 h-8 text-white" />
         </div>
         <h1 className="text-4xl font-bold bg-gradient-to-r from-foreground via-foreground/90 to-foreground/70 bg-clip-text text-transparent mb-4">
-          Hello there! 👋
+          Hello there!
         </h1>
         <p className="text-lg text-muted-foreground/80 leading-relaxed">
           I'm your AI-powered job search assistant. Ready to help you find
@@ -109,7 +109,7 @@ export function EmptyScreen({ onSendMessage }: EmptyScreenProps) {
       {/* Footer hint */}
       <div className="mt-8 text-center">
         <p className="text-sm text-muted-foreground/60">
-          Or type your own message below to get started ✨
+          Or type your own message below to get started
         </p>
       </div>
     </div>

@@ -33,19 +33,19 @@ interface AIProgressIndicatorProps {
 }
 
 const progressMessages = {
-  thinking: ["🧠 Thinking...", "💭 Processing...", "⚡ Almost done..."],
-  searching: ["🔍 Searching...", "📊 Finding jobs...", "🎯 Getting results..."],
-  generating: ["✍️ Writing...", "🎨 Personalizing...", "📝 Finishing up..."],
-  processing: ["⚙️ Processing...", "📋 Extracting...", "✨ Preparing..."],
-  downloading: ["📄 Formatting...", "🎨 Styling...", "💾 Ready..."],
+  thinking: ["Thinking...", "Processing...", "Almost done..."],
+  searching: ["Searching...", "Finding jobs...", "Getting results..."],
+  generating: ["Writing...", "Personalizing...", "Finishing up..."],
+  processing: ["Processing...", "Extracting...", "Preparing..."],
+  downloading: ["Formatting...", "Styling...", "Ready..."],
   browser_automation: [
-    "🌐 Opening...",
-    "🔍 Searching...",
-    "📋 Extracting...",
-    "⚡ Done...",
+    "Opening...",
+    "Searching...",
+    "Extracting...",
+    "Done...",
   ],
-  job_search: ["🔎 Searching...", "📊 Finding...", "🎯 Compiling..."],
-  linkedin_api: ["🔗 Connecting...", "📊 Querying...", "✨ Formatting..."],
+  job_search: ["Searching...", "Finding...", "Compiling..."],
+  linkedin_api: ["Connecting...", "Querying...", "Formatting..."],
 };
 
 const iconComponents = {

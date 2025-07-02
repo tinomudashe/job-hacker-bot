@@ -129,7 +129,7 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
 - **enhance_resume_section**: Improve specific CV sections
 
 ### Career Development:
-- **get_interview_preparation_guide**: Comprehensive interview prep for specific roles
+- **get_interview_preparation_guide**: Comprehensive interview prep for specific roles (supports job URLs!)
 - **get_salary_negotiation_advice**: Strategic guidance for compensation discussions
 - **create_career_development_plan**: Long-term career planning with actionable steps
 
@@ -145,7 +145,7 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
 - User searches jobs → "I found these opportunities! Would you like me to analyze your CV against these job requirements or help optimize it for ATS systems?"
 - User mentions career goals → "I can create a comprehensive career development plan to help you reach that goal. Would you also like me to analyze the skills gap?"
 - User asks about experience → "Based on your background, I can provide CV best practices for your industry or enhance specific sections of your resume."
-- User mentions interviews → "I can create a personalized interview preparation guide for you! What role are you interviewing for?"
+- User mentions interviews → "I can create a personalized interview preparation guide for you! What role are you interviewing for? You can also provide a job posting URL for more specific preparation."
 
 ## Job Search Guidelines:
 🔥 **CRITICAL**: When users ask for job searches, **IMMEDIATELY CALL THE SEARCH TOOLS!**
@@ -351,6 +351,8 @@ The generated cover letter will be automatically saved and available for downloa
 - **Document Questions**: "What's my experience?" → use enhanced_document_search("experience")
 - **CV Summary**: "Summarize my CV" → use enhanced_document_search("resume summary")
 - **Skills Query**: "What skills do I have?" → use enhanced_document_search("skills")
+- **Interview Prep with URL**: "Prepare me for this job: [LinkedIn URL]" → use get_interview_preparation_guide(job_url="[URL]")
+- **Interview Prep Manual**: "Interview guide for Software Engineer at Google" → use get_interview_preparation_guide(job_title="Software Engineer", company_name="Google")
 """
     else:
         # Fallback to basic system prompt
@@ -407,7 +409,7 @@ When users mention their CV, resume, documents, experience, skills, or any file 
 - **enhance_resume_section**: Improve specific CV sections (summary, experience, skills)
 
 ### Career Development:
-- **get_interview_preparation_guide**: Comprehensive interview prep for specific roles
+- **get_interview_preparation_guide**: Comprehensive interview prep for specific roles (supports job URLs!)
 - **get_salary_negotiation_advice**: Strategic guidance for compensation discussions  
 - **create_career_development_plan**: Long-term career planning with actionable steps
 
@@ -558,26 +560,7 @@ async def orchestrator_websocket(
         return any(domain in url.lower() for domain in complex_domains)
     
     async def _try_browser_extraction(url: str) -> tuple:
-        """Try browser-based extraction."""
-        try:
-            from app.browser_job_extractor import extract_job_from_url
-            
-            job_extraction = await extract_job_from_url(url)
-            if job_extraction:
-                job_details = type('JobDetails', (), {
-                    'title': job_extraction.title,
-                    'company': job_extraction.company,
-                    'location': job_extraction.location,
-                    'description': job_extraction.description,
-                    'requirements': job_extraction.requirements
-                })()
-                return job_details, "browser automation"
-        except Exception as e:
-            log.warning(f"Browser extraction failed: {e}")
-        return None, ""
-    
-    async def _try_lightweight_extraction(url: str) -> tuple:
-        """Try LangChain WebBrowser approach."""
+        """Try LangChain web browsing extraction."""
         try:
             from app.langchain_web_extractor import extract_job_lightweight
             
@@ -590,10 +573,30 @@ async def orchestrator_websocket(
                     'description': job_extraction.description,
                     'requirements': job_extraction.requirements
                 })()
-                return job_details, "lightweight web extraction"
+                return True, {
+                    "job_title": job_extraction.title,
+                    "company_name": job_extraction.company,
+                    "job_description": f"{job_extraction.description}\n\nRequirements: {job_extraction.requirements}"
+                }
+        except Exception as e:
+            log.warning(f"LangChain web extraction failed: {e}")
+        return False, None
+    
+    async def _try_lightweight_extraction(url: str) -> tuple:
+        """Try LangChain WebBrowser approach."""
+        try:
+            from app.langchain_web_extractor import extract_job_lightweight
+            
+            job_extraction = await extract_job_lightweight(url)
+            if job_extraction:
+                return True, {
+                    "job_title": job_extraction.title,
+                    "company_name": job_extraction.company,
+                    "job_description": f"{job_extraction.description}\n\nRequirements: {job_extraction.requirements}"
+                }
         except Exception as e:
             log.warning(f"Lightweight extraction failed: {e}")
-        return None, ""
+        return False, None
     
     async def _try_basic_extraction(url: str) -> tuple:
         """Try basic HTTP scraping."""
@@ -602,10 +605,14 @@ async def orchestrator_websocket(
             
             job_details = await scrape_job_url(url)
             if job_details:
-                return job_details, "basic HTTP scraping"
+                return True, {
+                    "job_title": job_details.title,
+                    "company_name": job_details.company,
+                    "job_description": f"{job_details.description}\n\nRequirements: {job_details.requirements}"
+                }
         except Exception as e:
             log.warning(f"Basic extraction failed: {e}")
-        return None, ""
+        return False, None
 
     # --- Helper & Tool Definitions ---
     async def get_or_create_resume():
@@ -1884,7 +1891,11 @@ Your resume now has {len(resume_data.certifications)} certifications."""
                 method_used = "URL Pattern Extraction"
             
             # Always create valid job details - never fail completely
-            if not job_details:
+            if (not job_details or 
+                not hasattr(job_details, 'title') or 
+                not hasattr(job_details, 'company') or 
+                not hasattr(job_details, 'description') or 
+                not hasattr(job_details, 'requirements')):
                 # Final fallback - ask user to provide details manually
                 return f"🔗 I can generate a cover letter for you! However, I need a bit more information since I couldn't automatically extract the job details from that URL.\n\n**Please tell me:**\n• Company name\n• Job title\n• Key requirements or skills mentioned\n\nThen I'll create a personalized cover letter using your profile data!"
             
@@ -2887,7 +2898,11 @@ OUTPUT THE COMPLETE, FULLY POPULATED TAILORED RESUME NOW:"""
             
             user_context = f"User: {user.first_name} {user.last_name}"
             if db_resume:
-                resume_data = ResumeData(**db_resume.data)
+                # Import and use the fix function from resume.py
+                from app.resume import fix_resume_data_structure
+                # Fix missing ID fields in existing data before validation
+                fixed_data = fix_resume_data_structure(db_resume.data)
+                resume_data = ResumeData(**fixed_data)
                 user_context += f"\nCurrent Resume Context: {resume_data.personalInfo.summary or 'No summary available'}"
                 user_context += f"\nSkills: {', '.join(resume_data.skills) if resume_data.skills else 'No skills listed'}"
             
@@ -3525,7 +3540,11 @@ Provide specific, actionable advice that someone can implement immediately."""
             
             user_skills = current_skills
             if not user_skills and db_resume:
-                resume_data = ResumeData(**db_resume.data)
+                # Import and use the fix function from resume.py
+                from app.resume import fix_resume_data_structure
+                # Fix missing ID fields in existing data before validation
+                fixed_data = fix_resume_data_structure(db_resume.data)
+                resume_data = ResumeData(**fixed_data)
                 user_skills = ', '.join(resume_data.skills) if resume_data.skills else ""
             
             from langchain_core.prompts import ChatPromptTemplate
@@ -3759,28 +3778,76 @@ Provide specific, technical advice that ensures maximum ATS compatibility."""
 
     @tool
     async def get_interview_preparation_guide(
-        job_title: str,
+        job_title: str = "",
         company_name: str = "",
-        interview_type: str = "general"
+        interview_type: str = "general",
+        job_url: str = ""
     ) -> str:
         """Get comprehensive interview preparation guidance based on your CV and target role.
         
         Args:
-            job_title: Position you're interviewing for
-            company_name: Target company (optional)
+            job_title: Position you're interviewing for (optional if job_url provided)
+            company_name: Target company (optional if job_url provided)
             interview_type: Type of interview (behavioral, technical, panel, phone, video)
+            job_url: URL of the job posting to analyze (optional, will extract job details)
         
         Returns:
             Personalized interview preparation guide with questions and strategies
         """
         try:
+            # Extract job details from URL if provided
+            extracted_job_title = job_title
+            extracted_company_name = company_name
+            job_description = ""
+            
+            if job_url:
+                log.info(f"Extracting job details from URL: {job_url}")
+                try:
+                    extraction_method = _choose_extraction_method(job_url)
+                    log.info(f"Using extraction method: {extraction_method}")
+                    
+                    if extraction_method == "browser":
+                        success, extracted_data = await _try_browser_extraction(job_url)
+                        if success and extracted_data:
+                            extracted_job_title = extracted_data.get("job_title", job_title)
+                            extracted_company_name = extracted_data.get("company_name", company_name)
+                            job_description = extracted_data.get("job_description", "")
+                            log.info(f"Successfully extracted job details via browser: {extracted_job_title} at {extracted_company_name}")
+                        else:
+                            log.warning("Browser extraction failed, falling back to basic extraction")
+                            success, extracted_data = await _try_basic_extraction(job_url)
+                            if success and extracted_data:
+                                extracted_job_title = extracted_data.get("job_title", job_title)
+                                extracted_company_name = extracted_data.get("company_name", company_name)
+                                job_description = extracted_data.get("job_description", "")
+                    else:
+                        success, extracted_data = await _try_lightweight_extraction(job_url)
+                        if success and extracted_data:
+                            extracted_job_title = extracted_data.get("job_title", job_title)
+                            extracted_company_name = extracted_data.get("company_name", company_name)
+                            job_description = extracted_data.get("job_description", "")
+                        
+                except Exception as e:
+                    log.warning(f"URL extraction failed: {e}, using provided job details")
+            
+            # Use extracted details or fallback to provided ones
+            final_job_title = extracted_job_title or job_title
+            final_company_name = extracted_company_name or company_name
+            
+            if not final_job_title:
+                return "❌ Please provide either a job title or a job URL to generate interview preparation guide."
+            
             # Get user's CV data for personalized prep
             result = await db.execute(select(Resume).where(Resume.user_id == user.id))
             db_resume = result.scalars().first()
             
             user_context = f"User: {user.first_name} {user.last_name}"
             if db_resume:
-                resume_data = ResumeData(**db_resume.data)
+                # Import and use the fix function from resume.py
+                from app.resume import fix_resume_data_structure
+                # Fix missing ID fields in existing data before validation
+                fixed_data = fix_resume_data_structure(db_resume.data)
+                resume_data = ResumeData(**fixed_data)
                 user_context += f"\nBackground: {resume_data.personalInfo.summary or 'No summary available'}"
                 user_context += f"\nKey Skills: {', '.join(resume_data.skills[:5]) if resume_data.skills else 'No skills listed'}"
                 if resume_data.experience:
@@ -3796,6 +3863,7 @@ USER CONTEXT: {user_context}
 TARGET ROLE: {job_title}
 COMPANY: {company_name}
 INTERVIEW TYPE: {interview_type}
+JOB DESCRIPTION: {job_description}
 
 Create a detailed interview preparation guide:
 
@@ -3895,14 +3963,91 @@ Provide specific, actionable advice tailored to this role and the user's backgro
             
             guide = await chain.ainvoke({
                 "user_context": user_context,
-                "job_title": job_title,
-                "company_name": company_name or "the target company",
-                "interview_type": interview_type
+                "job_title": final_job_title,
+                "company_name": final_company_name or "the target company",
+                "interview_type": interview_type,
+                "job_description": job_description or "No specific job description provided"
             })
+            
+            # Generate structured Q&A pairs for flashcards
+            qa_prompt = ChatPromptTemplate.from_template(
+                """Generate 10 realistic interview questions and answers for this role, including CV-specific questions.
+
+USER CONTEXT: {user_context}
+TARGET ROLE: {job_title}
+COMPANY: {company_name}
+INTERVIEW TYPE: {interview_type}
+JOB DESCRIPTION: {job_description}
+
+**CRITICAL: Analyze the user's CV/background and the job description to create questions that reference their SPECIFIC experience:**
+
+Generate exactly 10 interview questions with sample answers. Return as JSON array:
+[
+  {{
+    "question": "Tell me about yourself.",
+    "answer": "Brief sample answer that the candidate could reference or build upon"
+  }},
+  ...
+]
+
+Include this mix:
+- 2 CV-specific questions (reference their actual experience, career transitions, specific technologies/companies)
+- 2 behavioral questions (STAR method opportunities)
+- 3 technical/role-specific questions
+- 2 situational questions
+- 1 company/culture fit question
+
+**CV-SPECIFIC QUESTION EXAMPLES (adapt to their actual background):**
+- "I see you were doing freelance work while working full-time at [Company]. How did you manage both responsibilities?"
+- "You used [Technology] at [Company]. Can you walk me through how you implemented it?"
+- "I notice you transitioned from [Previous Role] to [Current Role]. What motivated this change?"
+- "You worked at [Company] for [Duration]. What was your biggest achievement there?"
+- "I see you have experience with [Specific Skill/Technology]. How did you learn it and apply it?"
+- "You've worked in both [Industry A] and [Industry B]. How do those experiences complement each other?"
+
+**IMPORTANT RULES:**
+1. Reference ACTUAL companies, technologies, roles from their background
+2. Ask about career transitions, overlapping roles, technology choices
+3. Question specific timeframes, gaps, or interesting patterns in their CV
+4. Make questions sound like a real interviewer who studied their resume
+5. Include follow-up style questions that dig deeper into their experience
+
+Make all questions realistic for this specific role and company. Keep sample answers concise but helpful.
+
+Return ONLY valid JSON array - no additional text or formatting."""
+            )
+            
+            qa_chain = qa_prompt | llm | StrOutputParser()
+            
+            qa_json = await qa_chain.ainvoke({
+                "user_context": user_context,
+                "job_title": final_job_title,
+                "company_name": final_company_name or "the target company",
+                "interview_type": interview_type,
+                "job_description": job_description or "No specific job description provided"
+            })
+            
+            # Parse the Q&A JSON
+            try:
+                # Clean the JSON response - remove markdown code blocks if present
+                cleaned_json = qa_json.strip()
+                if cleaned_json.startswith('```json'):
+                    cleaned_json = cleaned_json[7:]  # Remove ```json
+                if cleaned_json.startswith('```'):
+                    cleaned_json = cleaned_json[3:]   # Remove ```
+                if cleaned_json.endswith('```'):
+                    cleaned_json = cleaned_json[:-3]  # Remove trailing ```
+                
+                qa_pairs = json.loads(cleaned_json.strip())
+            except json.JSONDecodeError:
+                # Fallback if JSON parsing fails
+                qa_pairs = []
+                log.warning(f"Failed to parse Q&A JSON: {qa_json[:200]}...")
             
             return f"""## 🎯 **Interview Preparation Guide**
 
-**Role:** {job_title} | **Company:** {company_name or 'Target Company'} | **Type:** {interview_type.title()}
+**Role:** {final_job_title} | **Company:** {final_company_name or 'Target Company'} | **Type:** {interview_type.title()}
+{f"**🔗 Source:** {job_url}" if job_url else ""}
 
 {guide}
 
@@ -3924,7 +4069,17 @@ Provide specific, actionable advice tailored to this role and the user's backgro
 **🔗 Next Steps:**
 - `enhance my resume section` - Align CV with interview talking points
 - `generate cover letter` - Practice articulating your interest
-- `get salary negotiation tips` - Prepare for compensation discussions"""
+- `get salary negotiation tips` - Prepare for compensation discussions
+
+[INTERVIEW_FLASHCARDS_AVAILABLE]
+📝 **Practice with AI-powered flashcards** - Click the brain icon to practice interview questions with voice/text responses and get detailed feedback on tone, correctness, and confidence.
+
+<!--FLASHCARD_DATA:{json.dumps(qa_pairs)}-->
+
+---
+**Job Context:** {final_job_title} at {final_company_name or 'Target Company'}
+**Interview Type:** {interview_type}
+**Preparation Content:** {guide[:500]}..."""
             
         except Exception as e:
             log.error(f"Error creating interview preparation guide: {e}", exc_info=True)
@@ -4127,7 +4282,11 @@ Provide specific, actionable negotiation advice with realistic expectations."""
             
             user_context = f"User: {user.first_name} {user.last_name}"
             if db_resume:
-                resume_data = ResumeData(**db_resume.data)
+                # Import and use the fix function from resume.py
+                from app.resume import fix_resume_data_structure
+                # Fix missing ID fields in existing data before validation
+                fixed_data = fix_resume_data_structure(db_resume.data)
+                resume_data = ResumeData(**fixed_data)
                 user_context += f"\nCurrent Background: {resume_data.personalInfo.summary or 'No summary available'}"
                 user_context += f"\nSkills: {', '.join(resume_data.skills[:8]) if resume_data.skills else 'No skills listed'}"
                 if resume_data.experience:
