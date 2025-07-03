@@ -97,7 +97,7 @@ export function AIProgressIndicator({
       </div>
 
       {/* Progress text with better typography */}
-      <span className="text-sm text-muted-foreground/80 font-medium flex-1">
+      <span className="text-base sm:text-base text-muted-foreground/80 font-medium flex-1 md:text-lg">
         {currentMessage}
       </span>
 

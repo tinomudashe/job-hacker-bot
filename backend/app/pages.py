@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import delete
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 
 from app.db import get_db
@@ -15,6 +15,7 @@ class PageResponse(BaseModel):
     id: str
     title: str
     created_at: str
+    last_opened_at: Optional[str] = None
 
 class CreatePageRequest(BaseModel):
     first_message: str
@@ -42,7 +43,8 @@ async def create_page(
     return PageResponse(
         id=new_page.id, 
         title=new_page.title,
-        created_at=new_page.created_at.isoformat()
+        created_at=new_page.created_at.isoformat(),
+        last_opened_at=new_page.last_opened_at.isoformat() if new_page.last_opened_at else None
     )
 
 @router.get("/pages", response_model=List[PageResponse])
@@ -61,7 +63,8 @@ async def get_pages(
         PageResponse(
             id=page.id, 
             title=page.title,
-            created_at=page.created_at.isoformat()
+            created_at=page.created_at.isoformat(),
+            last_opened_at=page.last_opened_at.isoformat() if page.last_opened_at else None
         ) for page in pages
     ]
 
@@ -82,7 +85,8 @@ async def get_most_recent_page(
     return PageResponse(
         id=page.id, 
         title=page.title,
-        created_at=page.created_at.isoformat()
+        created_at=page.created_at.isoformat(),
+        last_opened_at=page.last_opened_at.isoformat() if page.last_opened_at else None
     )
 
 @router.delete("/pages/{page_id}")

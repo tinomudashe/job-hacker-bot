@@ -36,11 +36,8 @@ const AlertDialogContent = React.forwardRef<
       ref={ref}
       className={cn(
         "fixed left-[50%] top-[50%] z-50 grid w-full max-w-md translate-x-[-50%] translate-y-[-50%] gap-6",
-        "rounded-3xl border border-gray-200/40 dark:border-gray-700/40",
-        "backdrop-blur-xl bg-gradient-to-br from-white/95 via-white/90 to-gray-50/85",
-        "dark:from-gray-900/95 dark:via-gray-900/90 dark:to-gray-950/85",
-        "p-6 shadow-2xl shadow-black/20 dark:shadow-black/40",
-        "duration-300 transition-all",
+        "rounded-3xl bg-background/60 backdrop-blur-xl backdrop-saturate-150 border-white/8 shadow-2xl",
+        "p-6 duration-300 transition-all",
         "data-[state=open]:animate-in data-[state=closed]:animate-out",
         "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
         "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",

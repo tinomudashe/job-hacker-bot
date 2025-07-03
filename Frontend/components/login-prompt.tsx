@@ -26,12 +26,12 @@ import { Logo } from "./ui/logo";
 
 export function LoginPrompt() {
   return (
-    <div className="relative min-h-screen bg-white dark:bg-gray-950 overflow-hidden">
+    <div className="relative min-h-screen bg-white dark:bg-black overflow-hidden">
       {/* Sophisticated Background Grid */}
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,#f1f5f9_1px,transparent_1px),linear-gradient(to_bottom,#f1f5f9_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_110%)] dark:bg-[linear-gradient(to_right,#0f172a_1px,transparent_1px),linear-gradient(to_bottom,#0f172a_1px,transparent_1px)]" />
+      <div className="fixed inset-0 top-0 left-0 right-0 bottom-0 bg-[linear-gradient(to_right,#f1f5f9_1px,transparent_1px),linear-gradient(to_bottom,#f1f5f9_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_110%)] dark:bg-[linear-gradient(to_right,#0f172a_1px,transparent_1px),linear-gradient(to_bottom,#0f172a_1px,transparent_1px)]" />
 
       {/* Hero Section */}
-      <section className="relative px-6 pt-24 pb-16 sm:pt-32 sm:pb-24 lg:px-8">
+      <section className="relative px-6 pt-8 pb-16 sm:pt-12 sm:pb-24 lg:px-8">
         <div className="mx-auto max-w-7xl">
           {/* Funding Announcement Banner */}
           <div className="flex justify-center mb-8">
@@ -488,7 +488,7 @@ export function LoginPrompt() {
       </section>
 
       {/* Final CTA */}
-      <section className="relative px-6 py-24 bg-gray-900 dark:bg-gray-950">
+      <section className="relative px-6 py-24 bg-gray-900 dark:bg-black">
         <div className="mx-auto max-w-4xl text-center">
           <h2 className="text-4xl sm:text-5xl font-bold text-white mb-6">
             Ready to accelerate your career?

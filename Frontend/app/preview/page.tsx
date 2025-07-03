@@ -586,14 +586,7 @@ export default function PreviewPage() {
               <div className="flex items-center gap-2">
                 <ThemeToggle />
                 <SignedIn>
-                  <UserButton
-                    appearance={{
-                      elements: {
-                        avatarBox:
-                          "h-8 w-8 lg:h-9 lg:w-9 rounded-xl shadow-md hover:shadow-lg transition-all duration-200",
-                      },
-                    }}
-                  />
+                  <UserButton />
                 </SignedIn>
               </div>
             </header>
@@ -649,14 +642,7 @@ export default function PreviewPage() {
                   </SignInButton>
                 </SignedOut>
                 <SignedIn>
-                  <UserButton
-                    appearance={{
-                      elements: {
-                        avatarBox:
-                          "h-8 w-8 lg:h-9 lg:w-9 rounded-xl shadow-md hover:shadow-lg transition-all duration-200",
-                      },
-                    }}
-                  />
+                  <UserButton />
                 </SignedIn>
               </div>
             </header>
@@ -831,14 +817,7 @@ export default function PreviewPage() {
               <div className="h-6 w-px bg-border/50 mx-1" />
               <ThemeToggle />
               <SignedIn>
-                <UserButton
-                  appearance={{
-                    elements: {
-                      avatarBox:
-                        "h-8 w-8 lg:h-9 lg:w-9 rounded-xl shadow-md hover:shadow-lg transition-all duration-200",
-                    },
-                  }}
-                />
+                <UserButton />
               </SignedIn>
             </div>
 
@@ -862,14 +841,7 @@ export default function PreviewPage() {
               </Button>
               <ThemeToggle />
               <SignedIn>
-                <UserButton
-                  appearance={{
-                    elements: {
-                      avatarBox:
-                        "h-7 w-7 sm:h-8 sm:w-8 rounded-lg sm:rounded-xl shadow-md hover:shadow-lg transition-all duration-200",
-                    },
-                  }}
-                />
+                <UserButton />
               </SignedIn>
             </div>
           </header>

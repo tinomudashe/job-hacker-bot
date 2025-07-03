@@ -11,6 +11,7 @@ from sqlalchemy import (
     func,
     Table,
     JSON,
+    Index,
 )
 from sqlalchemy.orm import relationship, declarative_base, Mapped, mapped_column
 from sqlalchemy.ext.asyncio import AsyncAttrs
@@ -26,12 +27,19 @@ def generate_uuid():
 class Page(Base):
     __tablename__ = "pages"
     id = Column(String, primary_key=True, default=generate_uuid)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     title = Column(String, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    last_opened_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
     user = relationship("User", back_populates="pages")
     chat_messages = relationship("ChatMessage", back_populates="page", cascade="all, delete-orphan")
+
+    # Add composite index for user_id + last_opened_at for efficient page listing
+    __table_args__ = (
+        Index('ix_pages_user_last_opened', 'user_id', 'last_opened_at'),
+        Index('ix_pages_user_created', 'user_id', 'created_at'),
+    )
 
 class User(Base):
     __tablename__ = "users"
@@ -105,15 +113,22 @@ class Notification(Base):
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
     id = Column(String, primary_key=True, default=generate_uuid)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
-    page_id = Column(String, ForeignKey("pages.id"), nullable=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    page_id = Column(String, ForeignKey("pages.id"), nullable=True, index=True)
     message = Column(Text, nullable=False)
-    is_user_message = Column(Boolean, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_user_message = Column(Boolean, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     deleted_at = Column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User", back_populates="chat_messages")
     page = relationship("Page", back_populates="chat_messages")
+
+    # Add composite indexes for efficient message queries
+    __table_args__ = (
+        Index('ix_chat_messages_user_page_created', 'user_id', 'page_id', 'created_at'),
+        Index('ix_chat_messages_page_created', 'page_id', 'created_at'),
+        Index('ix_chat_messages_user_created', 'user_id', 'created_at'),
+    )
 
 class Subscription(Base):
     __tablename__ = "subscriptions"

@@ -4,8 +4,8 @@ import { cn } from "@/lib/utils";
 import { AlertCircle, ChevronDown, Loader2 } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { EmptyScreen } from "../empty-screen";
-import { ChatInput } from "./chat-input";
 import { ChatMessage } from "./chat-message";
+import { ChatTextarea } from "./chat-textarea";
 import { LoadingMessage } from "./loading-message";
 
 interface Message {
@@ -253,7 +253,7 @@ export const ChatContainer = ({
       )}
     >
       <div
-        className="flex-1 overflow-y-auto overflow-x-hidden pb-24 sm:pb-32 md:pb-36"
+        className="flex-1 overflow-y-auto overflow-x-hidden pb-32 sm:pb-40 md:pb-44"
         style={{
           // Enhanced mobile scrolling
           WebkitOverflowScrolling: "touch",
@@ -314,24 +314,17 @@ export const ChatContainer = ({
               <button
                 onClick={scrollToBottom}
                 className={cn(
-                  "flex items-center justify-center w-10 h-10 rounded-2xl transition-all duration-300",
-                  // Enhanced glassmorphism styling
-                  "bg-gradient-to-br from-background/80 via-background/60 to-background/40",
-                  "hover:from-background/90 hover:via-background/80 hover:to-background/60",
-                  "backdrop-blur-2xl border border-white/20 dark:border-white/10",
-                  "hover:border-white/40 dark:hover:border-white/20",
-                  "shadow-2xl shadow-black/10 hover:shadow-black/20",
-                  "dark:shadow-white/5 dark:hover:shadow-white/10",
+                  "flex items-center justify-center w-8 h-8 rounded-xl transition-all duration-200",
+                  "bg-background/60 backdrop-blur-xl backdrop-saturate-150",
+                  "border border-white/8 hover:border-white/12",
+                  "shadow-2xl",
                   "text-muted-foreground hover:text-foreground",
-                  "hover:scale-110 active:scale-95",
-                  // Glass reflection effect
-                  "relative overflow-hidden",
-                  "before:absolute before:inset-0 before:bg-gradient-to-br before:from-white/10 before:to-transparent before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-300"
+                  "hover:scale-105 active:scale-95"
                 )}
                 title="Scroll to latest message - Ctrl+End"
                 aria-label="Scroll to bottom"
               >
-                <ChevronDown className="w-4 h-4 relative z-10" />
+                <ChevronDown className="w-3 h-3" />
               </button>
             </div>
           )}
@@ -344,7 +337,7 @@ export const ChatContainer = ({
               </div>
             </div>
           )}
-          <ChatInput
+          <ChatTextarea
             onSendMessage={onSendMessage}
             onStopGeneration={onStopGeneration}
             isConnected={isConnected}

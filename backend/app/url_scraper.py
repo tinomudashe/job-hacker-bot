@@ -122,7 +122,15 @@ class URLScraper:
             
             # Use readability to extract main content
             doc = Document(response.text)
-            return doc.content()
+            content = doc.content()
+            
+            # Check if content is actually a string and not empty
+            if isinstance(content, str) and content.strip():
+                return content
+            else:
+                logger.warning(f"Readability returned invalid content type for {url}: {type(content)}")
+                # Fallback to raw HTML if readability fails
+                return response.text
             
         except Exception as e:
             logger.warning(f"HTTP fetch failed for {url}: {e}")
@@ -152,9 +160,17 @@ class URLScraper:
             loop = asyncio.get_event_loop()
             content = await loop.run_in_executor(None, _selenium_fetch)
             
-            # Use readability to extract main content
+            # Use readability to extract main content with error handling
             doc = Document(content)
-            return doc.content()
+            extracted_content = doc.content()
+            
+            # Check if content is actually a string and not empty
+            if isinstance(extracted_content, str) and extracted_content.strip():
+                return extracted_content
+            else:
+                logger.warning(f"Selenium+Readability returned invalid content type for {url}: {type(extracted_content)}")
+                # Fallback to raw content if readability fails
+                return content
             
         except Exception as e:
             logger.warning(f"Selenium fetch failed for {url}: {e}")

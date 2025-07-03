@@ -753,9 +753,9 @@ export function ChatMessage({
     ];
 
     const preparationContentPatterns = [
-      /\*\*Preparation Content:\*\* (.+?)(?:\.\.\.|$)/is,
-      /Preparation Content:\s*(.+?)(?:\.\.\.|$)/is,
-      /interview preparation guide.*?:\s*(.+?)(?:\.\.\.|$)/is,
+      /\*\*Preparation Content:\*\* ([\s\S]+?)(?:\.\.\.|$)/i,
+      /Preparation Content:\s*([\s\S]+?)(?:\.\.\.|$)/i,
+      /interview preparation guide[\s\S]*?:\s*([\s\S]+?)(?:\.\.\.|$)/i,
     ];
 
     let jobTitle = "Interview Position";
@@ -823,7 +823,7 @@ export function ChatMessage({
     // Extract flashcard data from HTML comment
     let flashcardData: Array<{ question: string; answer: string }> = [];
     const flashcardMatch = plainTextContent.match(
-      /<!--FLASHCARD_DATA:(.+?)-->/s
+      /<!--FLASHCARD_DATA:([\s\S]+?)-->/
     );
     if (flashcardMatch) {
       try {
@@ -1570,8 +1570,8 @@ export function ChatMessage({
                 : cn(
                     "bg-white/95 text-foreground border-slate-200/70 shadow-slate-900/8",
                     "hover:bg-white hover:shadow-lg hover:shadow-slate-900/12 hover:border-slate-300/80",
-                    "dark:bg-slate-800/90 dark:border-slate-600/50 dark:shadow-black/15",
-                    "dark:hover:bg-slate-800/95 dark:hover:border-slate-500/60 dark:hover:shadow-black/20"
+                    "dark:bg-black/90 dark:border-gray-600/50 dark:shadow-black/15",
+                    "dark:hover:bg-black/95 dark:hover:border-gray-500/60 dark:hover:shadow-black/20"
                   ),
               isEditing &&
                 "ring-2 ring-blue-500/60 shadow-blue-500/30 border-blue-400/40"
@@ -1779,13 +1779,13 @@ export function ChatMessage({
                     className={cn(
                       "prose prose-sm dark:prose-invert max-w-none relative z-10 break-words",
                       isUser ? "prose-invert" : "",
-                      // Enhanced mobile typography (1.5x bigger font sizes)
-                      "text-xl leading-[1.7] prose-p:text-xl prose-p:leading-[1.7] prose-p:mb-4 prose-p:break-words",
-                      "prose-headings:text-2xl prose-headings:mb-4 prose-headings:mt-0 prose-headings:font-semibold prose-headings:break-words prose-headings:leading-[1.4]",
-                      "prose-ul:text-xl prose-ul:mb-4 prose-ol:text-xl prose-ol:mb-4 prose-ul:mt-2 prose-ol:mt-2",
-                      "prose-li:text-xl prose-li:mb-2 prose-li:leading-[1.7] prose-li:break-words",
-                      "prose-strong:text-xl prose-em:text-xl prose-code:text-base",
-                      // Enhanced desktop typography
+                      // Standard mobile typography (14px - typical for mobile web apps)
+                      "text-sm leading-6 prose-p:text-sm prose-p:leading-6 prose-p:mb-3 prose-p:break-words",
+                      "prose-headings:text-base prose-headings:mb-3 prose-headings:mt-0 prose-headings:font-semibold prose-headings:break-words prose-headings:leading-7",
+                      "prose-ul:text-sm prose-ul:mb-3 prose-ol:text-sm prose-ol:mb-3 prose-ul:mt-2 prose-ol:mt-2",
+                      "prose-li:text-sm prose-li:mb-1 prose-li:leading-6 prose-li:break-words",
+                      "prose-strong:text-sm prose-em:text-sm prose-code:text-xs",
+                      // Desktop typography (16px - standard for desktop)
                       "sm:text-base sm:leading-7 sm:prose-p:text-base sm:prose-p:leading-7 sm:prose-p:mb-4",
                       "sm:prose-headings:text-lg sm:prose-headings:mb-4 sm:prose-headings:leading-8",
                       "sm:prose-ul:text-base sm:prose-ul:mb-4 sm:prose-ol:text-base sm:prose-ol:mb-4 sm:prose-ul:mt-2 sm:prose-ol:mt-2",
@@ -1793,8 +1793,8 @@ export function ChatMessage({
                       "sm:prose-strong:text-base sm:prose-em:text-base sm:prose-code:text-sm",
                       "prose-strong:font-semibold prose-em:italic",
                       "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-                      "prose-ul:space-y-1 prose-ol:space-y-1 sm:prose-ul:space-y-2 sm:prose-ol:space-y-2",
-                      "[&>*+*]:mt-2 sm:[&>*+*]:mt-4",
+                      "prose-ul:space-y-2 prose-ol:space-y-2 sm:prose-ul:space-y-2 sm:prose-ol:space-y-2",
+                      "[&>*+*]:mt-3 sm:[&>*+*]:mt-4",
                       "overflow-wrap-anywhere hyphens-auto word-break-break-word",
                       "w-auto min-w-0 max-w-full",
                       // Force URL wrapping
@@ -1804,7 +1804,7 @@ export function ChatMessage({
                         ? "prose-a:text-white prose-a:no-underline prose-a:font-medium hover:prose-a:underline prose-a:decoration-white/80"
                         : "prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline prose-a:font-medium hover:prose-a:underline prose-a:decoration-blue-600/80 dark:prose-a:decoration-blue-400/80",
                       // Enhanced code styling
-                      "prose-code:bg-gray-100 dark:prose-code:bg-gray-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:font-mono"
+                      "prose-code:bg-gray-100 dark:prose-code:bg-gray-800 prose-code:px-1.5 prose-code:py-1 prose-code:rounded prose-code:font-mono"
                     )}
                   >
                     <MessageContent content={displayContent} isUser={isUser} />
@@ -1818,13 +1818,13 @@ export function ChatMessage({
                 className={cn(
                   "prose prose-sm dark:prose-invert max-w-none relative z-10 break-words",
                   isUser ? "prose-invert" : "",
-                  // Enhanced mobile typography (1.5x bigger font sizes)
-                  "text-xl leading-[1.7] prose-p:text-xl prose-p:leading-[1.7] prose-p:mb-4 prose-p:break-words",
-                  "prose-headings:text-2xl prose-headings:mb-4 prose-headings:mt-0 prose-headings:font-semibold prose-headings:break-words prose-headings:leading-[1.4]",
-                  "prose-ul:text-xl prose-ul:mb-4 prose-ol:text-xl prose-ol:mb-4 prose-ul:mt-2 prose-ol:mt-2",
-                  "prose-li:text-xl prose-li:mb-2 prose-li:leading-[1.7] prose-li:break-words",
-                  "prose-strong:text-xl prose-em:text-xl prose-code:text-base",
-                  // Enhanced desktop typography
+                  // Standard mobile typography (14px - typical for mobile web apps)
+                  "text-sm leading-6 prose-p:text-sm prose-p:leading-6 prose-p:mb-3 prose-p:break-words",
+                  "prose-headings:text-base prose-headings:mb-3 prose-headings:mt-0 prose-headings:font-semibold prose-headings:break-words prose-headings:leading-7",
+                  "prose-ul:text-sm prose-ul:mb-3 prose-ol:text-sm prose-ol:mb-3 prose-ul:mt-2 prose-ol:mt-2",
+                  "prose-li:text-sm prose-li:mb-1 prose-li:leading-6 prose-li:break-words",
+                  "prose-strong:text-sm prose-em:text-sm prose-code:text-xs",
+                  // Desktop typography (16px - standard for desktop)
                   "sm:text-base sm:leading-7 sm:prose-p:text-base sm:prose-p:leading-7 sm:prose-p:mb-4",
                   "sm:prose-headings:text-lg sm:prose-headings:mb-4 sm:prose-headings:leading-8",
                   "sm:prose-ul:text-base sm:prose-ul:mb-4 sm:prose-ol:text-base sm:prose-ol:mb-4 sm:prose-ul:mt-2 sm:prose-ol:mt-2",
@@ -1832,8 +1832,8 @@ export function ChatMessage({
                   "sm:prose-strong:text-base sm:prose-em:text-base sm:prose-code:text-sm",
                   "prose-strong:font-semibold prose-em:italic",
                   "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-                  "prose-ul:space-y-1 prose-ol:space-y-1 sm:prose-ul:space-y-2 sm:prose-ol:space-y-2",
-                  "[&>*+*]:mt-2 sm:[&>*+*]:mt-4",
+                  "prose-ul:space-y-2 prose-ol:space-y-2 sm:prose-ul:space-y-2 sm:prose-ol:space-y-2",
+                  "[&>*+*]:mt-3 sm:[&>*+*]:mt-4",
                   "overflow-wrap-anywhere hyphens-auto word-break-break-word",
                   "w-auto min-w-0 max-w-full",
                   // Force URL wrapping
@@ -1843,7 +1843,7 @@ export function ChatMessage({
                     ? "prose-a:text-white prose-a:no-underline prose-a:font-medium hover:prose-a:underline prose-a:decoration-white/80"
                     : "prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline prose-a:font-medium hover:prose-a:underline prose-a:decoration-blue-600/80 dark:prose-a:decoration-blue-400/80",
                   // Enhanced code styling
-                  "prose-code:bg-gray-100 dark:prose-code:bg-gray-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:font-mono"
+                  "prose-code:bg-gray-100 dark:prose-code:bg-gray-800 prose-code:px-1.5 prose-code:py-1 prose-code:rounded prose-code:font-mono"
                 )}
               >
                 <MessageContent content={displayContent} isUser={isUser} />
@@ -1899,7 +1899,7 @@ export function ChatMessage({
             )}
           >
             {isEditing ? (
-              <div className="flex items-center gap-2 bg-white/95 dark:bg-slate-800/95 rounded-2xl px-4 py-3 shadow-lg border border-white/60 dark:border-slate-700/70">
+              <div className="flex items-center gap-2 bg-white/95 dark:bg-black/95 rounded-2xl px-4 py-3 shadow-lg border border-white/60 dark:border-gray-700/70">
                 <Button
                   onClick={handleSaveEdit}
                   size="sm"
@@ -1919,7 +1919,7 @@ export function ChatMessage({
                 </Button>
               </div>
             ) : (
-              <div className="flex items-center gap-0.5 sm:gap-1 bg-white/95 dark:bg-slate-800/95 rounded-2xl px-2 sm:px-3 py-1.5 sm:py-2 shadow-lg border border-white/50 dark:border-slate-700/60">
+              <div className="flex items-center gap-0.5 sm:gap-1 bg-white/95 dark:bg-black/95 rounded-2xl px-2 sm:px-3 py-1.5 sm:py-2 shadow-lg border border-white/50 dark:border-gray-700/60">
                 {!isUser && (
                   <div className="relative group/audio">
                     <button

@@ -25,9 +25,15 @@ class ChatMessageResponse(BaseModel):
     @classmethod
     def from_orm_model(cls, orm_model: ChatMessage):
         try:
+            # First, try to load the message as JSON
             content = json.loads(orm_model.message)
         except (json.JSONDecodeError, TypeError):
+            # If it fails, it's a plain string
             content = orm_model.message
+        
+        # If the content is a dictionary, serialize it back to a JSON string for the frontend
+        if isinstance(content, dict):
+            content = json.dumps(content)
         
         return cls(
             id=orm_model.id,
@@ -74,11 +80,14 @@ async def get_chats(
 @router.get("/messages", response_model=List[ChatMessageResponse])
 async def get_messages(
     page_id: Optional[str] = Query(None, description="Filter messages by page ID"),
+    limit: int = Query(50, ge=1, le=500, description="Maximum number of messages to return"),
+    offset: int = Query(0, ge=0, description="Number of messages to skip"),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Retrieve chat messages for the current user, optionally filtered by page.
+    Supports pagination for better performance with large conversations.
     """
     query = select(ChatMessage).where(ChatMessage.user_id == current_user.id)
     
@@ -88,7 +97,8 @@ async def get_messages(
         # If no page_id specified, get messages without a page (legacy behavior)
         query = query.where(ChatMessage.page_id.is_(None))
     
-    query = query.order_by(ChatMessage.created_at.asc())
+    # Add pagination and ordering
+    query = query.order_by(ChatMessage.created_at.asc()).offset(offset).limit(limit)
     
     result = await db.execute(query)
     messages = result.scalars().all()

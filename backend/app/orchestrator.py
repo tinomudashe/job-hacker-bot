@@ -7,6 +7,10 @@ import uuid
 import json
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
+from sqlalchemy import update, func
+
+load_dotenv()
 
 # Set Google Cloud environment variables if not already set
 if not os.getenv('GOOGLE_CLOUD_PROJECT'):
@@ -32,9 +36,11 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
+from langsmith import Client
+from langchain.callbacks import LangChainTracer
 
 from app.db import get_db
-from app.models_db import User, ChatMessage, Resume, Document, GeneratedCoverLetter
+from app.models_db import User, ChatMessage, Resume, Document, GeneratedCoverLetter, Page
 from app.dependencies import get_current_active_user_ws
 from app.clerk import verify_token
 from app.resume import ResumeData, PersonalInfo, Experience, Education
@@ -57,6 +63,10 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY")
 GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
+
+# --- LangSmith Setup ---
+langsmith_client = Client()
+tracer = LangChainTracer(client=langsmith_client)
 
 # --- Tool Input Schemas ---
 
@@ -475,7 +485,7 @@ When users mention their CV, resume, documents, experience, skills, or any file 
         MessagesPlaceholder(variable_name="agent_scratchpad"),
     ])
 
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0.7)
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0.7, callbacks=[tracer])
     
     agent = create_tool_calling_agent(llm, tools, prompt)
     
@@ -541,78 +551,77 @@ async def orchestrator_websocket(
     # --- Helper Functions for Intelligent Extraction ---
     def _choose_extraction_method(url: str) -> str:
         """Choose the best extraction method based on URL characteristics."""
-        url_lower = url.lower()
-        
-        # Complex sites that need browser automation
-        if any(domain in url_lower for domain in ['linkedin.com', 'indeed.com', 'glassdoor.com']):
-            return "browser"
-        
-        # Simple company career pages - use lightweight
-        if any(pattern in url_lower for pattern in ['careers', 'jobs', 'apply', 'hiring']):
-            return "lightweight"
-        
-        # Default to lightweight for unknown sites
-        return "lightweight"
-    
-    def _is_complex_site(url: str) -> bool:
-        """Determine if a site likely needs browser automation."""
-        complex_domains = ['linkedin.com', 'indeed.com', 'glassdoor.com', 'monster.com', 'ziprecruiter.com']
-        return any(domain in url.lower() for domain in complex_domains)
+        # Always use browser-based extraction
+        return "browser"
     
     async def _try_browser_extraction(url: str) -> tuple:
-        """Try LangChain web browsing extraction."""
+        """Try official Playwright Browser tool extraction."""
         try:
-            from app.langchain_web_extractor import extract_job_lightweight
+            from app.langchain_webbrowser import create_webbrowser_tool
             
-            job_extraction = await extract_job_lightweight(url)
-            if job_extraction:
-                job_details = type('JobDetails', (), {
-                    'title': job_extraction.title,
-                    'company': job_extraction.company,
-                    'location': job_extraction.location,
-                    'description': job_extraction.description,
-                    'requirements': job_extraction.requirements
-                })()
-                return True, {
-                    "job_title": job_extraction.title,
-                    "company_name": job_extraction.company,
-                    "job_description": f"{job_extraction.description}\n\nRequirements: {job_extraction.requirements}"
-                }
-        except Exception as e:
-            log.warning(f"LangChain web extraction failed: {e}")
-        return False, None
-    
-    async def _try_lightweight_extraction(url: str) -> tuple:
-        """Try LangChain WebBrowser approach."""
-        try:
-            from app.langchain_web_extractor import extract_job_lightweight
+            browser_tool = create_webbrowser_tool()
+            # Use sync tool in async context
+            import asyncio
+            loop = asyncio.get_event_loop()
+            content = await loop.run_in_executor(None, browser_tool.invoke, {"url": url})
             
-            job_extraction = await extract_job_lightweight(url)
-            if job_extraction:
-                return True, {
-                    "job_title": job_extraction.title,
-                    "company_name": job_extraction.company,
-                    "job_description": f"{job_extraction.description}\n\nRequirements: {job_extraction.requirements}"
-                }
+            if content:
+                # Use LLM to extract structured information
+                llm = ChatGoogleGenerativeAI(
+                    model="gemini-2.0-flash",
+                    temperature=0.1
+                )
+                
+                extraction_prompt = f"""
+                Extract job information from this text content. Return ONLY a JSON object with these fields:
+                {{
+                    "job_title": "job title",
+                    "company_name": "company name",
+                    "job_description": "job description (concise)",
+                    "requirements": "job requirements (concise)"
+                }}
+                
+                Text content:
+                {content[:5000]}  # Limit text length
+                """
+                
+                response = await llm.ainvoke(extraction_prompt)
+                # Extract JSON from response, handling markdown code blocks
+                response_text = response.content
+                if "```json" in response_text:
+                    response_text = response_text.split("```json")[1].split("```")[0].strip()
+                elif "```" in response_text:
+                    response_text = response_text.split("```")[1].split("```")[0].strip()
+                
+                job_info = json.loads(response_text)
+                
+                return True, job_info
+            else:
+                log.warning(f"Playwright tool returned no content for {url}")
+                return False, None
         except Exception as e:
-            log.warning(f"Lightweight extraction failed: {e}")
-        return False, None
+            log.warning(f"Official Playwright extraction failed: {e}")
+            return False, None
     
     async def _try_basic_extraction(url: str) -> tuple:
-        """Try basic HTTP scraping."""
+        """Try basic HTTP scraping as fallback."""
         try:
             from app.url_scraper import scrape_job_url
             
             job_details = await scrape_job_url(url)
-            if job_details:
+            # Check if we got a valid JobDetails object
+            if job_details and hasattr(job_details, 'title') and hasattr(job_details, 'company'):
                 return True, {
                     "job_title": job_details.title,
                     "company_name": job_details.company,
                     "job_description": f"{job_details.description}\n\nRequirements: {job_details.requirements}"
                 }
+            else:
+                log.warning(f"Basic extraction returned invalid object type: {type(job_details)}")
+                return False, None
         except Exception as e:
             log.warning(f"Basic extraction failed: {e}")
-        return False, None
+            return False, None
 
     # --- Helper & Tool Definitions ---
     async def get_or_create_resume():
@@ -1840,20 +1849,38 @@ Your resume now has {len(resume_data.certifications)} certifications."""
                 
             log.info(f"🔗 Extracting job details from: {job_url}")
             
-            # Try direct extraction methods (no browser automation)
+            # Try browser-based extraction first
             try:
-                job_details, method_used = await _try_lightweight_extraction(job_url)
-                if job_details:
-                    log.info(f"✅ Successfully extracted job: {job_details.title} at {job_details.company}")
+                success, job_info = await _try_browser_extraction(job_url)
+                if success and job_info:
+                    log.info(f"✅ Successfully extracted job details using browser automation")
+                    # Convert to job_details object
+                    job_details = type('JobDetails', (), {
+                        'title': job_info.get('job_title', 'Unknown Position'),
+                        'company': job_info.get('company_name', 'Unknown Company'),
+                        'location': job_info.get('location', 'Not specified'),
+                        'description': job_info.get('job_description', ''),
+                        'requirements': job_info.get('requirements', '')
+                    })()
+                    method_used = "Browser Extraction"
             except Exception as e:
-                log.warning(f"Lightweight extraction failed: {e}")
+                log.warning(f"Browser extraction failed: {e}")
             
             # Try basic extraction as fallback
             if not job_details:
                 try:
-                    job_details, method_used = await _try_basic_extraction(job_url)
-                    if job_details:
-                        log.info(f"✅ Basic extraction successful: {job_details.title} at {job_details.company}")
+                    success, job_info = await _try_basic_extraction(job_url)
+                    if success and job_info:
+                        log.info(f"✅ Basic extraction successful")
+                        # Convert to job_details object
+                        job_details = type('JobDetails', (), {
+                            'title': job_info.get('job_title', 'Unknown Position'),
+                            'company': job_info.get('company_name', 'Unknown Company'),
+                            'location': job_info.get('location', 'Not specified'),
+                            'description': job_info.get('job_description', ''),
+                            'requirements': job_info.get('requirements', '')
+                        })()
+                        method_used = "Basic Extraction"
                 except Exception as e:
                     log.warning(f"Basic extraction failed: {e}")
                     
@@ -2264,7 +2291,7 @@ Your cover letter for the **{job_details.title}** position at **{job_details.com
                 "- Write in first person as {user_name}"
             )
             
-            llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0.7)
+            llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0.7, callbacks=[tracer])
             chain = prompt | llm
             
             # Generate the cover letter
@@ -2693,8 +2720,7 @@ You can download your CV/Resume in multiple professional styles. The download di
                 await db.refresh(user)
             
             # Get existing resume data
-            result = await db.execute(select(Resume).where(Resume.user_id == user.id))
-            db_resume = result.scalars().first()
+            db_resume, resume_data = await get_or_create_resume()
             
             # Get user documents for context
             doc_result = await db.execute(
@@ -3035,7 +3061,8 @@ Return comprehensive, detailed information - not placeholders or templates."""
                 
                 extraction_llm = ChatGoogleGenerativeAI(
                     model="gemini-2.5-pro-preview-03-25",
-                    temperature=0.3
+                    temperature=0.3,
+                    callbacks=[tracer]
                 )
                 
                 extraction_chain = extraction_prompt | extraction_llm | StrOutputParser()
@@ -3351,7 +3378,7 @@ OUTPUT THE COMPLETE, POPULATED CV NOW:"""
             
             llm = ChatGoogleGenerativeAI(
                 model="gemini-2.5-pro-preview-03-25",
-                temperature=0.7,
+                temperature=0.3,
                 top_p=0.9
             )
             
@@ -3736,7 +3763,8 @@ Provide specific, technical advice that ensures maximum ATS compatibility."""
             
             llm = ChatGoogleGenerativeAI(
                 model="gemini-2.5-flash-preview-04-17",
-                temperature=0.6
+                temperature=0.6,
+                callbacks=[tracer]
             )
             
             chain = prompt | llm | StrOutputParser()
@@ -3821,7 +3849,7 @@ Provide specific, technical advice that ensures maximum ATS compatibility."""
                                 extracted_company_name = extracted_data.get("company_name", company_name)
                                 job_description = extracted_data.get("job_description", "")
                     else:
-                        success, extracted_data = await _try_lightweight_extraction(job_url)
+                        success, extracted_data = await _try_basic_extraction(job_url)
                         if success and extracted_data:
                             extracted_job_title = extracted_data.get("job_title", job_title)
                             extracted_company_name = extracted_data.get("company_name", company_name)
@@ -3956,7 +3984,7 @@ Provide specific, actionable advice tailored to this role and the user's backgro
             
             llm = ChatGoogleGenerativeAI(
                 model="gemini-2.5-flash-preview-04-17",
-                temperature=0.7
+                temperature=0.3
             )
             
             chain = prompt | llm | StrOutputParser()
@@ -4208,7 +4236,8 @@ Provide specific, actionable negotiation advice with realistic expectations."""
             
             llm = ChatGoogleGenerativeAI(
                 model="gemini-2.5-flash-preview-04-17",
-                temperature=0.7
+                temperature=0.7,
+                callbacks=[tracer]
             )
             
             chain = prompt | llm | StrOutputParser()
@@ -5227,6 +5256,56 @@ Your resume database record is now properly structured. Try clicking a download 
             log.error(f"Error checking resume data structure: {e}", exc_info=True)
             return f"❌ Error checking resume data structure: {str(e)}"
 
+    @tool
+    async def browse_web_with_langchain(
+        url: str,
+        query: str = ""
+    ) -> str:
+        """
+        Use the official LangChain WebBrowser tool to browse and extract information from web pages.
+        
+        This tool provides intelligent web browsing with AI-powered content extraction and summarization.
+        It's particularly useful for extracting job information from job posting URLs.
+        
+        Args:
+            url: The URL to browse and extract information from
+            query: Optional specific query about what to find on the page (e.g., "job requirements", "salary information")
+                  If empty, will provide a general summary of the page content
+        
+        Returns:
+            Extracted and summarized information from the webpage, with relevant links if available
+        """
+        try:
+            from app.langchain_webbrowser import create_webbrowser_tool
+            
+            log.info(f"Using official LangChain WebBrowser tool for URL: {url}")
+            
+            # Create the WebBrowser tool
+            webbrowser_tool = create_webbrowser_tool()
+            
+            # Prepare input for WebBrowser tool
+            # Format: "URL,query" or just "URL" for summary
+            if query:
+                browser_input = f"{url},{query}"
+                log.info(f"WebBrowser query: '{query}'")
+            else:
+                browser_input = url
+                log.info("WebBrowser mode: general summary")
+            
+            # Use the WebBrowser tool
+            result = await webbrowser_tool.arun(browser_input)
+            
+            if result:
+                log.info(f"WebBrowser tool successful for {url}")
+                return f"🌐 **Web Content from {url}:**\n\n{result}"
+            else:
+                log.warning(f"WebBrowser tool returned empty result for {url}")
+                return f"❌ Could not extract content from {url}. The page might be inaccessible or protected."
+                
+        except Exception as e:
+            log.error(f"Error using LangChain WebBrowser tool for {url}: {e}")
+            return f"❌ Error browsing {url}: {str(e)}. Please try again or use a different URL."
+
     # Add the new tools to the tools list - CV/RESUME TOOLS FIRST for priority!
     tools = [
         # ⭐ CV/RESUME TOOLS (HIGHEST PRIORITY) ⭐
@@ -5281,8 +5360,27 @@ Your resume database record is now properly structured. Try clicking a download 
         get_current_time_and_date,  # NEW: Current date/time awareness for temporal context
         get_user_location_context,  # NEW: User location and market context
         update_user_location,  # NEW: Update user location in profile
+        browse_web_with_langchain,
     ]
-    
+
+    # --- Add browser tools ---
+    # Try Playwright browser tool first (synchronous version)
+    try:
+        from app.langchain_webbrowser import create_webbrowser_tool
+        browser_tool = create_webbrowser_tool()
+        tools.append(browser_tool)
+        log.info("Added Playwright browser tool to agent")
+    except Exception as e:
+        log.warning(f"Failed to add Playwright browser tool: {e}")
+        # Fall back to simple browser tool
+        try:
+            from app.simple_browser_tool import create_simple_browser_tool
+            browser_tool = create_simple_browser_tool()
+            tools.append(browser_tool)
+            log.info("Added simple browser tool to agent as fallback")
+        except Exception as e2:
+            log.warning(f"Failed to add simple browser tool: {e2}")
+
     # Add advanced memory tools if available
     if 'memory_tools' in locals() and memory_tools:
         tools.extend(memory_tools)
@@ -5515,6 +5613,16 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                     if new_page_id != current_loaded_page_id:
                         current_loaded_page_id = new_page_id
                         log.info(f"WebSocket context switched to page {new_page_id}")
+                        
+                        # Update last_opened_at timestamp
+                        if new_page_id:
+                            await db.execute(
+                                update(Page)
+                                .where(Page.id == new_page_id)
+                                .values(last_opened_at=func.now())
+                            )
+                            await db.commit()
+                            log.info(f"Updated last_opened_at for page {new_page_id}")
                     continue
                 elif message_data.get("type") == "regenerate":
                     log.info("🔄 Regeneration request received")
@@ -5525,12 +5633,13 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                     log.info(f"🔄 Page ID: {regenerate_page_id}")
                     log.info(f"🔄 Current chat history length: {len(current_chat_history)}")
                     
-                    # CRITICAL: Load page history if chat_history is empty - USE LANGCHAIN FORMAT
-                    if len(current_chat_history) == 0 and regenerate_page_id:
-                        log.info(f"🔄 Chat history empty, loading history for page {regenerate_page_id}")
+                    # Load page history if we're regenerating from a different page
+                    if regenerate_page_id != current_loaded_page_id:
+                        log.info(f"🔄 Loading history for page {regenerate_page_id}")
                         try:
                             page_messages = await db.execute(
                                 select(ChatMessage)
+                                .where(ChatMessage.user_id == user.id)
                                 .where(ChatMessage.page_id == regenerate_page_id)
                                 .order_by(ChatMessage.created_at)
                             )
@@ -5549,18 +5658,20 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                                         current_chat_history.append(HumanMessage(id=msg.id, content=content if isinstance(content, str) else json.dumps(content)))
                                     else:
                                         current_chat_history.append(AIMessage(id=msg.id, content=content if isinstance(content, str) else json.dumps(content)))
-                                log.info(f"🔄 Chat history updated to {len(current_chat_history)} LangChain messages")
+                                current_loaded_page_id = regenerate_page_id
+                                log.info(f"🔄 Chat history updated to {len(current_chat_history)} messages")
                             else:
                                 log.warning(f"🔄 No messages found for page {regenerate_page_id}")
                         except Exception as e:
                             log.error(f"🔄 Error loading page history: {e}")
+                            await db.rollback()
                     
-                    # Remove the last AI message from history (if exists) - LANGCHAIN FORMAT
+                    # Remove the last AI message from history
                     if current_chat_history and isinstance(current_chat_history[-1], AIMessage):
                         removed_message = current_chat_history.pop()
                         log.info(f"🔄 Removed last AI message from history: '{removed_message.content[:50]}...'")
                     
-                    # Add the regenerate content as user message if not already present - LANGCHAIN FORMAT
+                    # Add the regenerate content as user message if not already present
                     if not current_chat_history or current_chat_history[-1].content != regenerate_content:
                         current_chat_history.append(HumanMessage(content=regenerate_content))
                         log.info(f"🔄 Added regenerate content to history")
@@ -5575,25 +5686,18 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                                     "input": regenerate_content,
                                     "chat_history": current_chat_history,
                                 }),
-                                timeout=180.0  # Increased to 3 minute timeout for complex requests
+                                timeout=180.0  # 3 minute timeout for complex requests
                             )
                             
                             if response and 'output' in response:
                                 agent_response = response['output']
                                 log.info(f"🔄 Master agent regenerated response: '{agent_response[:100]}...'")
                                 
-                                # Send the regenerated response (don't double JSON encode)
-                                await websocket.send_text(agent_response)
-                                
-                                # Update chat history with LangChain format
-                                ai_message_id = str(uuid.uuid4())
-                                current_chat_history.append(AIMessage(id=ai_message_id, content=agent_response))
-                                
-                                # Save to database with proper page_id - DELETE OLD AI MESSAGE FIRST
+                                # Delete the last AI message from database before saving new one
                                 try:
-                                    # CRITICAL: Delete the last AI message from database before saving new one
                                     last_ai_message = await db.execute(
                                         select(ChatMessage)
+                                        .where(ChatMessage.user_id == user.id)
                                         .where(ChatMessage.page_id == regenerate_page_id)
                                         .where(ChatMessage.is_user_message == False)
                                         .order_by(ChatMessage.created_at.desc())
@@ -5606,8 +5710,8 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                                     
                                     # Now save the new regenerated message
                                     new_message = ChatMessage(
-                                        id=ai_message_id,
-                                        user_id=user_id,
+                                        id=str(uuid.uuid4()),
+                                        user_id=user.id,
                                         message=agent_response,
                                         is_user_message=False,
                                         page_id=regenerate_page_id
@@ -5618,6 +5722,11 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                                 except Exception as save_error:
                                     log.error(f"🔄 Error saving regenerated message: {save_error}")
                                     await db.rollback()
+                                
+                                await websocket.send_json({
+                                    "type": "message",
+                                    "message": agent_response
+                                })
                             else:
                                 log.error("🔄 Master agent returned invalid response format")
                                 await websocket.send_text("I apologize, but I encountered an issue generating a response. Please try again.")

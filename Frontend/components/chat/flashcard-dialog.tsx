@@ -429,19 +429,16 @@ export function FlashcardDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[95vw] sm:max-w-6xl max-h-[92vh] sm:max-h-[95vh] w-[95vw] h-[92vh] sm:w-[95vw] sm:h-[95vh] flex flex-col bg-white/95 dark:bg-gray-950/95 backdrop-blur-3xl backdrop-saturate-200 rounded-2xl sm:rounded-3xl overflow-hidden p-0 border border-white/40 dark:border-gray-800/50 shadow-2xl">
+      <DialogContent className="max-w-[95vw] sm:max-w-6xl max-h-[92vh] sm:max-h-[95vh] w-[95vw] h-[92vh] sm:w-[95vw] sm:h-[95vh] flex flex-col !bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 !border !border-gray-200 dark:!border-white/8 shadow-2xl rounded-2xl sm:rounded-3xl overflow-hidden p-0">
         {/* Enhanced glassmorphism effects matching PDF dialog */}
-        <div className="absolute inset-0 rounded-2xl sm:rounded-3xl pointer-events-none bg-gradient-to-br from-white/30 via-white/10 to-transparent dark:from-white/20 dark:via-white/5 dark:to-transparent" />
-        <div className="absolute inset-0 rounded-2xl sm:rounded-3xl pointer-events-none border border-white/50 dark:border-white/30" />
-        <div className="absolute inset-[1px] rounded-2xl sm:rounded-3xl pointer-events-none bg-gradient-to-b from-white/20 via-transparent to-transparent dark:from-white/10 dark:via-transparent dark:to-transparent" />
 
         {/* Header matching PDF dialog */}
-        <div className="flex-shrink-0 bg-white/90 dark:bg-gray-950/90 backdrop-blur-md border-b border-white/40 dark:border-gray-800/60 p-3 sm:p-5 relative z-10">
+        <div className="flex-shrink-0 !bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 !border-b !border-gray-200 dark:!border-white/8 p-3 sm:p-5 relative z-10">
           <div className="flex items-center justify-between gap-4">
             {/* Left: Document Type */}
             <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 border border-blue-300/40 shadow-lg dark:from-blue-400/20 dark:to-purple-400/20 dark:border-blue-600/40 flex items-center justify-center backdrop-blur-sm">
-                <Brain className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+              <div className="w-12 h-12 rounded-2xl !bg-blue-100 !border !border-blue-200 shadow-lg flex items-center justify-center backdrop-blur-sm dark:!bg-blue-500/20 dark:!border-blue-500/40">
+                <Brain className="h-6 w-6 !text-blue-600 dark:!text-blue-400" />
               </div>
               <div>
                 <DialogTitle className="text-2xl font-bold text-gray-900 dark:text-gray-100">
@@ -467,7 +464,7 @@ export function FlashcardDialog({
                 {mode === "review" && (
                   <Badge
                     variant="outline"
-                    className="bg-gradient-to-r from-green-100 to-emerald-50 text-green-700 border-green-200/50 dark:from-green-900/40 dark:to-emerald-800/30 dark:text-green-300 dark:border-green-700/50 font-medium"
+                    className="bg-muted text-foreground border border-border font-medium"
                   >
                     Review Results
                   </Badge>
@@ -476,7 +473,7 @@ export function FlashcardDialog({
                   preGeneratedFlashcards.length > 0 && (
                     <Badge
                       variant="outline"
-                      className="bg-gradient-to-r from-teal-100 to-cyan-50 text-teal-700 border-teal-200/50 dark:from-teal-900/40 dark:to-cyan-800/30 dark:text-teal-300 dark:border-teal-700/50 font-medium"
+                      className="bg-muted text-foreground border border-border font-medium"
                     >
                       <Sparkles className="h-3 w-3 mr-1" />
                       AI Generated
@@ -487,7 +484,7 @@ export function FlashcardDialog({
                   variant="ghost"
                   size="icon"
                   onClick={() => onOpenChange(false)}
-                  className="h-10 w-10 rounded-xl transition-all duration-300 hover:scale-105 bg-gray-100/90 border border-gray-200/70 backdrop-blur-sm hover:bg-gray-200/95 hover:border-gray-300/80 dark:bg-gray-800/90 dark:border-gray-700/70 dark:hover:bg-gray-700/95 dark:hover:border-gray-600/80 ml-2"
+                  className="h-10 w-10 rounded-xl transition-all duration-300 hover:scale-105 !bg-gray-100 !border !border-gray-200 hover:!bg-gray-200 dark:!bg-background/60 dark:!border-white/8 dark:backdrop-blur-xl dark:backdrop-saturate-150 dark:hover:!bg-background/80 ml-2"
                 >
                   <X className="h-4 w-4" />
                 </Button>
@@ -498,15 +495,14 @@ export function FlashcardDialog({
 
         {mode === "setup" && (
           /* Setup/Generation View */
-          <div className="flex-1 overflow-auto p-3 sm:p-6 bg-gradient-to-br from-gray-50/30 via-white/20 to-gray-100/30 dark:from-gray-900/30 dark:via-gray-800/20 dark:to-gray-900/40 backdrop-blur-sm">
+          <div className="flex-1 overflow-auto p-3 sm:p-6">
             <div className="max-w-4xl mx-auto space-y-8">
               {preGeneratedFlashcards && preGeneratedFlashcards.length > 0 ? (
                 /* Questions Already Available */
                 <div className="text-center py-12 px-6">
                   <div className="relative w-24 h-24 mx-auto mb-8">
-                    <div className="absolute inset-0 bg-gradient-to-br from-blue-500/20 to-teal-500/20 rounded-3xl animate-pulse shadow-2xl"></div>
-                    <div className="relative w-full h-full bg-gradient-to-br from-blue-600 to-teal-600 rounded-3xl flex items-center justify-center shadow-2xl transform hover:scale-105 transition-transform duration-300">
-                      <Brain className="h-12 w-12 text-white drop-shadow-lg" />
+                    <div className="w-full h-full bg-primary rounded-3xl flex items-center justify-center shadow-2xl transform hover:scale-105 transition-transform duration-300">
+                      <Brain className="h-12 w-12 text-primary-foreground drop-shadow-lg" />
                     </div>
                   </div>
                   <h3 className="text-3xl font-bold mb-4 text-gray-900 dark:text-gray-100">
@@ -518,8 +514,8 @@ export function FlashcardDialog({
                   </p>
                   <div className="mt-8 p-6 bg-white/60 dark:bg-gray-800/60 backdrop-blur-md rounded-xl border border-white/30 dark:border-gray-700/50 shadow-lg">
                     <div className="flex items-center justify-center gap-3 mb-4">
-                      <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-teal-600 rounded-xl flex items-center justify-center shadow-md">
-                        <Check className="h-4 w-4 text-white" />
+                      <div className="w-8 h-8 bg-primary rounded-xl flex items-center justify-center shadow-md">
+                        <Check className="h-4 w-4 text-primary-foreground" />
                       </div>
                       <p className="text-gray-900 dark:text-gray-100 font-bold text-lg">
                         {preGeneratedFlashcards.length} Personalized Questions
@@ -529,14 +525,14 @@ export function FlashcardDialog({
                     <p className="text-gray-700 dark:text-gray-300 text-base leading-relaxed">
                       These questions include CV-specific scenarios about your
                       experience and role-specific challenges for{" "}
-                      <span className="font-bold text-blue-700 dark:text-blue-300">
+                      <span className="font-bold text-foreground">
                         {jobTitle}
                       </span>
                       {companyName && (
                         <span>
                           {" "}
                           at{" "}
-                          <span className="font-bold text-blue-700 dark:text-blue-300">
+                          <span className="font-bold text-foreground">
                             {companyName}
                           </span>
                         </span>
@@ -547,7 +543,7 @@ export function FlashcardDialog({
                   <Button
                     onClick={() => setMode("practice")}
                     size="lg"
-                    className="mt-8 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white px-10 py-4 rounded-xl font-bold text-lg transition-all duration-300 hover:scale-105 hover:shadow-lg shadow-blue-500/25 transform active:scale-95"
+                    className="mt-8 bg-primary hover:bg-primary/90 text-primary-foreground px-10 py-4 rounded-xl font-bold text-lg transition-all duration-300 hover:scale-105 hover:shadow-lg transform active:scale-95"
                   >
                     <Brain className="h-6 w-6 mr-3" />
                     Start Practice Session
@@ -557,9 +553,8 @@ export function FlashcardDialog({
                 /* Standard Setup View */
                 <div className="text-center py-12 px-6">
                   <div className="relative w-24 h-24 mx-auto mb-8">
-                    <div className="absolute inset-0 bg-gradient-to-br from-blue-500/20 to-teal-500/20 rounded-3xl animate-pulse shadow-2xl"></div>
-                    <div className="relative w-full h-full bg-gradient-to-br from-blue-600 to-teal-600 rounded-3xl flex items-center justify-center shadow-2xl transform hover:scale-105 transition-transform duration-300">
-                      <Brain className="h-12 w-12 text-white drop-shadow-lg" />
+                    <div className="w-full h-full bg-primary rounded-3xl flex items-center justify-center shadow-2xl transform hover:scale-105 transition-transform duration-300">
+                      <Brain className="h-12 w-12 text-primary-foreground drop-shadow-lg" />
                     </div>
                   </div>
                   <h3 className="text-3xl font-bold mb-4 text-gray-900 dark:text-gray-100">
@@ -629,7 +624,7 @@ export function FlashcardDialog({
                               onClick={() => setFlashcardCount(count)}
                               className={
                                 flashcardCount === count
-                                  ? "bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white"
+                                  ? "bg-primary hover:bg-primary/90 text-primary-foreground"
                                   : "bg-white/80 border-gray-300/60 text-gray-700 hover:bg-white/95 hover:border-gray-400/70 dark:bg-gray-800/80 dark:border-gray-600/60 dark:text-gray-300 dark:hover:bg-gray-700/95"
                               }
                             >
@@ -646,7 +641,7 @@ export function FlashcardDialog({
                       onClick={generateFlashcards}
                       disabled={isGenerating || !customJobTitle.trim()}
                       size="lg"
-                      className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white px-8 py-3 rounded-xl font-semibold transition-all duration-300 hover:scale-105 hover:shadow-lg shadow-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                      className="bg-primary hover:bg-primary/90 text-primary-foreground px-8 py-3 rounded-xl font-semibold transition-all duration-300 hover:scale-105 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                     >
                       {isGenerating ? (
                         <>
@@ -672,7 +667,7 @@ export function FlashcardDialog({
           <div className="flex-1 overflow-hidden">
             <div className="h-full flex flex-col lg:flex-row">
               {/* Question Section */}
-              <div className="flex-1 p-4 lg:p-6 bg-gradient-to-br from-gray-50/30 via-white/20 to-gray-100/30 dark:from-gray-900/30 dark:via-gray-800/20 dark:to-gray-900/40 backdrop-blur-sm overflow-y-auto">
+              <div className="flex-1 p-4 lg:p-6 overflow-y-auto">
                 <div className="max-w-3xl mx-auto space-y-6">
                   {/* Progress Bar */}
                   <div className="bg-white/60 dark:bg-gray-800/60 backdrop-blur-md rounded-xl p-4 shadow-lg border border-white/30 dark:border-gray-700/50">
@@ -686,7 +681,7 @@ export function FlashcardDialog({
                     </div>
                     <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                       <div
-                        className="bg-gradient-to-r from-blue-600 to-teal-600 h-2 rounded-full transition-all duration-300"
+                        className="bg-primary h-2 rounded-full transition-all duration-300"
                         style={{
                           width: `${
                             ((currentIndex + 1) / flashcards.length) * 100
@@ -699,8 +694,8 @@ export function FlashcardDialog({
                   {/* Question Card */}
                   <div className="bg-white/60 dark:bg-gray-800/60 backdrop-blur-md rounded-xl p-6 shadow-lg border border-white/30 dark:border-gray-700/50">
                     <div className="flex items-start gap-4 mb-6">
-                      <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-teal-600 rounded-xl flex items-center justify-center shadow-md flex-shrink-0">
-                        <ClipboardList className="h-5 w-5 text-white" />
+                      <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center shadow-md flex-shrink-0">
+                        <ClipboardList className="h-5 w-5 text-primary-foreground" />
                       </div>
                       <div className="flex-1">
                         <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
@@ -725,7 +720,7 @@ export function FlashcardDialog({
                           onClick={() => setCurrentAnswerMethod("text")}
                           className={
                             currentAnswerMethod === "text"
-                              ? "bg-gradient-to-r from-blue-600 to-blue-700 text-white"
+                              ? "bg-primary text-primary-foreground"
                               : "bg-white/80 border-gray-300/60 text-gray-700 hover:bg-white/95 dark:bg-gray-800/80 dark:border-gray-600/60 dark:text-gray-300"
                           }
                         >
@@ -742,7 +737,7 @@ export function FlashcardDialog({
                           onClick={() => setCurrentAnswerMethod("voice")}
                           className={
                             currentAnswerMethod === "voice"
-                              ? "bg-gradient-to-r from-blue-600 to-blue-700 text-white"
+                              ? "bg-primary text-primary-foreground"
                               : "bg-white/80 border-gray-300/60 text-gray-700 hover:bg-white/95 dark:bg-gray-800/80 dark:border-gray-600/60 dark:text-gray-300"
                           }
                         >
@@ -770,7 +765,7 @@ export function FlashcardDialog({
                               <Button
                                 onClick={startRecording}
                                 size="lg"
-                                className="bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white px-6 py-3 rounded-xl font-semibold"
+                                className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-xl font-semibold"
                               >
                                 <Mic className="h-5 w-5 mr-2" />
                                 Start Recording
@@ -780,7 +775,7 @@ export function FlashcardDialog({
                                 <Button
                                   onClick={stopRecording}
                                   size="lg"
-                                  className="bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white px-6 py-3 rounded-xl font-semibold"
+                                  className="bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-xl font-semibold"
                                 >
                                   <MicOff className="h-5 w-5 mr-2" />
                                   Stop Recording
@@ -815,7 +810,7 @@ export function FlashcardDialog({
                           (!userAnswer.trim() && !audioBlob) ||
                           isAnswered
                         }
-                        className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white py-3 rounded-xl font-semibold transition-all duration-300 hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                        className="w-full bg-primary hover:bg-primary/90 text-primary-foreground py-3 rounded-xl font-semibold transition-all duration-300 hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                       >
                         {isEvaluating ? (
                           <>
@@ -862,7 +857,7 @@ export function FlashcardDialog({
                     <Button
                       onClick={nextCard}
                       disabled={!isAnswered}
-                      className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {currentIndex === flashcards.length - 1 ? (
                         <>
@@ -888,7 +883,7 @@ export function FlashcardDialog({
                     {/* Card Header */}
                     <div className="flex-shrink-0 p-4 lg:p-6 border-b border-white/40 dark:border-gray-700/50">
                       <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                        <BarChart3 className="h-5 w-5 text-blue-600" />
+                        <BarChart3 className="h-5 w-5 text-foreground" />
                         AI Feedback
                       </h3>
                     </div>
@@ -909,7 +904,7 @@ export function FlashcardDialog({
                           className="w-full flex items-center justify-between p-4 text-left hover:bg-white/80 dark:hover:bg-gray-700/80 transition-colors duration-200 rounded-lg"
                         >
                           <h4 className="font-medium text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                            <BarChart3 className="h-4 w-4 text-blue-500" />
+                            <BarChart3 className="h-4 w-4 text-foreground" />
                             Performance Scores
                           </h4>
                           <ChevronDown
@@ -1078,7 +1073,7 @@ export function FlashcardDialog({
                 return stats ? (
                   <div className="bg-white/60 dark:bg-gray-800/60 backdrop-blur-md rounded-xl p-6 shadow-lg border border-white/30 dark:border-gray-700/50">
                     <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-3">
-                      <Award className="h-6 w-6 text-blue-600" />
+                      <Award className="h-6 w-6 text-foreground" />
                       Performance Summary
                     </h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -1147,8 +1142,8 @@ export function FlashcardDialog({
                                 variant="outline"
                                 className={
                                   answer?.answerMethod === "voice"
-                                    ? "bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-700"
-                                    : "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700"
+                                    ? "bg-muted text-foreground"
+                                    : "bg-muted text-foreground"
                                 }
                               >
                                 {answer?.answerMethod === "voice" ? (
@@ -1202,7 +1197,7 @@ export function FlashcardDialog({
                 <Button
                   onClick={() => onOpenChange(false)}
                   size="lg"
-                  className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white px-6 py-3 rounded-xl font-semibold transition-all duration-300 hover:scale-105"
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground px-6 py-3 rounded-xl font-semibold transition-all duration-300 hover:scale-105"
                 >
                   <Check className="h-5 w-5 mr-2" />
                   Close Session
