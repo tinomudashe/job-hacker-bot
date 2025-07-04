@@ -5733,14 +5733,23 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                                 
                         except asyncio.TimeoutError:
                             log.error("🔄 Master agent timed out during regeneration")
-                            await websocket.send_text("The regeneration took too long and timed out. Please try again with a simpler request.")
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "The regeneration took too long and timed out. Please try again with a simpler request."
+                            })
                         except Exception as agent_error:
                             log.error(f"🔄 Master agent error during regeneration: {agent_error}")
-                            await websocket.send_text("I encountered an error while regenerating the response. Please try again.")
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "I encountered an error while regenerating the response. Please try again."
+                            })
                             
                     except Exception as e:
                         log.error(f"🔄 Error during regeneration: {e}", exc_info=True)
-                        await websocket.send_text("I apologize, but I encountered an error during regeneration. Please try again.")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "I apologize, but I encountered an error during regeneration. Please try again."
+                        })
                     continue
                 elif "content" in message_data:
                     # New format with page context
@@ -5863,7 +5872,10 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                     except Exception:
                         pass
             
-            await websocket.send_text(result)
+            await websocket.send_json({
+                "type": "message",
+                "message": result
+            })
             
             # Save AI message with page context
             try:
@@ -5889,6 +5901,9 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
     except Exception as e:
         log.error(f"WebSocket error for user {user_id}: {e}")
         try:
-            await websocket.send_text(f"An error occurred: {str(e)}")
+            await websocket.send_json({
+                "type": "error",
+                "message": f"An error occurred: {str(e)}"
+            })
         except Exception:
             pass  # WebSocket might be closed 
