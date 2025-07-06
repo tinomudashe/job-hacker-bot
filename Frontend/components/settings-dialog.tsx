@@ -25,12 +25,10 @@ import {
   Crown,
   Database,
   Download,
-  FileText,
   Loader2,
   Lock,
   Shield,
   Trash2,
-  Upload,
   User,
   X,
 } from "lucide-react";
@@ -464,7 +462,8 @@ export function SettingsDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-w-[100vw] sm:max-w-6xl max-h-[100vh] sm:max-h-[95vh] w-full h-full sm:w-[95vw] sm:h-[95vh] flex flex-col !bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 rounded-none sm:rounded-3xl overflow-hidden p-0 !border-none sm:!border-gray-200 dark:sm:!border-white/8 shadow-none sm:shadow-2xl"
+        className="fixed max-w-[100vw] sm:max-w-6xl max-h-[100vh] sm:max-h-[95vh] w-full h-full sm:w-[95vw] sm:h-[95vh] 
+           flex flex-col !bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 rounded-none sm:rounded-3xl overflow-hidden p-0 !border-none sm:!border-gray-200 dark:sm:!border-white/8 shadow-none sm:shadow-2xl"
         role="dialog"
         aria-labelledby="settings-title"
       >
@@ -476,7 +475,7 @@ export function SettingsDialog({
         </VisuallyHidden>
 
         {/* Header */}
-        <div className="flex-shrink-0 !bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 !border-b !border-gray-200 dark:!border-white/8 p-4 sm:p-5 relative z-10 safe-area-inset-top">
+        <div className="flex-shrink-0 !bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 !border-b !border-gray-200 dark:!border-white/8 p-4 z-10 pt-[calc(env(safe-area-inset-top,0rem)+1rem)] sm:pt-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-blue-100 border border-blue-200 shadow-lg dark:bg-blue-500/20 dark:border-blue-400/40 flex items-center justify-center flex-shrink-0">
@@ -485,11 +484,11 @@ export function SettingsDialog({
               <div className="min-w-0">
                 <h1
                   id="settings-title"
-                  className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 truncate"
+                  className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100"
                 >
                   Settings
                 </h1>
-                <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 -mt-0.5 truncate">
+                <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 -mt-0.5">
                   Manage your account and preferences
                 </p>
               </div>
@@ -508,10 +507,10 @@ export function SettingsDialog({
         {/* Navigation */}
         <div className="flex-shrink-0 !border-b !border-gray-200 dark:!border-white/8 !bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 relative z-10">
           <div className="px-3 sm:px-6">
-            <div className="flex overflow-x-auto scrollbar-hide -mb-px gap-0.5 sm:gap-1">
+            <div className="flex -mb-px sm:gap-1">
               <button
                 onClick={() => setActiveTab("personal")}
-                className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2.5 sm:py-3 border-b-3 font-semibold text-xs sm:text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-lg sm:rounded-t-xl hover:scale-105 touch-manipulation ${
+                className={`flex flex-1 justify-center items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2.5 sm:py-3 border-b-3 font-semibold text-xs sm:text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-lg sm:rounded-t-xl hover:scale-105 touch-manipulation ${
                   activeTab === "personal"
                     ? "border-blue-500 text-blue-600 bg-blue-50 shadow-lg dark:border-blue-400 dark:text-blue-400 dark:bg-blue-500/20"
                     : "border-transparent text-gray-600 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50/50 hover:shadow-lg dark:text-gray-400 dark:hover:text-blue-400 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
@@ -524,22 +523,8 @@ export function SettingsDialog({
               </button>
 
               <button
-                onClick={() => setActiveTab("documents")}
-                className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2.5 sm:py-3 border-b-3 font-semibold text-xs sm:text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-lg sm:rounded-t-xl hover:scale-105 touch-manipulation ${
-                  activeTab === "documents"
-                    ? "border-blue-500 text-blue-600 bg-blue-50 shadow-lg dark:border-blue-400 dark:text-blue-400 dark:bg-blue-500/20"
-                    : "border-transparent text-gray-600 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50/50 hover:shadow-lg dark:text-gray-400 dark:hover:text-blue-400 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
-                }`}
-                role="tab"
-                aria-controls="documents-tab"
-              >
-                <FileText className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
-                <span>Documents</span>
-              </button>
-
-              <button
                 onClick={() => setActiveTab("subscription")}
-                className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2.5 sm:py-3 border-b-3 font-semibold text-xs sm:text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-lg sm:rounded-t-xl hover:scale-105 touch-manipulation ${
+                className={`flex flex-1 justify-center items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2.5 sm:py-3 border-b-3 font-semibold text-xs sm:text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-lg sm:rounded-t-xl hover:scale-105 touch-manipulation ${
                   activeTab === "subscription"
                     ? "border-blue-500 text-blue-600 bg-blue-50 shadow-lg dark:border-blue-400 dark:text-blue-400 dark:bg-blue-500/20"
                     : "border-transparent text-gray-600 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50/50 hover:shadow-lg dark:text-gray-400 dark:hover:text-blue-400 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
@@ -549,12 +534,11 @@ export function SettingsDialog({
               >
                 <CreditCard className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
                 <span className="hidden xs:inline">Subscription</span>
-                <span className="xs:hidden">Plan</span>
               </button>
 
               <button
                 onClick={() => setActiveTab("privacy")}
-                className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2.5 sm:py-3 border-b-3 font-semibold text-xs sm:text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-lg sm:rounded-t-xl hover:scale-105 touch-manipulation ${
+                className={`flex flex-1 justify-center items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2.5 sm:py-3 border-b-3 font-semibold text-xs sm:text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-lg sm:rounded-t-xl hover:scale-105 touch-manipulation ${
                   activeTab === "privacy"
                     ? "border-blue-500 text-blue-600 bg-blue-50 shadow-lg dark:border-blue-400 dark:text-blue-400 dark:bg-blue-500/20"
                     : "border-transparent text-gray-600 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50/50 hover:shadow-lg dark:text-gray-400 dark:hover:text-blue-400 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
@@ -788,7 +772,9 @@ export function SettingsDialog({
                               id="marketingEmails"
                               checked={preferences.marketingEmails}
                               onCheckedChange={(checked: boolean) =>
-                                updatePreferences({ marketingEmails: checked })
+                                updatePreferences({
+                                  marketingEmails: checked,
+                                })
                               }
                               disabled={preferencesLoading}
                               className="flex-shrink-0 touch-manipulation"
@@ -834,122 +820,6 @@ export function SettingsDialog({
                           )}
                         </Button>
                       </form>
-                    </div>
-                  </div>
-                )}
-
-                {/* Documents Tab */}
-                {activeTab === "documents" && (
-                  <div
-                    className="space-y-4 sm:space-y-6"
-                    id="documents-tab"
-                    role="tabpanel"
-                  >
-                    <div className="!bg-white !border !border-gray-200 dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 dark:!border-white/8 rounded-lg sm:rounded-xl p-4 sm:p-6 shadow-lg">
-                      <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
-                        <FileText className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
-                        <span>Document Management</span>
-                      </h2>
-
-                      {documentsError &&
-                      documentsError.includes("coming soon") ? (
-                        <Alert className="mb-4 sm:mb-6 border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/50">
-                          <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-                          <AlertDescription className="text-amber-800 dark:text-amber-200 text-sm">
-                            {documentsError}
-                          </AlertDescription>
-                        </Alert>
-                      ) : documentsError ? (
-                        <Alert variant="destructive" className="mb-4 sm:mb-6">
-                          <AlertCircle className="h-4 w-4" />
-                          <AlertDescription className="text-sm">
-                            {documentsError}
-                          </AlertDescription>
-                        </Alert>
-                      ) : (
-                        <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-4 sm:p-6 text-center mb-4 sm:mb-6">
-                          <Upload
-                            className="h-6 w-6 sm:h-8 sm:w-8 mx-auto mb-2 text-muted-foreground"
-                            aria-hidden="true"
-                          />
-                          <h3 className="font-semibold mb-1 text-sm sm:text-base">
-                            Upload Documents
-                          </h3>
-                          <p className="text-xs sm:text-sm text-muted-foreground mb-3 sm:mb-4">
-                            Drag and drop files here, or click to browse
-                          </p>
-                          <Button
-                            variant="outline"
-                            className="h-10 text-sm touch-manipulation"
-                          >
-                            <Upload
-                              className="h-4 w-4 mr-2"
-                              aria-hidden="true"
-                            />
-                            Choose Files
-                          </Button>
-                        </div>
-                      )}
-
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <h4 className="font-semibold text-sm sm:text-base">
-                            Your Documents
-                          </h4>
-                          {documentsLoading && (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          )}
-                        </div>
-
-                        {documents.length === 0 && !documentsLoading ? (
-                          <p className="text-xs sm:text-sm text-muted-foreground text-center py-6 sm:py-8">
-                            No documents uploaded yet
-                          </p>
-                        ) : (
-                          <div className="space-y-2">
-                            {documents.map((doc) => (
-                              <div
-                                key={doc.id}
-                                className="flex items-start sm:items-center justify-between p-3 !border !border-gray-200 rounded-lg !bg-gray-50 dark:!bg-background/40 dark:!border-white/8 gap-3"
-                              >
-                                <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
-                                  <FileText
-                                    className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5 sm:mt-0"
-                                    aria-hidden="true"
-                                  />
-                                  <div className="min-w-0 flex-1">
-                                    <p className="font-medium text-sm sm:text-base truncate">
-                                      {doc.name}
-                                    </p>
-                                    <p className="text-xs sm:text-sm text-muted-foreground">
-                                      {doc.type} • {doc.size} • {doc.uploadDate}
-                                    </p>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8 sm:h-10 sm:w-10 touch-manipulation"
-                                    aria-label={`Download ${doc.name}`}
-                                  >
-                                    <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8 sm:h-10 sm:w-10 touch-manipulation"
-                                    onClick={() => handleDeleteDocument(doc.id)}
-                                    aria-label={`Delete ${doc.name}`}
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-red-500" />
-                                  </Button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
                     </div>
                   </div>
                 )}

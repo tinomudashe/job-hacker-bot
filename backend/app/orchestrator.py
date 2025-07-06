@@ -39,7 +39,7 @@ from pydantic import BaseModel
 from langsmith import Client
 from langchain.callbacks import LangChainTracer
 
-from app.db import get_db
+from app.db import get_db,async_session_maker
 from app.models_db import User, ChatMessage, Resume, Document, GeneratedCoverLetter, Page
 from app.dependencies import get_current_active_user_ws
 from app.clerk import verify_token
@@ -112,14 +112,27 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
 ## 🚨 CRITICAL RULE: ALWAYS USE TOOLS - NEVER GIVE GENERIC RESPONSES
 **YOU MUST ACTUALLY CALL THE TOOLS! NEVER JUST SAY YOU WILL!**
 
+### IMPORTANT: All ways refer to the previous messages to understand the user's context and goals.###
+- Rules:Make sure to quote the previous messages in your response but don't repeat the same message.
+- Rules:If you're confused about the user's context, ask the user for clarification.
+- example:
+    -user:choose the first job from the list of jobs
+    -agent:check to see if you had generated some jobs in the previous messages and if so, choose the first job from the list of jobs
+    -user:Create an interview preparation guide the same job
+    -agent:Check to see which job you were talking about and create an interview preparation guide for that job
+
+
 ### Tool Selection Rules:
 - CV/Resume requests → **IMMEDIATELY CALL** `refine_cv_for_role`, `generate_tailored_resume`, `create_resume_from_scratch`
 - Cover Letter requests → **IMMEDIATELY CALL** `generate_cover_letter`, `generate_cover_letter_from_url`
+- messages_reply
 
 ### CRITICAL: NO GENERIC RESPONSES ALLOWED!
 - ❌ NEVER say "I'll generate..." without calling the tool
 - ❌ NEVER say "A download button will appear..." without calling the tool  
 - ❌ NEVER give promises - always deliver results by calling tools
+- ❌ NEVER return an empty response if a tool returns an error message(e.g., 'Failed to access...', 'Could not find...')
+- ✅ Always return a response if a tool returns an error message by inform the user about the error in a helpful way
 - ✅ ALWAYS call the appropriate tool immediately
 - ✅ Let the tool's response speak for itself
 
@@ -135,6 +148,9 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
 - **get_ats_optimization_tips**: Help optimize CVs for Applicant Tracking Systems
 - **refine_cv_for_role**: Enhance existing CVs for specific positions
 - **generate_tailored_resume**: Create complete resumes tailored to job descriptions
+- **add_education**: Add education to the resume and profile when user asks for a resume
+- **add_work_experience**: Add work experience to the resume and profile when user asks for a resume
+- **add_skills**: Add skills to the resume and profile when user asks for a resume
 - **create_resume_from_scratch**: Build new CVs based on career goals
 - **enhance_resume_section**: Improve specific CV sections
 
@@ -160,23 +176,26 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
 ## Job Search Guidelines:
 🔥 **CRITICAL**: When users ask for job searches, **IMMEDIATELY CALL THE SEARCH TOOLS!**
 
+### For interview preparations use the get_interview_preparation_guide tool:
+- *** after generating the interview preparation use [INTERVIEW_FLASHCARDS_AVAILABLE] and inform the user to Click the brain icon to practice interview questions with voice/text responses and get detailed feedback on tone, correctness, and confidence.
+
+
 ### Job Search Process:
 1. **When users ask for job searches**:
-   - **Basic Search**: **IMMEDIATELY use search_jobs_tool** for standard searches
-   - **Browser Search**: **IMMEDIATELY use search_jobs_with_browser** for comprehensive results
+   - **Basic Search**: **IMMEDIATELY use linkedin_jobs_service ** for standard searches
+   
    
 2. **CRITICAL**: **NEVER just say you'll search for jobs - ACTUALLY DO IT!**
    - ❌ "I can definitely help you look for software engineering jobs..." (WITHOUT calling tool)
    - ❌ "I'm searching for the latest opportunities..." (WITHOUT calling tool)
    - ❌ "Let me gather the listings..." (WITHOUT calling tool)
    - ❌ "Please wait while I search..." (WITHOUT calling tool)
-   - ✅ **IMMEDIATELY CALL search_jobs_with_browser (Browser Use Cloud)** for comprehensive results
+   - ✅ **IMMEDIATELY CALL linkedin_jobs_service 
    - ✅ **NO GENERIC PROMISES** - call search tools instantly!
    
-3. **TOOL PRIORITY**: **LinkedIn API First, then fallbacks**
+3. **TOOL PRIORITY**: **only use LinkedIn API First, then fallbacks**
    - ✅ **FIRST CHOICE**: search_jobs_linkedin_api (direct LinkedIn database access)
-   - 🌐 **SECOND CHOICE**: search_jobs_with_browser (browser automation fallback)
-   - 📊 **LAST RESORT**: search_jobs_tool (basic Google Cloud API)
+   
 
 ### Search Tool Selection (Priority Order):
 1. **⭐ LinkedIn Jobs API**: Use search_jobs_linkedin_api for most job searches
@@ -188,15 +207,6 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
    * Direct apply links to LinkedIn job postings
    * Use this for 90% of job searches!
 
-2. **🌐 Browser Automation**: Use search_jobs_with_browser as fallback
-   * **FALLBACK ONLY** - Use when LinkedIn API fails or for specific job boards
-   * Supports Indeed, Glassdoor, JustJoin.it, NoFluffJobs
-   * More comprehensive scraping but can be blocked by anti-bot measures
-   * Use when users specifically request non-LinkedIn sources
-
-3. **📊 Basic Search**: Use search_jobs_tool for Google Cloud API
-   * **LAST RESORT** - Use only when both above options fail
-   * Limited results, often falls back to mock data
 
 ### Search Parameters:
 - For general job searches, you can search with just a location (e.g., location="Poland")
@@ -210,7 +220,7 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
 - ❌ "Please wait while I gather listings..."
 
 ### ALWAYS do:
-- ✅ **IMMEDIATELY call** search_jobs_linkedin_api (preferred) or search_jobs_with_browser (fallback)
+- ✅ **IMMEDIATELY call** search_jobs_linkedin_api 
 - ✅ **LinkedIn API is fastest** - Use search_jobs_linkedin_api for instant results
 - ✅ The tools handle everything and return actual job results
 - ✅ Present the results in a clear, organized format
@@ -451,8 +461,8 @@ When users mention their CV, resume, documents, experience, skills, or any file 
   * "Improve my CV for tech jobs" → use refine_cv_for_role(target_role="Technology")
 
 ## Job Search Guidelines:
-- **Basic Job Search**: Use search_jobs_tool for standard Google Cloud Talent API searches
-- **Advanced Browser Search**: Use search_jobs_with_browser for more comprehensive results with browser automation
+- **Basic Job Search**: Use linkedin_jobs_service standard searches
+- **Advanced Browser Search**: Use linkedin_jobs_service for more comprehensive results with browser automation
 - For general job searches, you can search with just a location (e.g., location="Poland")
 - For specific roles, include both query and location (e.g., query="software engineer", location="Warsaw")
 - Always provide helpful context about the jobs you find
@@ -485,7 +495,7 @@ When users mention their CV, resume, documents, experience, skills, or any file 
         MessagesPlaceholder(variable_name="agent_scratchpad"),
     ])
 
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0.7, callbacks=[tracer])
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.7, callbacks=[tracer])
     
     agent = create_tool_calling_agent(llm, tools, prompt)
     
@@ -568,7 +578,7 @@ async def orchestrator_websocket(
             if content:
                 # Use LLM to extract structured information
                 llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.0-flash",
+                    model="gemini-2.5-pro-preview-03-25",
                     temperature=0.1
                 )
                 
@@ -624,9 +634,15 @@ async def orchestrator_websocket(
             return False, None
 
     # --- Helper & Tool Definitions ---
-    async def get_or_create_resume():
-        result = await db.execute(select(Resume).where(Resume.user_id == user_id))
-        db_resume = result.scalars().first()
+    async def get_or_create_resume(session: AsyncSession):
+
+        """
+        Helper to get or create a resume for the current user using a specific session.
+        This ensures transactional integrity within tools.
+        """
+
+        result = await session.execute(select(Resume).where(Resume.user_id == user_id))
+        db_resume = result.scalar_one_or_none()
 
         if db_resume and db_resume.data:
             # Import the fix function from resume.py
@@ -635,7 +651,11 @@ async def orchestrator_websocket(
             fixed_data = fix_resume_data_structure(db_resume.data)
             # Update the database with fixed data
             db_resume.data = fixed_data
-            await db.commit()
+            session.add(db_resume)
+            await session.flush()
+
+            resume_data_dict = db_resume.data if isinstance(db_resume.data, dict) else {}
+
             return db_resume, ResumeData(**fixed_data)
         
         # Create default personal info with user's Clerk data if available
@@ -782,7 +802,8 @@ async def orchestrator_websocket(
                     job_text += f"\n   ✅ **Requirements:** {req}"
                 
                 if job.get('apply_url'):
-                    job_text += f"\n   🔗 **Apply:** {job['apply_url']}"
+                    job_text += f"\n   🔗 **Apply:** [{job['apply_url']}]({job['apply_url']})"
+                    # Remove automatic cover letter link
                 
                 formatted_jobs.append(job_text)
             
@@ -938,7 +959,8 @@ async def orchestrator_websocket(
                 return "ℹ️ No changes provided. Please specify which fields to update."
                 
         except Exception as e:
-            await db.rollback()
+            if db.is_active:
+                await db.rollback()
             log.error(f"Error updating user profile: {e}")
             return f"❌ Error updating profile: {str(e)}"
 
@@ -1111,7 +1133,8 @@ async def orchestrator_websocket(
             return success_message
             
         except Exception as e:
-            await db.rollback()
+            if db.is_active:
+                await db.rollback()
             log.error(f"Error updating user profile: {e}", exc_info=True)
             return f"❌ Error updating profile: {str(e)}. Please try again or contact support."
 
@@ -1146,56 +1169,58 @@ async def orchestrator_websocket(
         Returns:
             Success message with added experience details
         """
-        try:
-            db_resume, resume_data = await get_or_create_resume()
+        async with async_session_maker() as session:
+            try:
+                db_resume, resume_data = await get_or_create_resume(session)
 
-            # Format dates
-            if is_current_job:
-                end_date = "Present"
-            
-            date_range = f"{start_date} - {end_date}" if end_date else start_date
-            
-            # Build comprehensive description
-            full_description = description
-            
-            if achievements:
-                full_description += f"\n\nKey Achievements:\n{achievements}"
-            
-            if technologies_used:
-                full_description += f"\n\nTechnologies: {technologies_used}"
-            
-            if location:
-                full_description += f"\n\nLocation: {location}"
+                # Format dates
+                if is_current_job:
+                    end_date = "Present"
                 
-            if employment_type:
-                full_description += f"\nEmployment Type: {employment_type}"
+                date_range = f"{start_date} - {end_date}" if end_date else start_date
+                
+                # Build comprehensive description
+                full_description = description
+                
+                if achievements:
+                    full_description += f"\n\nKey Achievements:\n{achievements}"
+                
+                if technologies_used:
+                    full_description += f"\n\nTechnologies: {technologies_used}"
+                
+                if location:
+                    full_description += f"\n\nLocation: {location}"
+                    
+                if employment_type:
+                    full_description += f"\nEmployment Type: {employment_type}"
 
-            new_experience = Experience(
-                id=str(uuid.uuid4()),
-                jobTitle=job_title,
-                company=company,
-                dates=date_range,
-                description=full_description.strip(),
-            )
-            resume_data.experience.append(new_experience)
+                new_experience = Experience(
+                    id=str(uuid.uuid4()),
+                    jobTitle=job_title,
+                    company=company,
+                    dates=date_range,
+                    description=full_description.strip(),
+                )
+                resume_data.experience.append(new_experience)
 
-            db_resume.data = resume_data.dict()
-            await db.commit()
-            
-            return f"""✅ **Work Experience Added Successfully!**
+                db_resume.data = resume_data.dict()
+                await db.commit()
+                
+                return f"""✅ **Work Experience Added Successfully!**
 
-**Position:** {job_title}
-**Company:** {company}
-**Duration:** {date_range}
-{f"**Location:** {location}" if location else ""}
-{f"**Type:** {employment_type}" if employment_type else ""}
+                        **Position:** {job_title}
+                        **Company:** {company}
+                        **Duration:** {date_range}
+                        {f"**Location:** {location}" if location else ""} 
+                        {f"**Type:** {employment_type}" if employment_type else ""}
 
-Your resume now has {len(resume_data.experience)} work experience entries."""
-            
-        except Exception as e:
-            await db.rollback()
-            log.error(f"Error adding work experience: {e}")
-            return f"❌ Error adding work experience: {str(e)}"
+                        Your resume now has {len(resume_data.experience)} work experience entries."""
+                
+            except Exception as e:
+                if db.is_active:
+                    await db.rollback()
+                log.error(f"Error adding work experience: {e}")
+                return f"❌ Error adding work experience: {str(e)}"
 
     @tool
     async def add_education(
@@ -1230,69 +1255,81 @@ Your resume now has {len(resume_data.experience)} work experience entries."""
         Returns:
             Success message with added education details
         """
-        try:
-            db_resume, resume_data = await get_or_create_resume()
+        # Use an isolated session for this tool to prevent conflicts
+        async with async_session_maker() as session:
+            try:
+                # Re-fetch the user within the new session
+                user_result = await session.execute(select(User).where(User.id == user.id))
+                session_user = user_result.scalars().first()
+                if not session_user:
+                    return "❌ Error: Could not find user to add education to."
 
-            # Format dates
-            if is_current:
-                if "expected" not in (end_year or "").lower():
-                    end_year = f"Expected {end_year}" if end_year else "Present"
-            
-            date_range = f"{start_year} - {end_year}" if end_year else start_year
-            
-            # Build degree title with field of study
-            full_degree = degree
-            if field_of_study:
-                full_degree += f" in {field_of_study}"
-            
-            # Build comprehensive description
-            description_parts = []
-            
-            if location:
-                description_parts.append(f"Location: {location}")
+                db_resume, resume_data = await get_or_create_resume(session)
+
+                # Format dates
+                if is_current:
+                    if "expected" not in (end_year or "").lower():
+                        end_year = f"Expected {end_year}" if end_year else "Present"
                 
-            if gpa:
-                description_parts.append(f"GPA: {gpa}")
+                date_range = f"{start_year} - {end_year}" if end_year else start_year
                 
-            if honors:
-                description_parts.append(f"Honors: {honors}")
+                # Build degree title with field of study
+                full_degree = degree
+                if field_of_study:
+                    full_degree += f" in {field_of_study}"
                 
-            if relevant_coursework:
-                description_parts.append(f"Relevant Coursework: {relevant_coursework}")
+                # Build comprehensive description
+                description_parts = []
                 
-            if thesis_project:
-                description_parts.append(f"Thesis/Project: {thesis_project}")
+                if location:
+                    description_parts.append(f"Location: {location}")
+                    
+                if gpa:
+                    description_parts.append(f"GPA: {gpa}")
+                    
+                if honors:
+                    description_parts.append(f"Honors: {honors}")
+                    
+                if relevant_coursework:
+                    description_parts.append(f"Relevant Coursework: {relevant_coursework}")
+                    
+                if thesis_project:
+                    description_parts.append(f"Thesis/Project: {thesis_project}")
+                
+                full_description = "\n".join(description_parts) if description_parts else ""
+
+                new_education = Education(
+                    id=str(uuid.uuid4()),
+                    degree=full_degree,
+                    institution=institution,
+                    dates=date_range,
+                    description=full_description
+                )
+                
+                # Ensure education list exists
+                if not hasattr(resume_data, 'education') or resume_data.education is None:
+                    resume_data.education = []
+                    
+                resume_data.education.append(new_education)
+
+                db_resume.data = resume_data.dict()
+                await session.commit()
+                
+                return f"""✅ **Education Added Successfully!**
+
+            **Degree:** {full_degree}
+            **Institution:** {institution}
+            **Duration:** {date_range}
+
+            Your resume now has {len(resume_data.education)} education entries."""
+                
+            except Exception as e:
+                if session.is_active:
+                    await session.rollback()
+                log.error(f"Error adding education: {e}", exc_info=True)
+                return f"❌ Error adding education: {str(e)}"
             
-            full_description = "\n".join(description_parts) if description_parts else ""
-
-            new_education = Education(
-                id=str(uuid.uuid4()),
-                degree=full_degree,
-                institution=institution,
-                dates=date_range,
-                description=full_description
-            )
-            resume_data.education.append(new_education)
-
-            db_resume.data = resume_data.dict()
-            await db.commit()
             
-            return f"""✅ **Education Added Successfully!**
-
-**Degree:** {full_degree}
-**Institution:** {institution}
-**Duration:** {date_range}
-{f"**Location:** {location}" if location else ""}
-{f"**GPA:** {gpa}" if gpa else ""}
-{f"**Honors:** {honors}" if honors else ""}
-
-Your resume now has {len(resume_data.education)} education entries."""
-            
-        except Exception as e:
-            await db.rollback()
-            log.error(f"Error adding education: {e}")
-            return f"❌ Error adding education: {str(e)}"
-
     @tool
     async def set_skills(skills: List[str]) -> str:
         """Replaces the entire skills list with the provided list of skills."""
@@ -1413,7 +1450,8 @@ Your resume now has {len(resume_data.education)} education entries."""
             return result_message
             
         except Exception as e:
-            await db.rollback()
+            if db.is_active:
+                await db.rollback()
             log.error(f"Error managing skills: {e}")
             return f"❌ Error updating skills: {str(e)}"
 
@@ -1505,7 +1543,8 @@ Your resume now has {len(resume_data.education)} education entries."""
 Your resume now has {len(resume_data.projects)} projects."""
             
         except Exception as e:
-            await db.rollback()
+            if db.is_active:
+                await db.rollback()
             log.error(f"Error adding project: {e}")
             return f"❌ Error adding project: {str(e)}"
 
@@ -1581,7 +1620,8 @@ Your resume now has {len(resume_data.projects)} projects."""
 Your resume now has {len(resume_data.certifications)} certifications."""
             
         except Exception as e:
-            await db.rollback()
+            if db.is_active:
+                await db.rollback()
             log.error(f"Error adding certification: {e}")
             return f"❌ Error adding certification: {str(e)}"
 
@@ -1703,8 +1743,8 @@ Your resume now has {len(resume_data.certifications)} certifications."""
                             job_id = short_url.split('/')[-1].split('?')[0]
                             short_url = f"linkedin.com/jobs/view/{job_id}"
                     
-                    job_text += f"\n   🔗 **Apply:** {short_url}"
-                    job_text += f"\n   💌 **Cover Letter:** Ask me to generate a cover letter for this role"
+                    job_text += f"\n   🔗 **Apply:** [{short_url}]({job.job_url})"
+                    # Remove automatic cover letter link
                 
                 formatted_jobs.append(job_text)
             
@@ -1716,94 +1756,9 @@ Your resume now has {len(resume_data.certifications)} certifications."""
             
         except Exception as e:
             log.error(f"Error in LinkedIn API search: {e}")
-            return f"❌ Error searching LinkedIn jobs: {str(e)}\n\nTry using the browser search as a fallback."
+            return f"🔍 No jobs found for '{keyword}' in {location}.\\n\\n💡 **Suggestions:**\\n• Try different keywords (e.g., 'developer', 'engineer')\\n• Expand location (e.g., 'Europe' instead of specific city)\\n• Try different job types or experience levels"
 
-    @tool
-    async def search_jobs_with_browser(
-        query: str,
-        location: str = "Remote",
-        job_board: str = "indeed",
-        max_jobs: int = 5
-    ) -> str:
-        """🌐 BROWSER AUTOMATION SEARCH - Comprehensive job board crawling!
-        
-        Uses Browser Use Cloud API for browser automation across major job platforms.
-        NO LOGIN REQUIRED - searches public job boards without authentication.
-        
-        Args:
-            query: Job search keywords (e.g., 'software engineer', 'python developer')
-            location: Location to search in (e.g., 'Remote', 'Europe', 'Gdynia', 'Warsaw')
-            job_board: Job platform ('indeed', 'glassdoor', 'justjoin', 'nofluffjobs')
-            max_jobs: Maximum number of jobs to extract (default 5, max 10)
-        
-        Returns:
-            Comprehensive job listings with direct URLs, full descriptions, and application links
-        """
-        try:
-            from app.browser_use_cloud import get_browser_use_service
-            
-            log.info(f"🚀 Starting Browser Use Cloud search for '{query}' on {job_board} in {location}")
-            
-            # Get the Browser Use Cloud service
-            browser_service = get_browser_use_service()
-            
-            # Search jobs using cloud browser automation
-            job_extractions = await browser_service.search_jobs_on_platform(
-                query=query,
-                location=location,
-                platform=job_board,
-                max_jobs=min(max_jobs, 10)  # Limit to 10 for performance
-            )
-            
-            if not job_extractions:
-                return f"🔍 No jobs found for '{query}' in {location} on {job_board}.\n\n💡 **Suggestions:**\n• Try different keywords (e.g., 'developer', 'engineer', 'analyst')\n• Expand location (e.g., 'Poland' instead of specific city)\n• Try a different job board: LinkedIn, Indeed, or Glassdoor"
-            
-            # Format the detailed results nicely for the user
-            formatted_jobs = []
-            for i, job in enumerate(job_extractions, 1):
-                job_text = f"**{i}. {job.title}** at **{job.company}**"
-                
-                if job.location:
-                    job_text += f"\n   📍 **Location:** {job.location}"
-                
-                if job.job_type:
-                    job_text += f"\n   💼 **Type:** {job.job_type}"
-                
-                if job.salary:
-                    job_text += f"\n   💰 **Salary:** {job.salary}"
-                
-                if job.posted_date:
-                    job_text += f"\n   📅 **Posted:** {job.posted_date}"
-                
-                if job.description:
-                    # Clean up and truncate description
-                    desc = job.description.replace('\n', ' ').strip()
-                    if len(desc) > 400:
-                        desc = desc[:400] + "..."
-                    job_text += f"\n   📋 **Description:** {desc}"
-                
-                if job.requirements:
-                    req = job.requirements.replace('\n', ' ').strip()
-                    if len(req) > 300:
-                        req = req[:300] + "..."
-                    job_text += f"\n   ✅ **Requirements:** {req}"
-                
-                if job.url:
-                    job_text += f"\n   🔗 **Full Details & Apply:** {job.url}"
-                    job_text += f"\n   💌 **Generate Cover Letter:** Ask me to 'generate cover letter from {job.url}'"
-                
-                formatted_jobs.append(job_text)
-            
-            result_header = f"🎯 **Browser Use Cloud Results: {len(job_extractions)} {query} jobs from {job_board.title()} in {location}**\n\n"
-            result_body = "\n\n---\n\n".join(formatted_jobs)
-            result_footer = f"\n\n✨ **Next Steps for Tino:**\n• Click any job URL to see full details\n• Ask me: 'generate cover letter from [job URL]' for instant applications\n• I can refine your CV specifically for any of these roles!\n• Want more jobs? Ask me to search other platforms!"
-            
-            return result_header + result_body + result_footer
-            
-        except Exception as e:
-            log.error(f"Error in Browser Use Cloud job search: {e}", exc_info=True)
-            return f"❌ Browser Use Cloud search encountered an issue: {str(e)}\n\n🔄 **Try:**\n• Using the basic search instead\n• Different keywords or location\n• I'll investigate and fix this issue!"
-
+   
     @tool
     async def generate_cover_letter_from_url(
         job_url: str,
@@ -2072,7 +2027,7 @@ Your resume now has {len(resume_data.certifications)} certifications."""
                 "- Write in first person as {user_name}"
             )
             
-            llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0.7)
+            llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.7)
             chain = prompt | llm
             
             # Generate the cover letter
@@ -2291,7 +2246,7 @@ Your cover letter for the **{job_details.title}** position at **{job_details.com
                 "- Write in first person as {user_name}"
             )
             
-            llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0.7, callbacks=[tracer])
+            llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.7, callbacks=[tracer])
             chain = prompt | llm
             
             # Generate the cover letter
@@ -2740,22 +2695,25 @@ You can download your CV/Resume in multiple professional styles. The download di
                 from langchain_core.prompts import ChatPromptTemplate
                 from langchain_core.output_parsers import StrOutputParser
                 
+
+
+
                 extraction_prompt = ChatPromptTemplate.from_template(
                     """Extract comprehensive resume information from these documents for a tailored resume:
 
-{document_content}
+                    {document_content}
 
-Extract and format ALL information for a complete tailored resume including:
-- Personal information (name, email, phone, location, LinkedIn, portfolio)
-- Professional summary highlighting relevant expertise for the target role
-- ALL work experience with detailed achievements and responsibilities
-- Education background with degrees, institutions, graduation years
-- Technical skills, programming languages, tools, technologies
-- Projects with descriptions and technologies used
-- Certifications, awards, languages, publications
+                    Extract and format ALL information for a complete tailored resume including:
+                    - Personal information (name, email, phone, location, LinkedIn, portfolio)
+                    - Professional summary highlighting relevant expertise for the target role
+                    - ALL work experience with detailed achievements and responsibilities
+                    - Education background with degrees, institutions, graduation years
+                    - Technical skills, programming languages, tools, technologies
+                    - Projects with descriptions and technologies used
+                    - Certifications, awards, languages, publications
 
-Focus on information that would be relevant for the target role. Return comprehensive, detailed information - not placeholders or templates."""
-                )
+                    Focus on information that would be relevant for the target role. Return comprehensive, detailed information - not placeholders or templates."""
+                                    )
                 
                 extraction_llm = ChatGoogleGenerativeAI(
                     model="gemini-2.5-pro-preview-03-25",
@@ -2777,75 +2735,42 @@ Focus on information that would be relevant for the target role. Return comprehe
             
             # Create the resume generation chain
             from langchain_core.prompts import ChatPromptTemplate
-            from langchain_core.output_parsers import StrOutputParser
+            from langchain_core.output_parsers import JsonOutputParser
+            from langchain_core.pydantic_v1 import BaseModel, Field
+
+            class TailoredResume(BaseModel):
+                personalInfo: dict = Field(description="Personal information section, including summary.")
+                experience: list = Field(description="List of all work experiences.")
+                education: list = Field(description="List of all education entries.")
+                skills: list = Field(description="A comprehensive list of skills.")
+                projects: list = Field(description="List of projects, if any.")
+                certifications: list = Field(description="List of certifications, if any.")
+
+            parser = JsonOutputParser(pydantic_object=TailoredResume)
             
             prompt = ChatPromptTemplate.from_template(
                 """You are an expert resume writer. Create a COMPLETE, FULLY POPULATED resume using ALL the user's actual information tailored for the target job.
+                 Your output MUST be a valid JSON object that adheres to the provided schema.
 
-COMPREHENSIVE USER INFORMATION:
-{context}
 
-TARGET JOB:
-- Position: {job_title}
-- Company: {company_name}
-- Job Description: {job_description}
-- Additional Skills to Highlight: {user_skills}
+             COMPREHENSIVE USER INFORMATION:
+                {context}
 
-**CRITICAL INSTRUCTIONS:**
-- NEVER use placeholders like [Name], [Email], [Job Title], [Company], [Year]
-- NEVER write template instructions
-- USE ONLY the actual extracted information from the user's documents
-- CREATE a complete, ready-to-use resume with real content in EVERY section
-- Fill ALL fields with the user's actual data so PDF dialog has NO empty fields
-- Optimize content for {job_title} position
+                TARGET JOB:
+                - Position: {job_title}
+                - Company: {company_name}
+                - Job Description: {job_description}
 
-**CREATE THE COMPLETE TAILORED RESUME:**
+                {format_instructions}
 
-# [Use actual full name from documents]
-**Email:** [actual email] | **Phone:** [actual phone] | **Location:** [actual location] | **LinkedIn:** [actual LinkedIn] | **Portfolio:** [actual portfolio]
+                **CRITICAL INSTRUCTIONS:**
+                1.  Generate a complete resume in the specified JSON format.
+                2.  NEVER use placeholders like [Name] or [Company]. Use ONLY the actual extracted information.
+                3.  Fill ALL fields of the JSON schema with the user's actual data. If a section (like projects) is not in the source documents, provide an empty list.
+                4.  Optimize all content specifically for the {job_title} position.
 
-## Professional Summary
-[Write 3-4 compelling lines using their actual background, tailored specifically for {job_title} at {company_name}]
-
-## Core Skills
-[List ALL their actual technical skills, programming languages, tools, frameworks from documents - prioritized for {job_title}]
-
-## Professional Experience
-[For EACH actual job from their background, in reverse chronological order:]
-**[Actual Job Title]** | [Actual Company] | [Actual Start Date] - [Actual End Date]
-• [Real achievement with metrics, optimized for {job_title} relevance]
-• [Real responsibility with quantifiable results, highlighting {job_title} skills]
-• [Real accomplishment that demonstrates value for {job_title} role]
-
-## Education
-[For EACH degree from their documents:]
-**[Actual Degree Title]** | [Actual Institution Name] | [Actual Graduation Year]
-[Include GPA if mentioned, relevant coursework, honors, etc.]
-
-## Projects
-[List ALL actual projects with:]
-**[Project Name]**: [Real description, technologies used, outcomes - emphasize relevance to {job_title}]
-
-## Technical Skills
-[Organize by categories - Programming Languages, Frameworks, Tools, Databases, etc.]
-
-## Certifications
-[List ALL actual certifications with dates and issuing organizations]
-
-## Additional Sections
-[Include: Languages spoken, Publications, Awards, Volunteer work, etc. - ALL from actual documents]
-
-**REQUIREMENTS:**
-1. Use EVERY piece of real information from the extracted context
-2. Create achievement-focused content with specific metrics and results
-3. Optimize all content specifically for {job_title} at {company_name}
-4. Include relevant keywords from job description naturally
-5. Ensure NO field is left empty - populate everything with real data
-6. Structure to highlight most relevant experience for {job_title}
-7. Make it completely ready to use with NO editing needed
-
-OUTPUT THE COMPLETE, FULLY POPULATED TAILORED RESUME NOW:"""
-            )
+                OUTPUT THE COMPLETE, FULLY POPULATED TAILORED RESUME IN JSON FORMAT NOW:"""
+                        )
             
             llm = ChatGoogleGenerativeAI(
                 model="gemini-2.5-pro-preview-03-25",
@@ -2853,7 +2778,7 @@ OUTPUT THE COMPLETE, FULLY POPULATED TAILORED RESUME NOW:"""
                 top_p=0.9
             )
             
-            chain = prompt | llm | StrOutputParser()
+            chain = prompt | llm | parser
             
             # Generate the tailored resume
             tailored_resume = await chain.ainvoke({
@@ -2871,31 +2796,20 @@ OUTPUT THE COMPLETE, FULLY POPULATED TAILORED RESUME NOW:"""
                 user_id=user.id,
                 content=tailored_resume
             )
-            db.add(new_resume_record)
+            db_resume.data = tailored_resume
             await db.commit()
+
+            summary = tailored_resume.get('personalInfo', {}).get('summary', 'Your new resume is ready.')
             
             return f"""[DOWNLOADABLE_RESUME]
 
-## 📄 **Tailored Resume Generated Successfully!**
+            ✅ **Your profile has been updated with a new resume tailored for the {job_title} role.**
 
-✅ **A first draft of your tailored resume for the {job_title} position{f' at {company_name}' if company_name else ''} is ready!** I've focused on ATS optimization, job-specific keywords, and achievement-focused language.
+            **✨ New Professional Summary:**
+            _{summary}_
 
-{tailored_resume}
-
----
-
-### 🎯 **Resume Optimization Features:**
-- **ATS-Optimized**: Formatted to pass Applicant Tracking Systems
-- **Job-Specific**: Tailored keywords and skills matching the job description
-- **Achievement-Focused**: Quantified accomplishments and strong action verbs
-- **Professional Format**: Clean, readable structure preferred by hiring managers
-
-### 📥 **Download Options:**
-**A download button (📥) should appear on this message.** Click it to access PDF versions of your tailored resume in multiple styles (Modern, Classic, Minimal). You can also preview and edit the content before downloading.
-
-**💡 Pro Tip:** Review the generated content and make any personal adjustments before downloading!
-
-<!-- content_id={new_resume_record.id} -->"""
+            You can now view the full, updated resume in the dialog or download it as a PDF.
+            """
             
         except Exception as e:
             log.error(f"Error generating tailored resume: {e}", exc_info=True)
@@ -2979,22 +2893,139 @@ Generate enhanced content that would impress hiring managers and pass ATS system
             
             return f"""## ✨ **Enhanced {section.title()} Section**
 
-{enhanced_content}
+            {enhanced_content}
 
----
+            ---
 
-**💡 Enhancement Features Applied:**
-- ✅ Professional language and terminology
-- ✅ Action-oriented and results-focused
-- ✅ ATS-optimized keywords
-- ✅ Industry best practices
-{f'- ✅ Tailored to job requirements' if job_description else ''}
+            **💡 Enhancement Features Applied:**
+            - ✅ Professional language and terminology
+            - ✅ Action-oriented and results-focused
+            - ✅ ATS-optimized keywords
+            - ✅ Industry best practices
+            {f'- ✅ Tailored to job requirements' if job_description else ''}
 
-**📝 Next Steps:** Copy this enhanced content to update your resume section, or use it as inspiration for further improvements!"""
+            **📝 Next Steps:** Copy this enhanced content to update your resume section, or use it as inspiration for further improvements!"""
             
         except Exception as e:
             log.error(f"Error enhancing resume section: {e}", exc_info=True)
             return f"❌ Sorry, I encountered an error while enhancing your {section} section: {str(e)}. Please try again."
+
+
+    @tool
+    async def generate_tailored_resume(
+        job_title: str,
+        company_name: str = "",
+        job_description: str = "",
+        user_skills: str = ""
+    ) -> str:
+        """Generate a complete, tailored resume based on a job description and user information.
+        
+        Args:
+            job_title: The job title to tailor the resume for
+            company_name: Target company name (optional)
+            job_description: Full job description to tailor against
+            user_skills: Additional skills to highlight (optional)
+        
+        Returns:
+            A complete, professionally formatted resume tailored to the job
+        """
+        try:
+            # CRITICAL: Check for placeholder data and extract real information first
+            if user.email and "@noemail.com" in user.email or user.name == "New User":
+                log.info("⚠️ Detected placeholder profile data, extracting real information first...")
+                extraction_result = await extract_and_populate_profile_from_documents()
+                log.info(f"📋 Profile extraction result: {extraction_result[:100]}...")
+                
+                # Refresh user data after extraction
+                await db.refresh(user)
+            
+            # Get existing resume data
+            db_resume, resume_data = await get_or_create_resume()
+            
+            # Get user documents for context
+            doc_result = await db.execute(
+                select(Document).where(Document.user_id == user.id).order_by(Document.date_created.desc())
+            )
+            documents = doc_result.scalars().all()
+            
+            # Prepare context for the AI model
+            document_context = "\n\n".join([f"**{doc.name}**:\n{doc.content[:1500]}" for doc in documents])
+            
+            prompt = f"""
+            You are a professional resume writer. Your task is to generate a complete, tailored resume for the user based on the provided information.
+
+            **Target Job:**
+            - Job Title: {job_title}
+            - Company: {company_name or "Not specified"}
+
+            **Job Description:**
+            ---
+            {job_description}
+            ---
+
+            **User's Current Resume Data:**
+            ---
+            {resume_data.json(indent=2)}
+            ---
+            
+            **User's Uploaded Documents for Additional Context:**
+            ---
+            {document_context}
+            ---
+
+            **Instructions:**
+            1.  Analyze the job description to identify key requirements, skills, and keywords.
+            2.  Review the user's existing resume data and documents.
+            3.  Generate a complete, new resume in a structured JSON format. **Do not just modify sections; regenerate the entire resume object.**
+            4.  Tailor the summary, experience descriptions, and skills to perfectly match the target job.
+            5.  Quantify achievements where possible (e.g., "Increased efficiency by 20%").
+            6.  Ensure the output is a valid JSON object matching the resume data structure.
+            
+            **Output Format (Strict JSON):**
+            {{
+                "personalInfo": {{ "name": "...", "email": "...", "phone": "...", "linkedin": "...", "location": "...", "summary": "..." }},
+                "experience": [{{ "job_title": "...", "company": "...", "dates": "...", "description": "..." }}],
+                "education": [{{ "degree": "...", "institution": "...", "dates": "..." }}],
+                "skills": ["...", "..."]
+            }}
+            """
+            
+            # Call the AI model
+            llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-preview-0514", temperature=0.3)
+            response = await llm.ainvoke(prompt)
+            
+            # Extract and parse the JSON response
+            import json
+            cleaned_response = response.content.strip().replace("```json", "").replace("```", "")
+            
+            try:
+                tailored_resume_data = json.loads(cleaned_response)
+            except json.JSONDecodeError:
+                log.error(f"Failed to decode tailored resume JSON: {cleaned_response}")
+                return "❌ I generated a tailored resume, but there was an error in its structure. Please try again."
+
+            # **THIS IS THE FIX:** Save the updated resume data back to the database
+            db_resume.data = tailored_resume_data
+            await db.commit()
+            
+            # Format the output for the user
+            output = f"✨ **Here is your new resume tailored for the {job_title} role!**\n\n"
+            output += f"**Summary:** {tailored_resume_data.get('personalInfo', {}).get('summary', 'N/A')}\n\n"
+            output += "**Experience Highlights:**\n"
+            for exp in tailored_resume_data.get('experience', [])[:2]:
+                output += f"- **{exp.get('job_title')} at {exp.get('company')}**: {exp.get('description', '')[:100]}...\n"
+            
+            output += "\nI have updated your profile with this new version. You can now download it as a PDF."
+            
+            return output
+
+        except Exception as e:
+            if db.is_active:
+                await db.rollback()
+            log.error(f"Error generating tailored resume: {e}", exc_info=True)
+            return "❌ I'm sorry, I encountered an error while tailoring your resume. Please check the details and try again."
+
+
 
     @tool
     async def create_resume_from_scratch(
@@ -3045,18 +3076,18 @@ Generate enhanced content that would impress hiring managers and pass ATS system
                 extraction_prompt = ChatPromptTemplate.from_template(
                     """Extract comprehensive resume information from these documents:
 
-{document_content}
+                        {document_content}
 
-Extract and format ALL information for a complete resume including:
-- Personal information (name, email, phone, location, LinkedIn, portfolio)
-- Professional summary and expertise
-- ALL work experience with detailed achievements
-- Education background with degrees and institutions
-- Technical skills, programming languages, tools
-- Projects with descriptions and technologies
-- Certifications, awards, languages, publications
+                        Extract and format ALL information for a complete resume including:
+                        - Personal information (name, email, phone, location, LinkedIn, portfolio)
+                        - Professional summary and expertise
+                        - ALL work experience with detailed achievements
+                        - Education background with degrees and institutions
+                        - Technical skills, programming languages, tools
+                        - Projects with descriptions and technologies
+                        - Certifications, awards, languages, publications
 
-Return comprehensive, detailed information - not placeholders or templates."""
+                        Return comprehensive, detailed information - not placeholders or templates."""
                 )
                 
                 extraction_llm = ChatGoogleGenerativeAI(
@@ -3085,61 +3116,61 @@ Return comprehensive, detailed information - not placeholders or templates."""
             prompt = ChatPromptTemplate.from_template(
                 """You are an expert career coach and resume writer. Create a COMPLETE, FULLY POPULATED resume using ALL the user's actual information.
 
-COMPREHENSIVE USER INFORMATION:
-{context}
+                    COMPREHENSIVE USER INFORMATION:
+                    {context}
 
-CAREER GOALS:
-- Target Role: {target_role}
-- Experience Level: {experience_level}
-- Industry: {industry}
-- Key Skills: {key_skills}
+                    CAREER GOALS:
+                    - Target Role: {target_role}
+                    - Experience Level: {experience_level}
+                    - Industry: {industry}
+                    - Key Skills: {key_skills}
 
-**CRITICAL INSTRUCTIONS:**
-- NEVER use placeholders like [Your Name], [Email], [Job Title], [Company]
-- NEVER write template instructions
-- USE ONLY the actual extracted information from the user's documents
-- CREATE a complete, ready-to-use resume with real content in every section
-- Fill ALL sections with the user's actual data
-- Optimize content for {target_role} positions
+                    **CRITICAL INSTRUCTIONS:**
+                    - NEVER use placeholders like [Your Name], [Email], [Job Title], [Company]
+                    - NEVER write template instructions
+                    - USE ONLY the actual extracted information from the user's documents
+                    - CREATE a complete, ready-to-use resume with real content in every section
+                    - Fill ALL sections with the user's actual data
+                    - Optimize content for {target_role} positions
 
-**CREATE THE COMPLETE RESUME:**
+                    **CREATE THE COMPLETE RESUME:**
 
-# [Use actual full name from documents]
-**Email:** [actual email] | **Phone:** [actual phone] | **Location:** [actual location] | **LinkedIn:** [actual LinkedIn]
+                    # [Use actual full name from documents]
+                    **Email:** [actual email] | **Phone:** [actual phone] | **Location:** [actual location] | **LinkedIn:** [actual LinkedIn]
 
-## Professional Summary
-[Write 3-4 compelling lines using their actual background, skills, and experience for {target_role} roles]
+                    ## Professional Summary
+                    [Write 3-4 compelling lines using their actual background, skills, and experience for {target_role} roles]
 
-## Core Skills
-[List ONLY their actual technical skills, programming languages, tools from documents, prioritized for {target_role}]
+                    ## Core Skills
+                    [List ONLY their actual technical skills, programming languages, tools from documents, prioritized for {target_role}]
 
-## Professional Experience
-[For EACH actual job from their background:]
-**[Actual Job Title]** | [Actual Company] | [Actual Dates]
-• [Real achievement with metrics optimized for {target_role}]
-• [Real responsibility with quantifiable results]
-• [Real accomplishment relevant to {target_role}]
+                    ## Professional Experience
+                    [For EACH actual job from their background:]
+                    **[Actual Job Title]** | [Actual Company] | [Actual Dates]
+                    • [Real achievement with metrics optimized for {target_role}]
+                    • [Real responsibility with quantifiable results]
+                    • [Real accomplishment relevant to {target_role}]
 
-## Education
-[For EACH degree from their documents:]
-**[Actual Degree]** | [Actual Institution] | [Actual Year/Dates]
+                    ## Education
+                    [For EACH degree from their documents:]
+                    **[Actual Degree]** | [Actual Institution] | [Actual Year/Dates]
 
-## Projects
-[List actual projects with:]
-**[Project Name]**: [Real description and technologies, relevant to {target_role}]
+                    ## Projects
+                    [List actual projects with:]
+                    **[Project Name]**: [Real description and technologies, relevant to {target_role}]
 
-## Additional Sections
-[Include actual certifications, languages, awards they have]
+                    ## Additional Sections
+                    [Include actual certifications, languages, awards they have]
 
-**REQUIREMENTS:**
-1. Use EVERY piece of real information from the extracted context
-2. Create achievement-focused content with metrics where available
-3. Optimize all content for {target_role} and {industry} positions
-4. Structure appropriately for {experience_level} professional
-5. Make it completely ready to use - no editing needed
-6. Focus on achievements and skills most relevant to {target_role}
+                    **REQUIREMENTS:**
+                    1. Use EVERY piece of real information from the extracted context
+                    2. Create achievement-focused content with metrics where available
+                    3. Optimize all content for {target_role} and {industry} positions
+                    4. Structure appropriately for {experience_level} professional
+                    5. Make it completely ready to use - no editing needed
+                    6. Focus on achievements and skills most relevant to {target_role}
 
-OUTPUT THE COMPLETE, POPULATED RESUME NOW:"""
+                    OUTPUT THE COMPLETE, POPULATED RESUME NOW:"""
             )
             
             llm = ChatGoogleGenerativeAI(
@@ -3169,31 +3200,31 @@ OUTPUT THE COMPLETE, POPULATED RESUME NOW:"""
             
             return f"""[DOWNLOADABLE_RESUME]
 
-## 📄 **Professional Resume Created Successfully!**
+            ## 📄 **Professional Resume Created Successfully!**
 
-✅ **A first draft of your {experience_level} {target_role} resume is ready!** I've focused on role-specific tailoring, ATS optimization, and professional structure.
+            ✅ **A first draft of your {experience_level} {target_role} resume is ready!** I've focused on role-specific tailoring, ATS optimization, and professional structure.
 
-{new_resume}
+            {new_resume}
 
----
+            ---
 
-### 🎯 **Resume Features:**
-- **Role-Specific**: Tailored for {target_role} positions
-- **Experience-Appropriate**: Structured for {experience_level} professionals
-- **ATS-Optimized**: Formatted to pass Applicant Tracking Systems
-- **Industry-Relevant**: {f'Focused on {industry} industry' if industry else 'Adaptable across industries'}
+            ### 🎯 **Resume Features:**
+            - **Role-Specific**: Tailored for {target_role} positions
+            - **Experience-Appropriate**: Structured for {experience_level} professionals
+            - **ATS-Optimized**: Formatted to pass Applicant Tracking Systems
+            - **Industry-Relevant**: {f'Focused on {industry} industry' if industry else 'Adaptable across industries'}
 
-### 📥 **Download Options:**
-**A download button (📥) should appear on this message.** Click it to access PDF versions of your resume in multiple styles (Modern, Classic, Minimal). You can also preview and edit the content before downloading.
+            ### 📥 **Download Options:**
+            **A download button (📥) should appear on this message.** Click it to access PDF versions of your resume in multiple styles (Modern, Classic, Minimal). You can also preview and edit the content before downloading.
 
-### 📝 **Next Steps:**
-1. **Review & Customize**: Personalize the template with your specific details
-2. **Download PDF**: Use the download button for professional formatting
-3. **Tailor Further**: Customize for specific job applications
+            ### 📝 **Next Steps:**
+            1. **Review & Customize**: Personalize the template with your specific details
+            2. **Download PDF**: Use the download button for professional formatting
+            3. **Tailor Further**: Customize for specific job applications
 
-**💡 Pro Tip:** This is your foundation - customize it for each job application for best results!
+            **💡 Pro Tip:** This is your foundation - customize it for each job application for best results!
 
-<!-- content_id={new_resume_record.id} -->"""
+            <!-- content_id={new_resume_record.id} -->"""
             
         except Exception as e:
             log.error(f"Error creating resume from scratch: {e}", exc_info=True)
@@ -3221,6 +3252,7 @@ OUTPUT THE COMPLETE, POPULATED RESUME NOW:"""
             target_role: The role or industry to tailor the CV for (e.g., "AI Engineering", "Software Development")
             job_description: Specific job description to tailor against (optional)
             company_name: Target company name (optional)
+            user_skills: Additional skills to highlight (optional)
         
         Returns:
             A refined, professionally tailored CV optimized for the target role
@@ -3265,39 +3297,39 @@ OUTPUT THE COMPLETE, POPULATED RESUME NOW:"""
                 extraction_prompt = ChatPromptTemplate.from_template(
                     """Extract comprehensive resume information from these documents:
 
-{document_content}
+                        {document_content}
 
-Extract and format ALL information for a complete resume. Return detailed content for:
+                        Extract and format ALL information for a complete resume. Return detailed content for:
 
-**PERSONAL INFORMATION:**
-- Full name, email, phone, location, LinkedIn, portfolio, GitHub
+                        **PERSONAL INFORMATION:**
+                        - Full name, email, phone, location, LinkedIn, portfolio, GitHub
 
-**PROFESSIONAL SUMMARY:**
-- Write a compelling 3-4 line summary of their background and expertise
+                        **PROFESSIONAL SUMMARY:**
+                        - Write a compelling 3-4 line summary of their background and expertise
 
-**WORK EXPERIENCE:**
-- List ALL positions with: Job Title | Company | Dates | Detailed achievements and responsibilities
+                        **WORK EXPERIENCE:**
+                        - List ALL positions with: Job Title | Company | Dates | Detailed achievements and responsibilities
 
-**EDUCATION:**
-- All degrees, institutions, dates, relevant coursework, honors
+                        **EDUCATION:**
+                        - All degrees, institutions, dates, relevant coursework, honors
 
-**TECHNICAL SKILLS:**
-- Programming languages, frameworks, tools, technologies
+                        **TECHNICAL SKILLS:**
+                        - Programming languages, frameworks, tools, technologies
 
-**PROJECTS:**
-- Significant projects with descriptions and technologies used
+                        **PROJECTS:**
+                        - Significant projects with descriptions and technologies used
 
-**CERTIFICATIONS/AWARDS:**
-- Any certifications, awards, or recognition
+                        **CERTIFICATIONS/AWARDS:**
+                        - Any certifications, awards, or recognition
 
-**ADDITIONAL SECTIONS:**
-- Languages, publications, volunteer work, etc.
+                        **ADDITIONAL SECTIONS:**
+                        - Languages, publications, volunteer work, etc.
 
-Return comprehensive, detailed information - not placeholders or templates. Use the actual content from the documents."""
+                        Return comprehensive, detailed information - not placeholders or templates. Use the actual content from the documents."""
                 )
                 
                 extraction_llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.5-pro-preview-03-25",
+                    model="gemini-2.5-flash-preview-04-17",
                     temperature=0.3
                 )
                 
@@ -3321,59 +3353,59 @@ Return comprehensive, detailed information - not placeholders or templates. Use 
             prompt = ChatPromptTemplate.from_template(
                 """You are an expert resume writer. Create a COMPLETE, FULLY POPULATED CV using ALL the user's actual information.
 
-USER'S COMPREHENSIVE INFORMATION:
-{context}
+                    USER'S COMPREHENSIVE INFORMATION:
+                    {context}
 
-TARGET ROLE: {target_role}
-COMPANY: {company_name}  
-JOB DESCRIPTION: {job_description}
+                    TARGET ROLE: {target_role}
+                    COMPANY: {company_name}  
+                    JOB DESCRIPTION: {job_description}
 
-**CRITICAL INSTRUCTIONS:**
-- NEVER use placeholders like [Full Name], [email], [Job Title]
-- NEVER write template instructions like "List your experience here"
-- USE ONLY the actual extracted information from the documents
-- CREATE a complete, ready-to-use CV with real content in every section
-- Fill ALL sections with the user's actual data
-- Optimize content for {target_role} positions
+                    **CRITICAL INSTRUCTIONS:**
+                    - NEVER use placeholders like [Full Name], [email], [Job Title]
+                    - NEVER write template instructions like "List your experience here"
+                    - USE ONLY the actual extracted information from the documents
+                    - CREATE a complete, ready-to-use CV with real content in every section
+                    - Fill ALL sections with the user's actual data
+                    - Optimize content for {target_role} positions
 
-**FORMAT THE COMPLETE CV:**
+                    **FORMAT THE COMPLETE CV:**
 
-# [Use actual full name from the documents]
-**Email:** [actual email] | **Phone:** [actual phone] | **Location:** [actual location] | **LinkedIn:** [actual LinkedIn]
+                    # [Use actual full name from the documents]
+                    **Email:** [actual email] | **Phone:** [actual phone] | **Location:** [actual location] | **LinkedIn:** [actual LinkedIn]
 
-## Professional Summary
-[Write 3-4 compelling lines using their actual background, skills, and experience - not generic text]
+                    ## Professional Summary
+                    [Write 3-4 compelling lines using their actual background, skills, and experience - not generic text]
 
-## Core Skills
-[List ONLY their actual technical skills, programming languages, tools, and technologies from the documents]
+                    ## Core Skills
+                    [List ONLY their actual technical skills, programming languages, tools, and technologies from the documents]
 
-## Professional Experience
-[For EACH actual job from their background:]
-**[Actual Job Title]** | [Actual Company] | [Actual Dates]
-• [Real achievement with metrics/impact]
-• [Real responsibility with quantifiable results]
-• [Real project or accomplishment specific to that role]
+                    ## Professional Experience
+                    [For EACH actual job from their background:]
+                    **[Actual Job Title]** | [Actual Company] | [Actual Dates]
+                    • [Real achievement with metrics/impact]
+                    • [Real responsibility with quantifiable results]
+                    • [Real project or accomplishment specific to that role]
 
-## Education
-[For EACH degree/certification from their documents:]
-**[Actual Degree]** | [Actual Institution] | [Actual Year/Dates]
-[Any relevant details like honors, GPA, relevant coursework]
+                    ## Education
+                    [For EACH degree/certification from their documents:]
+                    **[Actual Degree]** | [Actual Institution] | [Actual Year/Dates]
+                    [Any relevant details like honors, GPA, relevant coursework]
 
-## Projects
-[List actual projects from their documents with:]
-**[Project Name]**: [Real description and technologies used]
+                    ## Projects
+                    [List actual projects from their documents with:]
+                    **[Project Name]**: [Real description and technologies used]
 
-## Additional Sections
-[Include any actual certifications, languages, awards, publications they have]
+                    ## Additional Sections
+                    [Include any actual certifications, languages, awards, publications they have]
 
-**REQUIREMENTS:**
-1. Use EVERY piece of real information from the extracted context
-2. Create achievement-focused bullet points with metrics where available
-3. Optimize language and keywords for {target_role} positions
-4. Ensure professional formatting and ATS compatibility
-5. Make it completely ready to use - no editing needed
+                    **REQUIREMENTS:**
+                    1. Use EVERY piece of real information from the extracted context
+                    2. Create achievement-focused bullet points with metrics where available
+                    3. Optimize language and keywords for {target_role} positions
+                    4. Ensure professional formatting and ATS compatibility
+                    5. Make it completely ready to use - no editing needed
 
-OUTPUT THE COMPLETE, POPULATED CV NOW:"""
+                    OUTPUT THE COMPLETE, POPULATED CV NOW:"""
             )
             
             llm = ChatGoogleGenerativeAI(
@@ -3407,25 +3439,25 @@ OUTPUT THE COMPLETE, POPULATED CV NOW:"""
             
             return f"""[DOWNLOADABLE_RESUME]
 
-## 🎉 **Hey {user_first_name}! Your {target_role} CV is ready!**
+            ## 🎉 **Hey {user_first_name}! Your {target_role} CV is ready!**
 
-I've refined your CV specifically for {target_role} positions{f' at {company_name}' if company_name else ''}. Here's what I created for you:
+            I've refined your CV specifically for {target_role} positions{f' at {company_name}' if company_name else ''}. Here's what I created for you:
 
-{refined_resume}
+            {refined_resume}
 
----
+            ---
 
-**🚀 What I optimized for you:**
-- Made it {target_role}-specific with the right keywords
-- Ensured it'll pass ATS systems
-- Highlighted your strongest achievements
-- Used professional language that hiring managers love
+            **🚀 What I optimized for you:**
+            - Made it {target_role}-specific with the right keywords
+            - Ensured it'll pass ATS systems
+            - Highlighted your strongest achievements
+            - Used professional language that hiring managers love
 
-**📥 Ready to download?** Click the download button (📥) above to get your CV in different styles - Modern, Classic, or Minimal. You can preview and make any tweaks before downloading.
+            **📥 Ready to download?** Click the download button (📥) above to get your CV in different styles - Modern, Classic, or Minimal. You can preview and make any tweaks before downloading.
 
-**💡 Quick tip:** This CV is already personalized with your information, but feel free to adjust anything before you download it!
+            **💡 Quick tip:** This CV is already personalized with your information, but feel free to adjust anything before you download it!
 
-<!-- content_id={new_resume_record.id} -->"""
+            <!-- content_id={new_resume_record.id} -->"""
             
         except Exception as e:
             log.error(f"Error in CV refinement: {e}", exc_info=True)
@@ -3463,53 +3495,53 @@ Please try one of these alternatives, and I'll help you create an outstanding CV
             prompt = ChatPromptTemplate.from_template(
                 """You are an expert career coach and CV writer. Provide comprehensive, actionable CV best practices.
 
-TARGET PROFILE:
-- Industry: {industry}
-- Experience Level: {experience_level}
-- Role Type: {role_type}
+                TARGET PROFILE:
+                - Industry: {industry}
+                - Experience Level: {experience_level}
+                - Role Type: {role_type}
 
-Provide detailed guidance covering:
+                Provide detailed guidance covering:
 
-## 📋 **CV Structure & Format**
-- Optimal CV length and layout
-- Section ordering and priorities
-- Font, spacing, and visual guidelines
-- ATS-friendly formatting tips
+                ## 📋 **CV Structure & Format**
+                - Optimal CV length and layout
+                - Section ordering and priorities
+                - Font, spacing, and visual guidelines
+                - ATS-friendly formatting tips
 
-## 🎯 **Content Best Practices**
-- How to write compelling professional summaries
-- Quantifying achievements with metrics
-- Using strong action verbs effectively
-- Tailoring content for specific roles
+                ## 🎯 **Content Best Practices**
+                - How to write compelling professional summaries
+                - Quantifying achievements with metrics
+                - Using strong action verbs effectively
+                - Tailoring content for specific roles
 
-## 🔍 **Industry-Specific Tips**
-- Key skills and keywords for this industry
-- Common requirements and expectations
-- Portfolio/work samples considerations
-- Certification and education priorities
+                ## 🔍 **Industry-Specific Tips**
+                - Key skills and keywords for this industry
+                - Common requirements and expectations
+                - Portfolio/work samples considerations
+                - Certification and education priorities
 
-## ⚠️ **Common Mistakes to Avoid**
-- Red flags that hurt your chances
-- Outdated practices to eliminate
-- Length and content balance issues
-- Contact information best practices
+                ## ⚠️ **Common Mistakes to Avoid**
+                - Red flags that hurt your chances
+                - Outdated practices to eliminate
+                - Length and content balance issues
+                - Contact information best practices
 
-## 🚀 **Advanced Strategies**
-- ATS optimization techniques
-- Personal branding integration
-- LinkedIn profile alignment
-- Cover letter coordination
+                ## 🚀 **Advanced Strategies**
+                - ATS optimization techniques
+                - Personal branding integration
+                - LinkedIn profile alignment
+                - Cover letter coordination
 
-## 📊 **Success Metrics**
-- How to track CV performance
-- When and how to update your CV
-- Multiple version strategies
+                ## 📊 **Success Metrics**
+                - How to track CV performance
+                - When and how to update your CV
+                - Multiple version strategies
 
-Provide specific, actionable advice that someone can implement immediately."""
+                Provide specific, actionable advice that someone can implement immediately."""
             )
             
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash-preview-04-17",
+                model="gemini-2.5-pro-preview-03-25",
                 temperature=0.7
             )
             
@@ -3523,22 +3555,22 @@ Provide specific, actionable advice that someone can implement immediately."""
             
             return f"""## 📚 **CV Best Practices Guide**
 
-🎯 **Tailored for:** {experience_level} {role_type} professionals{f' in {industry}' if industry else ''}
+                🎯 **Tailored for:** {experience_level} {role_type} professionals{f' in {industry}' if industry else ''}
 
-{guidance}
+                {guidance}
 
----
+                ---
 
-**💡 Quick Action Items:**
-1. **Review Your Current CV**: Use these guidelines to audit your existing CV
-2. **Implement Top 3 Changes**: Start with the most impactful improvements
-3. **Test ATS Compatibility**: Use online ATS checkers to validate formatting
-4. **Get Feedback**: Have colleagues or mentors review using these criteria
+                **💡 Quick Action Items:**
+                1. **Review Your Current CV**: Use these guidelines to audit your existing CV
+                2. **Implement Top 3 Changes**: Start with the most impactful improvements
+                3. **Test ATS Compatibility**: Use online ATS checkers to validate formatting
+                4. **Get Feedback**: Have colleagues or mentors review using these criteria
 
-**🔗 Related Commands:**
-- `enhance my resume section [section_name]` - Improve specific sections
-- `create resume from scratch` - Start fresh with best practices
-- `analyze my skills gap` - Identify areas for improvement"""
+                **🔗 Related Commands:**
+                - `enhance my resume section [section_name]` - Improve specific sections
+                - `create resume from scratch` - Start fresh with best practices
+                - `analyze my skills gap` - Identify areas for improvement"""
             
         except Exception as e:
             log.error(f"Error getting CV best practices: {e}", exc_info=True)
@@ -3580,68 +3612,68 @@ Provide specific, actionable advice that someone can implement immediately."""
             prompt = ChatPromptTemplate.from_template(
                 """You are a career development expert. Analyze the skills gap and provide actionable career development advice.
 
-TARGET ROLE: {target_role}
-CURRENT SKILLS: {current_skills}
-JOB DESCRIPTION: {job_description}
+                TARGET ROLE: {target_role}
+                CURRENT SKILLS: {current_skills}
+                JOB DESCRIPTION: {job_description}
 
-Provide a comprehensive skills gap analysis:
+                Provide a comprehensive skills gap analysis:
 
-## 🎯 **Role Requirements Analysis**
-- Core technical skills needed
-- Soft skills and competencies required
-- Experience level expectations
-- Industry-specific knowledge needed
+                ## 🎯 **Role Requirements Analysis**
+                - Core technical skills needed
+                - Soft skills and competencies required
+                - Experience level expectations
+                - Industry-specific knowledge needed
 
-## ✅ **Your Strengths**
-- Skills you already have that match
-- Transferable skills from your background
-- Competitive advantages you possess
-- Areas where you exceed requirements
+                ## ✅ **Your Strengths**
+                - Skills you already have that match
+                - Transferable skills from your background
+                - Competitive advantages you possess
+                - Areas where you exceed requirements
 
-## 📈 **Skills to Develop**
-### High Priority (Essential)
-- Critical missing skills for the role
-- Skills that appear in most job postings
-- Technical competencies to prioritize
+                ## 📈 **Skills to Develop**
+                ### High Priority (Essential)
+                - Critical missing skills for the role
+                - Skills that appear in most job postings
+                - Technical competencies to prioritize
 
-### Medium Priority (Valuable)
-- Nice-to-have skills that differentiate candidates
-- Emerging technologies in the field
-- Cross-functional competencies
+                ### Medium Priority (Valuable)
+                - Nice-to-have skills that differentiate candidates
+                - Emerging technologies in the field
+                - Cross-functional competencies
 
-### Low Priority (Future Growth)
-- Advanced skills for career progression
-- Specialized technologies or certifications
-- Leadership and management capabilities
+                ### Low Priority (Future Growth)
+                - Advanced skills for career progression
+                - Specialized technologies or certifications
+                - Leadership and management capabilities
 
-## 📚 **Learning Roadmap**
-### Immediate (Next 1-3 months)
-- Specific courses, certifications, or bootcamps
-- Free resources and tutorials
-- Practical projects to build skills
+                ## 📚 **Learning Roadmap**
+                ### Immediate (Next 1-3 months)
+                - Specific courses, certifications, or bootcamps
+                - Free resources and tutorials
+                - Practical projects to build skills
 
-### Medium-term (3-6 months)
-- More comprehensive training programs
-- Professional certifications
-- Portfolio development projects
+                ### Medium-term (3-6 months)
+                - More comprehensive training programs
+                - Professional certifications
+                - Portfolio development projects
 
-### Long-term (6+ months)
-- Advanced certifications or degrees
-- Conference attendance and networking
-- Thought leadership opportunities
+                ### Long-term (6+ months)
+                - Advanced certifications or degrees
+                - Conference attendance and networking
+                - Thought leadership opportunities
 
-## 💼 **CV Enhancement Strategy**
-- How to present existing skills more effectively
-- Projects to showcase during skill development
-- Keywords to incorporate from target role
-- Experience gaps to address
+                ## 💼 **CV Enhancement Strategy**
+                - How to present existing skills more effectively
+                - Projects to showcase during skill development
+                - Keywords to incorporate from target role
+                - Experience gaps to address
 
-## 🎯 **Action Plan**
-Provide specific, time-bound recommendations for skill development."""
+                ## 🎯 **Action Plan**
+                Provide specific, time-bound recommendations for skill development."""
             )
             
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash-preview-04-17",
+                model="gemini-2.5-pro-preview-03-25",
                 temperature=0.7
             )
             
@@ -3655,21 +3687,21 @@ Provide specific, time-bound recommendations for skill development."""
             
             return f"""## 🔍 **Skills Gap Analysis for {target_role}**
 
-{analysis}
+            {analysis}
 
----
+            ---
 
-**🚀 Next Steps:**
-1. **Prioritize Learning**: Focus on high-priority skills first
-2. **Update Your CV**: Add new skills as you develop them
-3. **Build Projects**: Create portfolio pieces demonstrating new skills
-4. **Network Actively**: Connect with professionals in your target role
-5. **Track Progress**: Regularly reassess your skill development
+            **🚀 Next Steps:**
+            1. **Prioritize Learning**: Focus on high-priority skills first
+            2. **Update Your CV**: Add new skills as you develop them
+            3. **Build Projects**: Create portfolio pieces demonstrating new skills
+            4. **Network Actively**: Connect with professionals in your target role
+            5. **Track Progress**: Regularly reassess your skill development
 
-**🔗 Helpful Commands:**
-- `search jobs for [role]` - Find specific requirements in current job postings
-- `enhance my resume section skills` - Optimize your skills presentation
-- `create learning plan for [skill]` - Get detailed learning resources"""
+            **🔗 Helpful Commands:**
+            - `search jobs for [role]` - Find specific requirements in current job postings
+            - `enhance my resume section skills` - Optimize your skills presentation
+            - `create learning plan for [skill]` - Get detailed learning resources"""
             
         except Exception as e:
             log.error(f"Error analyzing skills gap: {e}", exc_info=True)
@@ -3696,73 +3728,73 @@ Provide specific, time-bound recommendations for skill development."""
             prompt = ChatPromptTemplate.from_template(
                 """You are an ATS optimization expert. Provide comprehensive, technical guidance for passing modern ATS systems.
 
-TARGET CONTEXT:
-- File Format: {file_format}
-- Industry: {industry}
+                TARGET CONTEXT:
+                - File Format: {file_format}
+                - Industry: {industry}
 
-Provide detailed ATS optimization guidance:
+                Provide detailed ATS optimization guidance:
 
-## 🤖 **Understanding ATS Systems**
-- How modern ATS systems work
-- What ATS algorithms look for
-- Common ATS software types and their quirks
-- Industry-specific ATS considerations
+                ## 🤖 **Understanding ATS Systems**
+                - How modern ATS systems work
+                - What ATS algorithms look for
+                - Common ATS software types and their quirks
+                - Industry-specific ATS considerations
 
-## 📄 **File Format Optimization**
-- Best practices for {file_format} format
-- Formatting do's and don'ts
-- Font and layout recommendations
-- File naming conventions
+                ## 📄 **File Format Optimization**
+                - Best practices for {file_format} format
+                - Formatting do's and don'ts
+                - Font and layout recommendations
+                - File naming conventions
 
-## 🔍 **Keyword Optimization**
-### Keyword Research
-- How to identify relevant keywords
-- Where to find industry-specific terms
-- Balancing keyword density naturally
-- Using variations and synonyms
+                ## 🔍 **Keyword Optimization**
+                ### Keyword Research
+                - How to identify relevant keywords
+                - Where to find industry-specific terms
+                - Balancing keyword density naturally
+                - Using variations and synonyms
 
-### Keyword Placement
-- Strategic locations for keywords
-- Section headers and their importance
-- Natural integration techniques
-- Avoiding keyword stuffing
+                ### Keyword Placement
+                - Strategic locations for keywords
+                - Section headers and their importance
+                - Natural integration techniques
+                - Avoiding keyword stuffing
 
-## 📋 **Structure & Formatting**
-### Section Organization
-- ATS-friendly section headers
-- Optimal section ordering
-- Contact information formatting
-- Date formats that ATS systems prefer
+                ## 📋 **Structure & Formatting**
+                ### Section Organization
+                - ATS-friendly section headers
+                - Optimal section ordering
+                - Contact information formatting
+                - Date formats that ATS systems prefer
 
-### Content Formatting
-- Bullet points vs. paragraphs
-- Special characters to avoid
-- Table and column usage
-- Header and footer limitations
+                ### Content Formatting
+                - Bullet points vs. paragraphs
+                - Special characters to avoid
+                - Table and column usage
+                - Header and footer limitations
 
-## ✅ **Technical Best Practices**
-- Font choices that scan well
-- Margins and spacing guidelines
-- Graphics and images considerations
-- Links and hypertext handling
+                ## ✅ **Technical Best Practices**
+                - Font choices that scan well
+                - Margins and spacing guidelines
+                - Graphics and images considerations
+                - Links and hypertext handling
 
-## 🧪 **Testing Your CV**
-- Free ATS testing tools
-- How to interpret ATS scan results
-- Common parsing errors to fix
-- Quality assurance checklist
+                ## 🧪 **Testing Your CV**
+                - Free ATS testing tools
+                - How to interpret ATS scan results
+                - Common parsing errors to fix
+                - Quality assurance checklist
 
-## 📊 **Tracking & Iteration**
-- Metrics to monitor application success
-- When and how to update your CV
-- A/B testing different versions
-- Industry benchmarks for response rates
+                ## 📊 **Tracking & Iteration**
+                - Metrics to monitor application success
+                - When and how to update your CV
+                - A/B testing different versions
+                - Industry benchmarks for response rates
 
-Provide specific, technical advice that ensures maximum ATS compatibility."""
+                Provide specific, technical advice that ensures maximum ATS compatibility."""
             )
             
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash-preview-04-17",
+                model="gemini-2.5-pro-preview-03-25",
                 temperature=0.6,
                 callbacks=[tracer]
             )
@@ -3776,29 +3808,29 @@ Provide specific, technical advice that ensures maximum ATS compatibility."""
             
             return f"""## 🤖 **ATS Optimization Guide**
 
-📁 **Format:** {file_format} | 🏢 **Industry:** {industry or 'General'}
+            📁 **Format:** {file_format} | 🏢 **Industry:** {industry or 'General'}
 
-{tips}
+            {tips}
 
----
+            ---
 
-**🔧 Immediate Actions:**
-1. **Test Your Current CV**: Use Jobscan or similar ATS checker tools
-2. **Review Keywords**: Compare your CV against 2-3 target job postings
-3. **Fix Formatting Issues**: Address any parsing problems identified
-4. **Create ATS Version**: Keep a simplified version specifically for ATS systems
+            **🔧 Immediate Actions:**
+            1. **Test Your Current CV**: Use Jobscan or similar ATS checker tools
+            2. **Review Keywords**: Compare your CV against 2-3 target job postings
+            3. **Fix Formatting Issues**: Address any parsing problems identified
+            4. **Create ATS Version**: Keep a simplified version specifically for ATS systems
 
-**⚠️ Quick Checklist:**
-- ✅ Uses standard section headers (Experience, Education, Skills)
-- ✅ No graphics, tables, or complex formatting
-- ✅ Keywords appear naturally throughout content
-- ✅ Consistent date formatting (MM/YYYY)
-- ✅ Contact info in simple text format
-- ✅ File saved with professional naming convention
+            **⚠️ Quick Checklist:**
+            - ✅ Uses standard section headers (Experience, Education, Skills)
+            - ✅ No graphics, tables, or complex formatting
+            - ✅ Keywords appear naturally throughout content
+            - ✅ Consistent date formatting (MM/YYYY)
+            - ✅ Contact info in simple text format
+            - ✅ File saved with professional naming convention
 
-**🔗 Related Tools:**
-- `generate tailored resume` - Create ATS-optimized content
-- `enhance my resume section` - Improve keyword density"""
+            **🔗 Related Tools:**
+            - `generate tailored resume` - Create ATS-optimized content
+            - `enhance my resume section` - Improve keyword density"""
             
         except Exception as e:
             log.error(f"Error getting ATS optimization tips: {e}", exc_info=True)
@@ -3887,103 +3919,103 @@ Provide specific, technical advice that ensures maximum ATS compatibility."""
             prompt = ChatPromptTemplate.from_template(
                 """You are an expert interview coach. Create a comprehensive, personalized interview preparation guide.
 
-USER CONTEXT: {user_context}
-TARGET ROLE: {job_title}
-COMPANY: {company_name}
-INTERVIEW TYPE: {interview_type}
-JOB DESCRIPTION: {job_description}
+                USER CONTEXT: {user_context}
+                TARGET ROLE: {job_title}
+                COMPANY: {company_name}
+                INTERVIEW TYPE: {interview_type}
+                JOB DESCRIPTION: {job_description}
 
-Create a detailed interview preparation guide:
+                Create a detailed interview preparation guide:
 
-## 🎯 **Role-Specific Preparation**
-### Key Competencies to Highlight
-- Core skills most relevant to this role
-- How to connect your background to role requirements
-- Unique value propositions to emphasize
-- Potential concerns to address proactively
+                ## 🎯 **Role-Specific Preparation**
+                ### Key Competencies to Highlight
+                - Core skills most relevant to this role
+                - How to connect your background to role requirements
+                - Unique value propositions to emphasize
+                - Potential concerns to address proactively
 
-### Industry Context
-- Current trends and challenges in the industry
-- Company-specific research points
-- Market positioning and competitive landscape
-- Recent news or developments to mention
+                ### Industry Context
+                - Current trends and challenges in the industry
+                - Company-specific research points
+                - Market positioning and competitive landscape
+                - Recent news or developments to mention
 
-## 💬 **Expected Interview Questions**
-### Behavioral Questions (STAR Method)
-- 5-7 likely behavioral questions for this role
-- Frameworks for structuring responses
-- How to use your CV experiences effectively
-- Stories to prepare from your background
+                ## 💬 **Expected Interview Questions**
+                ### Behavioral Questions (STAR Method)
+                - 5-7 likely behavioral questions for this role
+                - Frameworks for structuring responses
+                - How to use your CV experiences effectively
+                - Stories to prepare from your background
 
-### Technical/Role-Specific Questions
-- Technical skills assessments to expect
-- Problem-solving scenarios relevant to the role
-- Industry knowledge questions
-- Portfolio or work sample discussions
+                ### Technical/Role-Specific Questions
+                - Technical skills assessments to expect
+                - Problem-solving scenarios relevant to the role
+                - Industry knowledge questions
+                - Portfolio or work sample discussions
 
-### Situational Questions
-- Hypothetical scenarios for this position
-- Leadership and teamwork examples
-- Conflict resolution situations
-- Decision-making frameworks
+                ### Situational Questions
+                - Hypothetical scenarios for this position
+                - Leadership and teamwork examples
+                - Conflict resolution situations
+                - Decision-making frameworks
 
-## 🤝 **Company Research Strategy**
-### Essential Research Areas
-- Company mission, values, and culture
-- Recent achievements and challenges
-- Leadership team and organizational structure
-- Products, services, and market position
+                ## 🤝 **Company Research Strategy**
+                ### Essential Research Areas
+                - Company mission, values, and culture
+                - Recent achievements and challenges
+                - Leadership team and organizational structure
+                - Products, services, and market position
 
-### Research Sources
-- Official company resources
-- Industry publications and news
-- Employee insights (LinkedIn, Glassdoor)
-- Social media and recent announcements
+                ### Research Sources
+                - Official company resources
+                - Industry publications and news
+                - Employee insights (LinkedIn, Glassdoor)
+                - Social media and recent announcements
 
-## ❓ **Questions to Ask Them**
-### Role and Responsibilities
-- Thoughtful questions about the position
-- Team dynamics and collaboration
-- Success metrics and expectations
-- Growth opportunities and career path
+                ## ❓ **Questions to Ask Them**
+                ### Role and Responsibilities
+                - Thoughtful questions about the position
+                - Team dynamics and collaboration
+                - Success metrics and expectations
+                - Growth opportunities and career path
 
-### Company and Culture
-- Strategic questions about company direction
-- Culture and work environment inquiries
-- Professional development opportunities
-- Industry challenges and opportunities
+                ### Company and Culture
+                - Strategic questions about company direction
+                - Culture and work environment inquiries
+                - Professional development opportunities
+                - Industry challenges and opportunities
 
-## 🎭 **Interview Performance Tips**
-### Communication Strategies
-- How to present your CV experiences compellingly
-- Confidence-building techniques
-- Body language and presentation tips
-- Virtual interview best practices (if applicable)
+                ## 🎭 **Interview Performance Tips**
+                ### Communication Strategies
+                - How to present your CV experiences compellingly
+                - Confidence-building techniques
+                - Body language and presentation tips
+                - Virtual interview best practices (if applicable)
 
-### Common Pitfalls to Avoid
-- Red flags that hurt candidates
-- How to handle difficult questions
-- Salary and compensation discussions
-- Follow-up and next steps etiquette
+                ### Common Pitfalls to Avoid
+                - Red flags that hurt candidates
+                - How to handle difficult questions
+                - Salary and compensation discussions
+                - Follow-up and next steps etiquette
 
-## 📋 **Preparation Checklist**
-### Before the Interview
-- Documents and materials to prepare
-- Questions and answers to practice
-- Research tasks to complete
-- Logistics and setup considerations
+                ## 📋 **Preparation Checklist**
+                ### Before the Interview
+                - Documents and materials to prepare
+                - Questions and answers to practice
+                - Research tasks to complete
+                - Logistics and setup considerations
 
-### Day of Interview
-- Final preparation steps
-- What to bring/have ready
-- Timing and arrival guidelines
-- Backup plans for technical issues
+                ### Day of Interview
+                - Final preparation steps
+                - What to bring/have ready
+                - Timing and arrival guidelines
+                - Backup plans for technical issues
 
-Provide specific, actionable advice tailored to this role and the user's background."""
+                Provide specific, actionable advice tailored to this role and the user's background."""
             )
             
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash-preview-04-17",
+                model="gemini-2.5-pro-preview-03-25",
                 temperature=0.3
             )
             
@@ -4001,48 +4033,48 @@ Provide specific, actionable advice tailored to this role and the user's backgro
             qa_prompt = ChatPromptTemplate.from_template(
                 """Generate 10 realistic interview questions and answers for this role, including CV-specific questions.
 
-USER CONTEXT: {user_context}
-TARGET ROLE: {job_title}
-COMPANY: {company_name}
-INTERVIEW TYPE: {interview_type}
-JOB DESCRIPTION: {job_description}
+                USER CONTEXT: {user_context}
+                TARGET ROLE: {job_title}
+                COMPANY: {company_name}
+                INTERVIEW TYPE: {interview_type}
+                JOB DESCRIPTION: {job_description}
 
-**CRITICAL: Analyze the user's CV/background and the job description to create questions that reference their SPECIFIC experience:**
+                **CRITICAL: Analyze the user's CV/background and the job description to create questions that reference their SPECIFIC experience:**
 
-Generate exactly 10 interview questions with sample answers. Return as JSON array:
-[
-  {{
-    "question": "Tell me about yourself.",
-    "answer": "Brief sample answer that the candidate could reference or build upon"
-  }},
-  ...
-]
+                Generate exactly 10 interview questions with sample answers. Return as JSON array:
+                [
+                {{
+                    "question": "Tell me about yourself.",
+                    "answer": "Brief sample answer that the candidate could reference or build upon"
+                }},
+                ...
+                ]
 
-Include this mix:
-- 2 CV-specific questions (reference their actual experience, career transitions, specific technologies/companies)
-- 2 behavioral questions (STAR method opportunities)
-- 3 technical/role-specific questions
-- 2 situational questions
-- 1 company/culture fit question
+                Include this mix:
+                - 2 CV-specific questions (reference their actual experience, career transitions, specific technologies/companies)
+                - 2 behavioral questions (STAR method opportunities)
+                - 3 technical/role-specific questions
+                - 2 situational questions
+                - 1 company/culture fit question
 
-**CV-SPECIFIC QUESTION EXAMPLES (adapt to their actual background):**
-- "I see you were doing freelance work while working full-time at [Company]. How did you manage both responsibilities?"
-- "You used [Technology] at [Company]. Can you walk me through how you implemented it?"
-- "I notice you transitioned from [Previous Role] to [Current Role]. What motivated this change?"
-- "You worked at [Company] for [Duration]. What was your biggest achievement there?"
-- "I see you have experience with [Specific Skill/Technology]. How did you learn it and apply it?"
-- "You've worked in both [Industry A] and [Industry B]. How do those experiences complement each other?"
+                **CV-SPECIFIC QUESTION EXAMPLES (adapt to their actual background):**
+                - "I see you were doing freelance work while working full-time at [Company]. How did you manage both responsibilities?"
+                - "You used [Technology] at [Company]. Can you walk me through how you implemented it?"
+                - "I notice you transitioned from [Previous Role] to [Current Role]. What motivated this change?"
+                - "You worked at [Company] for [Duration]. What was your biggest achievement there?"
+                - "I see you have experience with [Specific Skill/Technology]. How did you learn it and apply it?"
+                - "You've worked in both [Industry A] and [Industry B]. How do those experiences complement each other?"
 
-**IMPORTANT RULES:**
-1. Reference ACTUAL companies, technologies, roles from their background
-2. Ask about career transitions, overlapping roles, technology choices
-3. Question specific timeframes, gaps, or interesting patterns in their CV
-4. Make questions sound like a real interviewer who studied their resume
-5. Include follow-up style questions that dig deeper into their experience
+                **IMPORTANT RULES:**
+                1. Reference ACTUAL companies, technologies, roles from their background
+                2. Ask about career transitions, overlapping roles, technology choices
+                3. Question specific timeframes, gaps, or interesting patterns in their CV
+                4. Make questions sound like a real interviewer who studied their resume
+                5. Include follow-up style questions that dig deeper into their experience
 
-Make all questions realistic for this specific role and company. Keep sample answers concise but helpful.
+                Make all questions realistic for this specific role and company. Keep sample answers concise but helpful.
 
-Return ONLY valid JSON array - no additional text or formatting."""
+                Return ONLY valid JSON array - no additional text or formatting."""
             )
             
             qa_chain = qa_prompt | llm | StrOutputParser()
@@ -4074,41 +4106,41 @@ Return ONLY valid JSON array - no additional text or formatting."""
             
             return f"""## 🎯 **Interview Preparation Guide**
 
-**Role:** {final_job_title} | **Company:** {final_company_name or 'Target Company'} | **Type:** {interview_type.title()}
-{f"**🔗 Source:** {job_url}" if job_url else ""}
+                **Role:** {final_job_title} | **Company:** {final_company_name or 'Target Company'} | **Type:** {interview_type.title()}
+                {f"**🔗 Source:** {job_url}" if job_url else ""}
 
-{guide}
+                {guide}
 
----
+                ---
 
-**📅 Preparation Timeline:**
-- **1 Week Before**: Complete company research and prepare STAR stories
-- **3 Days Before**: Practice answers and finalize questions to ask
-- **1 Day Before**: Review notes, prepare materials, test technology
-- **Day Of**: Final review, arrive early, stay confident
+                **📅 Preparation Timeline:**
+                - **1 Week Before**: Complete company research and prepare STAR stories
+                - **3 Days Before**: Practice answers and finalize questions to ask
+                - **1 Day Before**: Review notes, prepare materials, test technology
+                - **Day Of**: Final review, arrive early, stay confident
 
-**🎯 Success Metrics:**
-- ✅ Can articulate your value proposition clearly
-- ✅ Have 3-5 compelling STAR stories ready
-- ✅ Know key company facts and recent developments  
-- ✅ Have thoughtful questions prepared
-- ✅ Feel confident about your qualifications
+                **🎯 Success Metrics:**
+                - ✅ Can articulate your value proposition clearly
+                - ✅ Have 3-5 compelling STAR stories ready
+                - ✅ Know key company facts and recent developments  
+                - ✅ Have thoughtful questions prepared
+                - ✅ Feel confident about your qualifications
 
-**🔗 Next Steps:**
-- `enhance my resume section` - Align CV with interview talking points
-- `generate cover letter` - Practice articulating your interest
-- `get salary negotiation tips` - Prepare for compensation discussions
+                **🔗 Next Steps:**
+                - `enhance my resume section` - Align CV with interview talking points
+                - `generate cover letter` - Practice articulating your interest
+                - `get salary negotiation tips` - Prepare for compensation discussions
 
-[INTERVIEW_FLASHCARDS_AVAILABLE]
-📝 **Practice with AI-powered flashcards** - Click the brain icon to practice interview questions with voice/text responses and get detailed feedback on tone, correctness, and confidence.
+                [INTERVIEW_FLASHCARDS_AVAILABLE]
+                📝 **Practice with AI-powered flashcards** - Click the brain icon to practice interview questions with voice/text responses and get detailed feedback on tone, correctness, and confidence.
 
-<!--FLASHCARD_DATA:{json.dumps(qa_pairs)}-->
+                <!--FLASHCARD_DATA:{json.dumps(qa_pairs)}-->
 
----
-**Job Context:** {final_job_title} at {final_company_name or 'Target Company'}
-**Interview Type:** {interview_type}
-**Preparation Content:** {guide[:500]}..."""
-            
+                ---
+                **Job Context:** {final_job_title} at {final_company_name or 'Target Company'}
+                **Interview Type:** {interview_type}
+                **Preparation Content:** {guide[:500]}..."""
+                            
         except Exception as e:
             log.error(f"Error creating interview preparation guide: {e}", exc_info=True)
             return f"❌ Sorry, I encountered an error while creating your interview guide: {str(e)}. Please try again."
@@ -4138,104 +4170,104 @@ Return ONLY valid JSON array - no additional text or formatting."""
             prompt = ChatPromptTemplate.from_template(
                 """You are a compensation and career negotiation expert. Provide comprehensive salary negotiation guidance.
 
-NEGOTIATION CONTEXT:
-- Job Title: {job_title}
-- Experience Level: {experience_level}
-- Location: {location}
-- Industry: {industry}
+                    NEGOTIATION CONTEXT:
+                    - Job Title: {job_title}
+                    - Experience Level: {experience_level}
+                    - Location: {location}
+                    - Industry: {industry}
 
-Provide detailed negotiation strategy and advice:
+                    Provide detailed negotiation strategy and advice:
 
-## 💰 **Market Research & Benchmarking**
-### Salary Research Sources
-- Best websites and tools for salary data
-- How to interpret salary ranges accurately
-- Geographic and industry adjustments
-- Experience level modifiers
+                    ## 💰 **Market Research & Benchmarking**
+                    ### Salary Research Sources
+                    - Best websites and tools for salary data
+                    - How to interpret salary ranges accurately
+                    - Geographic and industry adjustments
+                    - Experience level modifiers
 
-### Compensation Package Components
-- Base salary considerations
-- Bonus and incentive structures
-- Benefits and perquisites
-- Equity and stock options
-- Remote work and flexibility value
+                    ### Compensation Package Components
+                    - Base salary considerations
+                    - Bonus and incentive structures
+                    - Benefits and perquisites
+                    - Equity and stock options
+                    - Remote work and flexibility value
 
-## 🎯 **Negotiation Strategy**
-### Preparation Phase
-- How to determine your target range
-- Building your value proposition
-- Documentation of achievements and impact
-- Market rate justification techniques
+                    ## 🎯 **Negotiation Strategy**
+                    ### Preparation Phase
+                    - How to determine your target range
+                    - Building your value proposition
+                    - Documentation of achievements and impact
+                    - Market rate justification techniques
 
-### Timing Considerations
-- When to bring up compensation
-- How to respond to salary questions
-- Negotiating after offer receipt
-- Multiple offer leverage strategies
+                    ### Timing Considerations
+                    - When to bring up compensation
+                    - How to respond to salary questions
+                    - Negotiating after offer receipt
+                    - Multiple offer leverage strategies
 
-### Communication Tactics
-- Scripts and language for negotiations
-- How to present counter-offers professionally
-- Negotiating non-salary benefits
-- Handling objections and pushback
+                    ### Communication Tactics
+                    - Scripts and language for negotiations
+                    - How to present counter-offers professionally
+                    - Negotiating non-salary benefits
+                    - Handling objections and pushback
 
-## 📋 **Negotiation Framework**
-### Initial Offer Response
-- How to buy time for consideration
-- Expressing enthusiasm while negotiating
-- Questions to ask about the offer
-- Professional response templates
+                    ## 📋 **Negotiation Framework**
+                    ### Initial Offer Response
+                    - How to buy time for consideration
+                    - Expressing enthusiasm while negotiating
+                    - Questions to ask about the offer
+                    - Professional response templates
 
-### Counter-Offer Strategy
-- How to structure compelling counter-offers
-- Supporting your requests with data
-- Prioritizing different compensation elements
-- Alternative proposals if budget is fixed
+                    ### Counter-Offer Strategy
+                    - How to structure compelling counter-offers
+                    - Supporting your requests with data
+                    - Prioritizing different compensation elements
+                    - Alternative proposals if budget is fixed
 
-### Closing the Deal
-- Finalizing agreed terms professionally
-- Getting offers in writing
-- Graceful acceptance or decline
-- Maintaining relationships regardless of outcome
+                    ### Closing the Deal
+                    - Finalizing agreed terms professionally
+                    - Getting offers in writing
+                    - Graceful acceptance or decline
+                    - Maintaining relationships regardless of outcome
 
-## 🎭 **Common Scenarios & Responses**
-### Difficult Situations
-- "Our budget is fixed" responses
-- Geographic pay differences
-- Internal equity concerns
-- First-time negotiator anxiety
+                    ## 🎭 **Common Scenarios & Responses**
+                    ### Difficult Situations
+                    - "Our budget is fixed" responses
+                    - Geographic pay differences
+                    - Internal equity concerns
+                    - First-time negotiator anxiety
 
-### Advanced Strategies
-- Multiple offer negotiations
-- Retention counter-offers
-- Promotion and raise requests
-- Contract vs. full-time considerations
+                    ### Advanced Strategies
+                    - Multiple offer negotiations
+                    - Retention counter-offers
+                    - Promotion and raise requests
+                    - Contract vs. full-time considerations
 
-## ⚠️ **Pitfalls to Avoid**
-### Negotiation Mistakes
-- Red flags that hurt your chances
-- Overplaying your hand
-- Burning bridges unnecessarily
-- Focusing only on salary
+                    ## ⚠️ **Pitfalls to Avoid**
+                    ### Negotiation Mistakes
+                    - Red flags that hurt your chances
+                    - Overplaying your hand
+                    - Burning bridges unnecessarily
+                    - Focusing only on salary
 
-### Professional Etiquette
-- Maintaining positive relationships
-- Respecting company constraints
-- Being prepared to walk away
-- Following up appropriately
+                    ### Professional Etiquette
+                    - Maintaining positive relationships
+                    - Respecting company constraints
+                    - Being prepared to walk away
+                    - Following up appropriately
 
-## 📊 **Market Insights**
-- Typical salary ranges for {experience_level} {job_title} roles
-- Industry-specific compensation trends
-- Geographic variations and cost of living
-- Emerging benefits and perks trends
-- Economic factors affecting compensation
+                    ## 📊 **Market Insights**
+                    - Typical salary ranges for {experience_level} {job_title} roles
+                    - Industry-specific compensation trends
+                    - Geographic variations and cost of living
+                    - Emerging benefits and perks trends
+                    - Economic factors affecting compensation
 
-Provide specific, actionable negotiation advice with realistic expectations."""
+                    Provide specific, actionable negotiation advice with realistic expectations."""
             )
             
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash-preview-04-17",
+                model="gemini-2.5-pro-preview-03-25",
                 temperature=0.7,
                 callbacks=[tracer]
             )
@@ -4251,38 +4283,38 @@ Provide specific, actionable negotiation advice with realistic expectations."""
             
             return f"""## 💰 **Salary Negotiation Strategy Guide**
 
-**Role:** {job_title} | **Level:** {experience_level} | **Market:** {location or 'General'}
+            **Role:** {job_title} | **Level:** {experience_level} | **Market:** {location or 'General'}
 
-{advice}
+            {advice}
 
----
+            ---
 
-**🚀 Action Plan:**
-1. **Research Phase** (Before applying): Gather market data and set target range
-2. **Application Phase**: Avoid early salary discussions, focus on fit
-3. **Interview Phase**: Demonstrate value, delay compensation talks
-4. **Offer Phase**: Evaluate total package, prepare counter-offer
-5. **Negotiation Phase**: Present professional counter with justification
-6. **Decision Phase**: Make informed choice aligned with career goals
+            **🚀 Action Plan:**
+            1. **Research Phase** (Before applying): Gather market data and set target range
+            2. **Application Phase**: Avoid early salary discussions, focus on fit
+            3. **Interview Phase**: Demonstrate value, delay compensation talks
+            4. **Offer Phase**: Evaluate total package, prepare counter-offer
+            5. **Negotiation Phase**: Present professional counter with justification
+            6. **Decision Phase**: Make informed choice aligned with career goals
 
-**📊 Negotiation Checklist:**
-- ✅ Researched market rates from multiple sources
-- ✅ Calculated total compensation package value
-- ✅ Prepared specific examples of your value/impact
-- ✅ Determined acceptable range and walk-away point
-- ✅ Practiced negotiation conversations
-- ✅ Ready to discuss non-salary benefits
+            **📊 Negotiation Checklist:**
+            - ✅ Researched market rates from multiple sources
+            - ✅ Calculated total compensation package value
+            - ✅ Prepared specific examples of your value/impact
+            - ✅ Determined acceptable range and walk-away point
+            - ✅ Practiced negotiation conversations
+            - ✅ Ready to discuss non-salary benefits
 
-**⚡ Key Reminders:**
-- **Be Professional**: Maintain positive tone throughout
-- **Focus on Value**: Emphasize what you bring to the role
-- **Consider Total Package**: Look beyond just base salary
-- **Know Your Worth**: But be realistic about market conditions
-- **Have Alternatives**: Negotiate from position of choice, not desperation
+            **⚡ Key Reminders:**
+            - **Be Professional**: Maintain positive tone throughout
+            - **Focus on Value**: Emphasize what you bring to the role
+            - **Consider Total Package**: Look beyond just base salary
+            - **Know Your Worth**: But be realistic about market conditions
+            - **Have Alternatives**: Negotiate from position of choice, not desperation
 
-**🔗 Related Tools:**
-- `search jobs for [role]` - Research current market opportunities
-- `get interview preparation guide` - Prepare to demonstrate value"""
+            **🔗 Related Tools:**
+            - `search jobs for [role]` - Research current market opportunities
+            - `get interview preparation guide` - Prepare to demonstrate value"""
             
         except Exception as e:
             log.error(f"Error getting salary negotiation advice: {e}", exc_info=True)
@@ -4327,139 +4359,139 @@ Provide specific, actionable negotiation advice with realistic expectations."""
             prompt = ChatPromptTemplate.from_template(
                 """You are a senior career strategist and executive coach. Create a comprehensive, actionable career development plan.
 
-USER CONTEXT: {user_context}
-CURRENT ROLE: {current_role}
-TARGET ROLE: {target_role}
-TIMELINE: {timeline}
+                USER CONTEXT: {user_context}
+                CURRENT ROLE: {current_role}
+                TARGET ROLE: {target_role}
+                TIMELINE: {timeline}
 
-Create a detailed career development roadmap:
+                Create a detailed career development roadmap:
 
-## 🎯 **Career Vision & Goals**
-### Target Role Analysis
-- Detailed breakdown of target role requirements
-- Skills, experience, and qualifications needed
-- Typical career progression path to this role
-- Market demand and growth outlook
+                ## 🎯 **Career Vision & Goals**
+                ### Target Role Analysis
+                - Detailed breakdown of target role requirements
+                - Skills, experience, and qualifications needed
+                - Typical career progression path to this role
+                - Market demand and growth outlook
 
-### Gap Analysis
-- Current state vs. target state assessment
-- Critical skills and experience gaps
-- Knowledge areas requiring development
-- Network and relationship gaps
+                ### Gap Analysis
+                - Current state vs. target state assessment
+                - Critical skills and experience gaps
+                - Knowledge areas requiring development
+                - Network and relationship gaps
 
-## 🗓️ **Timeline & Milestones**
-### Phase 1: Foundation Building (Months 1-{timeline_first_third})
-- Immediate skill development priorities
-- Quick wins and early achievements
-- Network building initiatives
-- Performance optimization in current role
+                ## 🗓️ **Timeline & Milestones**
+                ### Phase 1: Foundation Building (Months 1-{timeline_first_third})
+                - Immediate skill development priorities
+                - Quick wins and early achievements
+                - Network building initiatives
+                - Performance optimization in current role
 
-### Phase 2: Growth & Expansion (Months {timeline_middle})
-- Advanced skill acquisition
-- Leadership development activities
-- Strategic project involvement
-- External visibility building
+                ### Phase 2: Growth & Expansion (Months {timeline_middle})
+                - Advanced skill acquisition
+                - Leadership development activities
+                - Strategic project involvement
+                - External visibility building
 
-### Phase 3: Positioning & Transition (Final phase)
-- Final preparation for target role
-- Strategic job search activities
-- Interview and positioning preparation
-- Offer negotiation and transition planning
+                ### Phase 3: Positioning & Transition (Final phase)
+                - Final preparation for target role
+                - Strategic job search activities
+                - Interview and positioning preparation
+                - Offer negotiation and transition planning
 
-## 📚 **Learning & Development Strategy**
-### Technical Skills Development
-- Specific courses, certifications, and training
-- Online learning platforms and resources
-- Hands-on projects and applications
-- Skill assessment and validation methods
+                ## 📚 **Learning & Development Strategy**
+                ### Technical Skills Development
+                - Specific courses, certifications, and training
+                - Online learning platforms and resources
+                - Hands-on projects and applications
+                - Skill assessment and validation methods
 
-### Soft Skills Enhancement
-- Leadership and management capabilities
-- Communication and presentation skills
-- Strategic thinking and business acumen
-- Industry knowledge and market awareness
+                ### Soft Skills Enhancement
+                - Leadership and management capabilities
+                - Communication and presentation skills
+                - Strategic thinking and business acumen
+                - Industry knowledge and market awareness
 
-### Formal Education & Certifications
-- Professional certifications to pursue
-- Advanced degree considerations
-- Industry-specific credentials
-- Cost-benefit analysis of educational investments
+                ### Formal Education & Certifications
+                - Professional certifications to pursue
+                - Advanced degree considerations
+                - Industry-specific credentials
+                - Cost-benefit analysis of educational investments
 
-## 🤝 **Networking & Relationship Building**
-### Professional Network Expansion
-- Industry conferences and events to attend
-- Professional associations to join
-- LinkedIn strategy and online presence
-- Informational interview targets
+                ## 🤝 **Networking & Relationship Building**
+                ### Professional Network Expansion
+                - Industry conferences and events to attend
+                - Professional associations to join
+                - LinkedIn strategy and online presence
+                - Informational interview targets
 
-### Mentorship & Sponsorship
-- Identifying potential mentors
-- Building sponsor relationships
-- Peer learning groups and communities
-- Reverse mentoring opportunities
+                ### Mentorship & Sponsorship
+                - Identifying potential mentors
+                - Building sponsor relationships
+                - Peer learning groups and communities
+                - Reverse mentoring opportunities
 
-### Internal Relationship Building
-- Stakeholder mapping in current organization
-- Cross-functional collaboration opportunities
-- Visibility projects and high-impact initiatives
-- Leadership team exposure strategies
+                ### Internal Relationship Building
+                - Stakeholder mapping in current organization
+                - Cross-functional collaboration opportunities
+                - Visibility projects and high-impact initiatives
+                - Leadership team exposure strategies
 
-## 💼 **Experience & Exposure Plan**
-### Current Role Optimization
-- Ways to enhance current role impact
-- Additional responsibilities to seek
-- Performance metrics to improve
-- Success stories to develop
+                ## 💼 **Experience & Exposure Plan**
+                ### Current Role Optimization
+                - Ways to enhance current role impact
+                - Additional responsibilities to seek
+                - Performance metrics to improve
+                - Success stories to develop
 
-### Strategic Project Involvement
-- High-visibility projects to pursue
-- Cross-functional team leadership
-- Innovation and change initiatives
-- Customer or client-facing opportunities
+                ### Strategic Project Involvement
+                - High-visibility projects to pursue
+                - Cross-functional team leadership
+                - Innovation and change initiatives
+                - Customer or client-facing opportunities
 
-### External Experience Building
-- Volunteer leadership roles
-- Industry speaking opportunities
-- Writing and thought leadership
-- Board or committee service
+                ### External Experience Building
+                - Volunteer leadership roles
+                - Industry speaking opportunities
+                - Writing and thought leadership
+                - Board or committee service
 
-## 📊 **Progress Tracking & Measurement**
-### Key Performance Indicators
-- Specific metrics to track progress
-- Milestone achievement criteria
-- Skills assessment benchmarks
-- Network growth measurements
+                ## 📊 **Progress Tracking & Measurement**
+                ### Key Performance Indicators
+                - Specific metrics to track progress
+                - Milestone achievement criteria
+                - Skills assessment benchmarks
+                - Network growth measurements
 
-### Regular Review Process
-- Monthly progress check-ins
-- Quarterly goal adjustments
-- Annual plan reviews and updates
-- Feedback collection and integration
+                ### Regular Review Process
+                - Monthly progress check-ins
+                - Quarterly goal adjustments
+                - Annual plan reviews and updates
+                - Feedback collection and integration
 
-### Course Correction Strategies
-- How to adapt plan based on market changes
-- Pivoting strategies if goals change
-- Accelerating progress when opportunities arise
-- Managing setbacks and delays
+                ### Course Correction Strategies
+                - How to adapt plan based on market changes
+                - Pivoting strategies if goals change
+                - Accelerating progress when opportunities arise
+                - Managing setbacks and delays
 
-## 🚀 **Action Plan & Next Steps**
-### Immediate Actions (Next 30 days)
-- Specific tasks to start immediately
-- Resources to gather and review
-- Conversations to initiate
-- Systems to put in place
+                ## 🚀 **Action Plan & Next Steps**
+                ### Immediate Actions (Next 30 days)
+                - Specific tasks to start immediately
+                - Resources to gather and review
+                - Conversations to initiate
+                - Systems to put in place
 
-### Short-term Priorities (Next 90 days)
-- Major initiatives to launch
-- Skills development to begin
-- Relationships to build
-- Opportunities to pursue
+                ### Short-term Priorities (Next 90 days)
+                - Major initiatives to launch
+                - Skills development to begin
+                - Relationships to build
+                - Opportunities to pursue
 
-Provide specific, time-bound, measurable actions that create a clear path to the target role."""
+                Provide specific, time-bound, measurable actions that create a clear path to the target role."""
             )
             
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash-preview-04-17",
+                model="gemini-2.5-pro-preview-03-25",
                 temperature=0.7
             )
             
@@ -4488,37 +4520,37 @@ Provide specific, time-bound, measurable actions that create a clear path to the
             
             return f"""## 🚀 **Career Development Plan**
 
-**Journey:** {current_role or 'Current Role'} → {target_role or 'Target Role'} | **Timeline:** {timeline}
+            **Journey:** {current_role or 'Current Role'} → {target_role or 'Target Role'} | **Timeline:** {timeline}
 
-{plan}
+            {plan}
 
----
+            ---
 
-**📋 Implementation Checklist:**
-- ✅ Schedule monthly career development review meetings
-- ✅ Create learning and development budget
-- ✅ Identify and reach out to potential mentors
-- ✅ Set up skill assessment baseline measurements
-- ✅ Begin networking activities and relationship building
-- ✅ Start first priority learning initiative
+            **📋 Implementation Checklist:**
+            - ✅ Schedule monthly career development review meetings
+            - ✅ Create learning and development budget
+            - ✅ Identify and reach out to potential mentors
+            - ✅ Set up skill assessment baseline measurements
+            - ✅ Begin networking activities and relationship building
+            - ✅ Start first priority learning initiative
 
-**⚡ Success Factors:**
-- **Consistency**: Regular, dedicated effort toward goals
-- **Flexibility**: Adapt plan based on opportunities and market changes
-- **Accountability**: Regular progress reviews and adjustments
-- **Network**: Strong professional relationships for guidance and opportunities
-- **Measurement**: Clear metrics to track progress and success
+            **⚡ Success Factors:**
+            - **Consistency**: Regular, dedicated effort toward goals
+            - **Flexibility**: Adapt plan based on opportunities and market changes
+            - **Accountability**: Regular progress reviews and adjustments
+            - **Network**: Strong professional relationships for guidance and opportunities
+            - **Measurement**: Clear metrics to track progress and success
 
-**🔄 Review Schedule:**
-- **Weekly**: Progress on immediate actions and priorities
-- **Monthly**: Overall plan progress and milestone achievement
-- **Quarterly**: Goals adjustment and strategy refinement
-- **Annually**: Comprehensive plan review and major updates
+            **🔄 Review Schedule:**
+            - **Weekly**: Progress on immediate actions and priorities
+            - **Monthly**: Overall plan progress and milestone achievement
+            - **Quarterly**: Goals adjustment and strategy refinement
+            - **Annually**: Comprehensive plan review and major updates
 
-**🔗 Supporting Tools:**
-- `analyze my skills gap` - Regular skills assessment
-- `get interview preparation guide` - Practice for target role
-- `enhance my resume section` - Update CV as you grow"""
+            **🔗 Supporting Tools:**
+            - `analyze my skills gap` - Regular skills assessment
+            - `get interview preparation guide` - Practice for target role
+            - `enhance my resume section` - Update CV as you grow"""
             
         except Exception as e:
             log.error(f"Error creating career development plan: {e}", exc_info=True)
@@ -4561,47 +4593,47 @@ Provide specific, time-bound, measurable actions that create a clear path to the
             prompt = ChatPromptTemplate.from_template(
                 """You are an expert information extractor. Extract COMPREHENSIVE resume information from CV/resume documents.
 
-DOCUMENT CONTENT:
-{document_content}
+                DOCUMENT CONTENT:
+                {document_content}
 
-EXTRACTION TASK:
-Extract ALL information and return ONLY a JSON object with these exact keys:
-- "full_name": Person's complete name
-- "email": Email address
-- "phone": Phone number (with country code)
-- "location": Current location/address
-- "linkedin": LinkedIn profile URL
-- "portfolio": Personal website/portfolio URL
-- "github": GitHub profile URL
-- "summary": Professional summary/bio (2-3 sentences)
-- "skills": Array of technical skills, programming languages, tools
-- "experience": Array of work experience objects with:
-  - "jobTitle": Job title/position
-  - "company": Company name
-  - "dates": Employment dates (start - end)
-  - "description": Brief description of role and achievements
-- "education": Array of education objects with:
-  - "degree": Degree title/name
-  - "institution": School/university name
-  - "dates": Graduation date or study period
-  - "field": Field of study (optional)
-- "projects": Array of project objects with:
-  - "name": Project name
-  - "description": Brief description
-  - "technologies": Technologies used
-- "certifications": Array of certification names with dates
+                EXTRACTION TASK:
+                Extract ALL information and return ONLY a JSON object with these exact keys:
+                - "full_name": Person's complete name
+                - "email": Email address
+                - "phone": Phone number (with country code)
+                - "location": Current location/address
+                - "linkedin": LinkedIn profile URL
+                - "portfolio": Personal website/portfolio URL
+                - "github": GitHub profile URL
+                - "summary": Professional summary/bio (2-3 sentences)
+                - "skills": Array of technical skills, programming languages, tools
+                - "experience": Array of work experience objects with:
+                - "jobTitle": Job title/position
+                - "company": Company name
+                - "dates": Employment dates (start - end)
+                - "description": Brief description of role and achievements
+                - "education": Array of education objects with:
+                - "degree": Degree title/name
+                - "institution": School/university name
+                - "dates": Graduation date or study period
+                - "field": Field of study (optional)
+                - "projects": Array of project objects with:
+                - "name": Project name
+                - "description": Brief description
+                - "technologies": Technologies used
+                - "certifications": Array of certification names with dates
 
-CRITICAL RULES:
-1. Return ONLY valid JSON - no additional text, formatting, or markdown
-2. Use null for any field not found in the documents
-3. For arrays, use empty arrays [] if no items found
-4. Extract ALL work experience, education, and projects found
-5. For dates, use format like "2020-2023" or "2023" or "Present"
-6. Include quantifiable achievements in job descriptions
-7. Use the most recent/complete information if multiple versions exist
+                CRITICAL RULES:
+                1. Return ONLY valid JSON - no additional text, formatting, or markdown
+                2. Use null for any field not found in the documents
+                3. For arrays, use empty arrays [] if no items found
+                4. Extract ALL work experience, education, and projects found
+                5. For dates, use format like "2020-2023" or "2023" or "Present"
+                6. Include quantifiable achievements in job descriptions
+                7. Use the most recent/complete information if multiple versions exist
 
-Extract EVERYTHING from the document content and return the complete JSON:"""
-            )
+                Extract EVERYTHING from the document content and return the complete JSON:"""
+                            )
             
             llm = ChatGoogleGenerativeAI(
                 model="gemini-2.5-pro-preview-03-25",
@@ -4722,36 +4754,36 @@ Extract EVERYTHING from the document content and return the complete JSON:"""
             
             return f"""✅ **Profile Successfully Updated from Documents!**
 
-**📋 Extracted and Updated Information:**
-{chr(10).join(f"• {update}" for update in updates_made)}
+            **📋 Extracted and Updated Information:**
+            {chr(10).join(f"• {update}" for update in updates_made)}
 
-**🎯 Comprehensive Data Extracted:**
-• **Personal Info**: {extracted_info.get('full_name', 'Not found')} | {extracted_info.get('email', 'Not found')}
-• **Contact**: {extracted_info.get('phone', 'Not found')} | {extracted_info.get('location', 'Not found')}
-• **Links**: Portfolio: {extracted_info.get('portfolio', 'Not found')} | GitHub: {extracted_info.get('github', 'Not found')}
-• **Work Experience**: {len(extracted_info.get('experience', []))} positions extracted
-• **Education**: {len(extracted_info.get('education', []))} degrees/qualifications extracted  
-• **Skills**: {len(extracted_info.get('skills', []))} technical skills extracted
-• **Projects**: {len(extracted_info.get('projects', []))} projects extracted
-• **Certifications**: {len(extracted_info.get('certifications', []))} certifications extracted
+            **🎯 Comprehensive Data Extracted:**
+            • **Personal Info**: {extracted_info.get('full_name', 'Not found')} | {extracted_info.get('email', 'Not found')}
+            • **Contact**: {extracted_info.get('phone', 'Not found')} | {extracted_info.get('location', 'Not found')}
+            • **Links**: Portfolio: {extracted_info.get('portfolio', 'Not found')} | GitHub: {extracted_info.get('github', 'Not found')}
+            • **Work Experience**: {len(extracted_info.get('experience', []))} positions extracted
+            • **Education**: {len(extracted_info.get('education', []))} degrees/qualifications extracted  
+            • **Skills**: {len(extracted_info.get('skills', []))} technical skills extracted
+            • **Projects**: {len(extracted_info.get('projects', []))} projects extracted
+            • **Certifications**: {len(extracted_info.get('certifications', []))} certifications extracted
 
-**🎉 Your profile is now fully populated with real data!** 
+            **🎉 Your profile is now fully populated with real data!** 
 
-**📥 PDF Forms Now Populated:**
-- ✅ Personal information fields
-- ✅ Work experience entries  
-- ✅ Education history
-- ✅ Skills and competencies
-- ✅ Projects and achievements
-- ✅ Certifications and awards
+            **📥 PDF Forms Now Populated:**
+            - ✅ Personal information fields
+            - ✅ Work experience entries  
+            - ✅ Education history
+            - ✅ Skills and competencies
+            - ✅ Projects and achievements
+            - ✅ Certifications and awards
 
-**📝 Next Steps:**
-1. **Test PDF Dialog**: Click any download button - all fields should now be populated!
-2. **Verify Data**: Check the work experience form you showed me - it should now have your real jobs
-3. **Generate Content**: Create resumes/cover letters with your actual information
-4. **Fine-tune**: Make any adjustments directly in the profile settings
+            **📝 Next Steps:**
+            1. **Test PDF Dialog**: Click any download button - all fields should now be populated!
+            2. **Verify Data**: Check the work experience form you showed me - it should now have your real jobs
+            3. **Generate Content**: Create resumes/cover letters with your actual information
+            4. **Fine-tune**: Make any adjustments directly in the profile settings
 
-**💡 Pro Tip**: Your PDF dialog forms should now show your actual work experience instead of "Software Engineer at Google Inc."!
+            **💡 Pro Tip**: Your PDF dialog forms should now show your actual work experience instead of "Software Engineer at Google Inc."!
 
 <!-- extracted_info={json.dumps(extracted_info)} -->"""
             
@@ -5098,7 +5130,8 @@ I can now provide location-specific salary guidance, job market insights, and ca
 **📄 Profile Sync:** Your resume and profile have been updated with the new location."""
             
         except Exception as e:
-            await db.rollback()
+            if db.is_active:
+                await db.rollback()
             log.error(f"Error updating user location: {e}")
             return f"❌ Error updating location: {str(e)}"
 
@@ -5347,8 +5380,7 @@ Your resume database record is now properly structured. Try clicking a download 
         
         # 🎯 JOB SEARCH TOOLS (PRIORITY ORDER)
         search_jobs_linkedin_api,  # ⭐ PRIMARY: Direct LinkedIn API access
-        search_jobs_with_browser,  # 🌐 SECONDARY: Browser automation fallback
-        search_jobs_tool,  # 📊 TERTIARY: Basic Google Cloud API
+        
         
         # 🚀 CAREER DEVELOPMENT TOOLS
         get_interview_preparation_guide,  # Interview prep tool
@@ -5565,7 +5597,8 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
         log.error(f"Error loading enhanced chat history, falling back to basic: {e}")
         # Fallback to basic chat history loading with proper transaction handling
         try:
-            await db.rollback()  # Ensure clean transaction state
+            if db.is_active:
+                await db.rollback()  # Ensure clean transaction state
             history_records = await db.execute(
                 select(ChatMessage)
                 .where(ChatMessage.user_id == user_id)
@@ -5601,6 +5634,12 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
             
             try:
                 message_data = json.loads(data)
+
+                if message_data.get("type") == "stop_generation":
+                    log.info("Received stop_generation signal. Halting any current agent activity.")
+                    # We can add more complex cancellation logic here in the future if needed.
+                    # For now, we just ignore the message and wait for the next one.
+                    continue
                 
                 if message_data.get("type") == "clear_context":
                     current_chat_history = []
@@ -5664,7 +5703,8 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                                 log.warning(f"🔄 No messages found for page {regenerate_page_id}")
                         except Exception as e:
                             log.error(f"🔄 Error loading page history: {e}")
-                            await db.rollback()
+                            if db.is_active:
+                                await db.rollback()
                     
                     # Remove the last AI message from history
                     if current_chat_history and isinstance(current_chat_history[-1], AIMessage):
@@ -5721,7 +5761,8 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                                     log.info(f"🔄 Regenerated message saved to database with page_id: {regenerate_page_id}")
                                 except Exception as save_error:
                                     log.error(f"🔄 Error saving regenerated message: {save_error}")
-                                    await db.rollback()
+                                    if db.is_active:
+                                        await db.rollback()
                                 
                                 await websocket.send_json({
                                     "type": "message",
@@ -5787,7 +5828,8 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                                 log.info(f"WebSocket context loaded {len(current_chat_history)} messages for page {page_id}")
                             except Exception as page_error:
                                 log.error(f"Failed to load page history for WebSocket context {page_id}: {page_error}")
-                                await db.rollback()
+                                if db.is_active:
+                                    await db.rollback()
                                 current_chat_history = []
                         else:
                             # New conversation - clear context
@@ -5813,7 +5855,8 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                 log.info(f"Saved user message {user_message_id} with page_id: {page_id}")
             except Exception as save_error:
                 log.error(f"Failed to save user message: {save_error}")
-                await db.rollback()
+                if db.is_active:
+                    await db.rollback()
                 user_message_id = str(uuid.uuid4())  # Generate new ID for retry
             
             current_chat_history.append(HumanMessage(id=user_message_id, content=message_content))
@@ -5891,7 +5934,8 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                 log.info(f"Saved AI message {ai_message_id} with page_id: {page_id}")
             except Exception as save_error:
                 log.error(f"Failed to save AI message: {save_error}")
-                await db.rollback()
+                if db.is_active:
+                    await db.rollback()
                 ai_message_id = str(uuid.uuid4())  # Generate new ID for retry
             
             current_chat_history.append(AIMessage(id=ai_message_id, content=result))

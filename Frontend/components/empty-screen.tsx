@@ -13,9 +13,9 @@ const exampleMessages = [
     color: "emerald",
   },
   {
-    heading: "Find jobs on specific platforms",
-    message: "Search LinkedIn, Indeed, Glassdoor easily",
-    fullMessage: "Find product manager jobs on Indeed in New York",
+    heading: "Search for jobs",
+    message: "Assist with job search in my location",
+    fullMessage: "Get me job vacancies in my location",
     icon: Building,
     color: "violet",
   },
@@ -40,7 +40,7 @@ export function EmptyScreen({ onSendMessage }: EmptyScreenProps) {
         <div className="inline-flex items-center justify-center w-16 h-16 mb-6 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-2xl">
           <Sparkles className="w-8 h-8 text-white" />
         </div>
-        <h1 className="text-4xl font-bold bg-gradient-to-r from-foreground via-foreground/90 to-foreground/70 bg-clip-text text-transparent mb-4">
+        <h1 className="text-3xl font-bold bg-gradient-to-r from-foreground via-foreground/90 to-foreground/70 bg-clip-text text-transparent mb-4">
           Hello there!
         </h1>
         <p className="text-lg text-muted-foreground/80 leading-relaxed">
@@ -74,7 +74,7 @@ export function EmptyScreen({ onSendMessage }: EmptyScreenProps) {
               </div>
 
               {/* Content */}
-              <div className="flex-1 space-y-2 overflow-hidden">
+              <div className="flex-1 space-y-2">
                 <h3 className="text-lg font-semibold text-foreground leading-tight">
                   {item.heading}
                 </h3>

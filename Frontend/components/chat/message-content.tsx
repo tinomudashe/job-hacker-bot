@@ -1,14 +1,20 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { ExternalLink, File, FileText, Image } from "lucide-react";
-import React from "react";
-import ReactMarkdown from "react-markdown";
+import { ExternalLink, File, FileText, Image, Send } from "lucide-react";
+import React, { MouseEvent } from "react";
+import ReactMarkdown, { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 interface MessageContentProps {
   content: any;
   isUser?: boolean;
+}
+
+interface CodeProps {
+  inline?: boolean;
+  className?: string;
+  children: React.ReactNode;
 }
 
 // Custom link component for ReactMarkdown
@@ -190,48 +196,74 @@ export function MessageContent({ content, isUser }: MessageContentProps) {
     );
   }
 
+  // Define markdown components with proper typing
+  const components: Components = {
+    a: ({ href, children }) => {
+      // Check if this is a cover letter generation link
+      const isCoverLetterButton = children
+        ?.toString()
+        .includes("Generate Cover Letter");
+
+      if (isCoverLetterButton) {
+        return (
+          <button
+            onClick={(e: MouseEvent<HTMLButtonElement>) => {
+              e.preventDefault();
+              // The parent message will handle sending the cover letter request
+              const message = `Please generate a cover letter for this role`;
+              // You can dispatch this message to your chat handler
+              // For now, we'll just log it
+              console.log("Generate cover letter requested:", message);
+            }}
+            className={cn(
+              "inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200",
+              "bg-blue-500 text-white hover:bg-blue-600 active:bg-blue-700",
+              "dark:bg-blue-600 dark:hover:bg-blue-700 dark:active:bg-blue-800",
+              "shadow-sm hover:shadow-md"
+            )}
+            type="button"
+          >
+            <Send className="h-3.5 w-3.5" />
+            Generate Cover Letter
+          </button>
+        );
+      }
+
+      // Regular link with enhanced styling
+      return (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={cn(
+            "inline-flex items-center gap-1.5 hover:gap-2 transition-all duration-200",
+            isUser
+              ? "text-white/90 hover:text-white underline decoration-white/30 hover:decoration-white/70"
+              : "text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline decoration-blue-400/30 hover:decoration-blue-400/70"
+          )}
+        >
+          {children}
+          <ExternalLink className="h-3.5 w-3.5 opacity-70" />
+        </a>
+      );
+    },
+    p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+    ul: ({ children }) => (
+      <ul className="list-disc list-inside space-y-1 mb-2">{children}</ul>
+    ),
+    ol: ({ children }) => (
+      <ol className="list-decimal list-inside space-y-1 mb-2">{children}</ol>
+    ),
+    code: ({ children }) => (
+      <code className="bg-muted px-1 py-0.5 rounded text-sm font-mono">
+        {children}
+      </code>
+    ),
+  };
+
   // Regular message content with enhanced link handling
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        a: (props: any) => <LinkComponent {...props} isUser={isUser} />,
-        // Enhanced paragraph styling
-        p: ({ children, ...props }) => (
-          <p className="mb-2 last:mb-0" {...props}>
-            {children}
-          </p>
-        ),
-        // Enhanced list styling
-        ul: ({ children, ...props }) => (
-          <ul className="list-disc list-inside space-y-1 mb-2" {...props}>
-            {children}
-          </ul>
-        ),
-        ol: ({ children, ...props }) => (
-          <ol className="list-decimal list-inside space-y-1 mb-2" {...props}>
-            {children}
-          </ol>
-        ),
-        // Enhanced code styling
-        code: ({ inline, children, ...props }: any) =>
-          inline ? (
-            <code
-              className="bg-muted px-1 py-0.5 rounded text-sm font-mono"
-              {...props}
-            >
-              {children}
-            </code>
-          ) : (
-            <code
-              className="block bg-muted p-2 rounded text-sm font-mono overflow-x-auto"
-              {...props}
-            >
-              {children}
-            </code>
-          ),
-      }}
-    >
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
       {text}
     </ReactMarkdown>
   );

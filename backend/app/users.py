@@ -79,7 +79,8 @@ async def update_me(
         return db_user
     except Exception as e:
         logger.error(f"Error updating user: {e}")
-        await db.rollback()
+        if db.is_active:
+            await db.rollback()
         raise HTTPException(status_code=500, detail="Failed to update user profile")
 
 @router.get("/me/documents", response_model=List[DocumentResponse])
@@ -122,7 +123,8 @@ async def delete_me(
         await db.commit()
     except Exception as e:
         logger.error(f"Error deleting user: {e}")
-        await db.rollback()
+        if db.is_active:
+            await db.rollback()
         raise HTTPException(status_code=500, detail="Failed to delete user account")
 
 class UserProfileOut(UserSchema):

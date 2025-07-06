@@ -32,21 +32,12 @@ interface AIProgressIndicatorProps {
   onCancel?: () => void;
 }
 
-const progressMessages = {
-  thinking: ["Thinking...", "Processing...", "Almost done..."],
-  searching: ["Searching...", "Finding jobs...", "Getting results..."],
-  generating: ["Writing...", "Personalizing...", "Finishing up..."],
-  processing: ["Processing...", "Extracting...", "Preparing..."],
-  downloading: ["Formatting...", "Styling...", "Ready..."],
-  browser_automation: [
-    "Opening...",
-    "Searching...",
-    "Extracting...",
-    "Done...",
-  ],
-  job_search: ["Searching...", "Finding...", "Compiling..."],
-  linkedin_api: ["Connecting...", "Querying...", "Formatting..."],
-};
+const progressMessages = [
+  "Parsing...",
+  "Searching...",
+  "Please wait a bit longer...",
+  "Almost ready...",
+];
 
 const iconComponents = {
   thinking: Brain,
@@ -68,8 +59,7 @@ export function AIProgressIndicator({
 }: AIProgressIndicatorProps) {
   const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
 
-  const messages = progressMessages[progressType];
-  const IconComponent = iconComponents[progressType];
+  const IconComponent = iconComponents[progressType] || iconComponents.thinking;
 
   // Message cycling
   useEffect(() => {
@@ -79,15 +69,15 @@ export function AIProgressIndicator({
     }
 
     const messageInterval = setInterval(() => {
-      setCurrentMessageIndex((prev) => (prev + 1) % messages.length);
+      setCurrentMessageIndex((prev) => (prev + 1) % progressMessages.length);
     }, 2000);
 
     return () => clearInterval(messageInterval);
-  }, [isLoading, messages.length]);
+  }, [isLoading]);
 
   if (!isLoading) return null;
 
-  const currentMessage = progressText || messages[currentMessageIndex];
+  const currentMessage = progressText || progressMessages[currentMessageIndex];
 
   return (
     <div className={cn("flex items-center gap-2 py-1 px-1", className)}>
@@ -97,7 +87,7 @@ export function AIProgressIndicator({
       </div>
 
       {/* Progress text with better typography */}
-      <span className="text-base sm:text-base text-muted-foreground/80 font-medium flex-1 md:text-lg">
+      <span className="text-sm sm:text-base text-muted-foreground/80 font-medium flex-1">
         {currentMessage}
       </span>
 

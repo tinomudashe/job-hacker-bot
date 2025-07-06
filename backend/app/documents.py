@@ -2,7 +2,7 @@ from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, s
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.db import get_db
-from app.models_db import Document, User
+from app.models_db import Document, User, Resume
 from app.dependencies import get_current_active_user
 from app.cv_processor import cv_processor, CVExtractionResult
 from app.enhanced_memory import EnhancedMemoryManager
@@ -23,6 +23,73 @@ import logging
 
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
+
+async def _update_user_profile_from_cv(user: User, cv_data: CVExtractionResult, db: AsyncSession) -> tuple[bool, list[str]]:
+    """Updates user profile and resume data from extracted CV content if fields are not already set."""
+    updated_fields = []
+
+    # --- 1. Update User Table Fields ---
+    field_map = {
+        'full_name': 'name',
+        'email': 'email',
+        'phone_number': 'phone',
+        'location': 'address',
+        'linkedin_url': 'linkedin',
+        'summary': 'profile_headline',
+        'skills': 'skills'
+    }
+
+    for cv_key, user_key in field_map.items():
+        cv_value = getattr(cv_data, cv_key, None)
+        if cv_value:
+            if isinstance(cv_value, list):
+                cv_value = ", ".join(skill for skill in cv_value if skill)
+            if not getattr(user, user_key, None):
+                setattr(user, user_key, cv_value)
+                updated_fields.append(user_key)
+    
+    if cv_data.full_name and (not user.first_name or not user.last_name):
+        parts = cv_data.full_name.split()
+        if len(parts) > 1:
+            if not user.first_name:
+                user.first_name = parts[0]
+                updated_fields.append('first_name')
+            if not user.last_name:
+                user.last_name = " ".join(parts[1:])
+                updated_fields.append('last_name')
+        elif not user.first_name:
+            user.first_name = cv_data.full_name
+            updated_fields.append('first_name')
+
+    # --- 2. Update Resume JSON Data (Experience & Education) ---
+    resume_result = await db.execute(select(Resume).where(Resume.user_id == user.id))
+    db_resume = resume_result.scalars().first()
+
+    if not db_resume:
+        db_resume = Resume(user_id=user.id, data={})
+        db.add(db_resume)
+        updated_fields.append('resume_record_created')
+    
+    resume_data = db_resume.data if db_resume.data else {}
+
+    # Update Work Experience if it's empty
+    if cv_data.experience and not resume_data.get('experience'):
+        resume_data['experience'] = [exp.dict() for exp in cv_data.experience]
+        updated_fields.append('work_experience')
+
+    # Update Education if it's empty
+    if cv_data.education and not resume_data.get('education'):
+        resume_data['education'] = [edu.dict() for edu in cv_data.education]
+        updated_fields.append('education')
+
+    # Update resume data field
+    if 'work_experience' in updated_fields or 'education' in updated_fields or 'resume_record_created' in updated_fields:
+        db_resume.data = resume_data
+
+    if updated_fields:
+        db.add(user)
+        return True, updated_fields
+    return False, []
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -121,7 +188,8 @@ async def upload_document(
     except Exception as e:
         # Ensure transaction rollback on main error
         try:
-            await db.rollback()
+            if db.is_active:
+                await db.rollback()
         except Exception:
             pass
             
@@ -231,7 +299,8 @@ async def upload_cv_with_extraction(
     except Exception as e:
         # Ensure transaction rollback on main error
         try:
-            await db.rollback()
+            if db.is_active:
+                await db.rollback()
         except Exception:
             pass
             

@@ -135,7 +135,7 @@
   @media (max-width: 640px) {
     body {
       /* Prevent zoom on input focus */
-      font-size: 16px;
+      font-size: 12px;
     }
 
     /* Improve button touch targets, exclude switches */
@@ -346,7 +346,7 @@
   /* Allow Tailwind utility classes to control font sizes */
   .prose {
     /* Remove !important to allow Tailwind classes to override */
-    font-size: 1rem;
+    font-size: 0.8rem;
     line-height: 1.75;
   }
 
@@ -587,17 +587,17 @@ body:has([data-radix-dialog-overlay][data-state="open"]) *:focus {
   [data-radix-dialog-content] {
     margin: 0 !important;
     border-radius: 0 !important;
-    max-width: 100vw !important;
-    width: 100vw !important;
-    max-height: 100vh !important;
-    height: 100vh !important;
+    max-width: 95vw !important;
+    width: 95vw !important;
+    max-height: 95vh !important;
+    height: 95vh !important;
   }
 
   /* Mobile input zoom prevention */
   [data-radix-dialog-content] input,
   [data-radix-dialog-content] textarea,
   [data-radix-dialog-content] select {
-    font-size: 16px !important;
+    font-size: 14px !important;
   }
 
   /* Mobile button improvements */
@@ -654,16 +654,32 @@ body.modal-open {
 
 @media (max-width: 480px) {
   [data-radix-dialog-content] {
-    padding: 0 !important;
     margin: 0 !important;
-    border-radius: 0 !important;
-    height: 100vh !important;
-    max-height: 100vh !important;
-    width: 100vw !important;
-    max-width: 100vw !important;
-    position: fixed !important;
-    top: 0 !important;
-    left: 0 !important;
+    border-radius: 1rem !important;
+    max-width: 85vw !important;
+    max-height: 95vh !important;
+    height: 95vh !important;
+    width: 85vw !important;
+    border: none !important;
+    padding-top: max(1rem, env(safe-area-inset-top)) !important;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom)) !important;
+    padding-left: max(1rem, env(safe-area-inset-left)) !important;
+    padding-right: max(1rem, env(safe-area-inset-right)) !important;
+  }
+}
+@media (max-width: 320px) {
+  [data-radix-dialog-content] {
+    margin: 2rem !important;
+    border-radius: 1rem !important;
+    max-width: 85vw !important;
+    max-height: 95vh !important;
+    height: 95vh !important;
+    width: 85vw !important;
+    border: none !important;
+    padding-top: max(1rem, env(safe-area-inset-top)) !important;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom)) !important;
+    padding-left: max(1rem, env(safe-area-inset-left)) !important;
+    padding-right: max(1rem, env(safe-area-inset-right)) !important;
   }
 }
 
@@ -692,11 +708,11 @@ body.modal-open {
   /* Full viewport usage for PDF dialog on mobile */
   [data-radix-dialog-content] {
     margin: 0 !important;
-    border-radius: 0 !important;
-    max-width: 100vw !important;
-    max-height: 100vh !important;
-    height: 100vh !important;
-    width: 100vw !important;
+    border-radius: 1rem !important;
+    max-width: 95vw !important;
+    max-height: 95vh !important;
+    height: 95vh !important;
+    width: 95vw !important;
     border: none !important;
   }
 
@@ -733,7 +749,7 @@ body.modal-open {
   input[type="color"],
   textarea,
   select {
-    font-size: 16px !important;
+    font-size: 14px !important;
   }
 
   /* Enhanced touch targets for mobile */
@@ -824,11 +840,11 @@ body.modal-open {
 
   /* Responsive font sizing for mobile */
   .text-responsive-xs {
-    font-size: clamp(10px, 2vw, 12px) !important;
+    font-size: clamp(8px, 2vw, 10px) !important;
   }
 
   .text-responsive-sm {
-    font-size: clamp(12px, 2.5vw, 14px) !important;
+    font-size: clamp(10px, 2vw, 12px) !important;
   }
 
   .text-responsive-base {

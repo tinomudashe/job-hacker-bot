@@ -253,7 +253,7 @@ export const ChatContainer = ({
       )}
     >
       <div
-        className="flex-1 overflow-y-auto overflow-x-hidden pb-32 sm:pb-40 md:pb-44"
+        className="flex-1 overflow-y-auto overflow-x-hidden pb-40 sm:pb-48 md:pb-52"
         style={{
           // Enhanced mobile scrolling
           WebkitOverflowScrolling: "touch",

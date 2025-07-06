@@ -47,6 +47,23 @@ async def create_page(
         last_opened_at=new_page.last_opened_at.isoformat() if new_page.last_opened_at else None
     )
 
+@router.get("/pages/{page_id}", response_model=PageResponse)
+async def get_single_page(
+    page_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+):
+    """Get a single page by its ID."""
+    result = await db.execute(
+        select(Page).where(Page.id == page_id, Page.user_id == user.id)
+    )
+    page = result.scalar_one_or_none()
+
+    if not page:
+        raise HTTPException(status_code=404, detail="Page not found")
+
+    return page
+
 @router.get("/pages", response_model=List[PageResponse])
 async def get_pages(
     current_user: User = Depends(get_current_active_user),
@@ -100,7 +117,10 @@ async def delete_page(
     """
     # Check if page exists and belongs to user
     result = await db.execute(
-        select(Page).where(Page.id == page_id, Page.user_id == current_user.id)
+        select(Page)
+        .where(Page.user_id == current_user.id)
+        .order_by(Page.last_opened_at.desc().nulls_last(), Page.created_at.desc())
+        .limit(1)
     )
     page = result.scalars().first()
     

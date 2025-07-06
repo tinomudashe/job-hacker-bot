@@ -608,10 +608,10 @@ export function ChatTextarea({
             <div className="flex sm:hidden flex-col items-center gap-2 text-center">
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center border border-blue-200/50 dark:border-blue-700/50">
-                    <Download className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                  <div className="w-7 h-5 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center border border-blue-200/50 dark:border-blue-700/50">
+                    <Download className="h-3 w-3 text-blue-600 dark:text-blue-400" />
                   </div>
-                  <span className="text-gray-700 dark:text-gray-300 font-medium">
+                  <span className="text-gray-700 dark:text-gray-300 text-xs">
                     Click download icon to save content
                   </span>
                 </div>
