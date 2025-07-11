@@ -25,6 +25,7 @@ from app.tts import router as tts_router
 from app.stt import router as stt_router
 from app.pages import router as pages_router
 from app.pdf_generator import router as pdf_router
+from app.cover_letter_documents import router as cover_letter_documents_router
 
 app = FastAPI()
 
@@ -63,7 +64,8 @@ app.include_router(tts_router, prefix="/api", tags=["tts"])
 app.include_router(stt_router, prefix="/api", tags=["stt"])
 app.include_router(pages_router, prefix="/api", tags=["pages"])
 app.include_router(pdf_router, prefix="/api", tags=["pdf"])
-
+app.include_router(cover_letter_documents_router, prefix="/api", tags=["cover-letter-documents"])
+app.include_router(messages_router, prefix="/api/chat", tags=["chat"])
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Job Application Automation API"} 

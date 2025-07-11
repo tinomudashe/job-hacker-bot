@@ -5,10 +5,11 @@ from typing import List, Optional
 import json
 
 from app.db import get_db
-from app.models_db import ChatMessage, User
+from app.models_db import ChatMessage, User,Page
 from app.dependencies import get_current_active_user
 from pydantic import BaseModel, Field
 from datetime import datetime
+
 import uuid
 
 router = APIRouter()
@@ -104,6 +105,23 @@ async def get_messages(
     messages = result.scalars().all()
     return [ChatMessageResponse.from_orm_model(msg) for msg in messages]
 
+@router.delete("/clear-history", status_code=204)
+async def clear_history(
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Delete all chat messages for the current user.
+    """
+    await db.execute(
+        ChatMessage.__table__.delete().where(ChatMessage.user_id == current_user.id)
+    )
+    await db.execute(
+        Page.__table__.delete().where(Page.user_id == current_user.id)
+    )
+    await db.commit()
+    return
+
 @router.delete("/messages/{message_id}", status_code=204)
 async def delete_message(
     message_id: str,
@@ -175,19 +193,7 @@ async def update_message(
     
     return ChatMessageResponse.from_orm_model(message)
 
-@router.delete("/chats", status_code=204)
-async def clear_history(
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Delete all chat messages for the current user.
-    """
-    await db.execute(
-        ChatMessage.__table__.delete().where(ChatMessage.user_id == current_user.id)
-    )
-    await db.commit()
-    return
+
 
 @router.get("/messages/debug/orphaned", response_model=List[ChatMessageResponse])
 async def get_orphaned_messages(

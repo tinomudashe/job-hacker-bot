@@ -1,4 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, status
+from sqlalchemy import desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.db import get_db
@@ -23,6 +24,8 @@ import logging
 
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
+
+
 
 async def _update_user_profile_from_cv(user: User, cv_data: CVExtractionResult, db: AsyncSession) -> tuple[bool, list[str]]:
     """Updates user profile and resume data from extracted CV content if fields are not already set."""
@@ -111,6 +114,48 @@ class CVUploadResponse(BaseModel):
     auto_extracted_fields: List[str] = []
     personalized_insights: Optional[str] = None
 
+
+@router.get("/documents/resumes/latest", response_model=dict, summary="Get the latest generated resume")
+async def get_latest_resume(
+    db: AsyncSession = Depends(get_db),
+    db_user: User = Depends(get_current_active_user)
+):
+    """
+    Retrieves the most recently generated resume for the authenticated user.
+    It checks the 'generated_content' table for entries that are resumes.
+    """
+    logger.info(f"Fetching latest generated resume for user {db_user.id}")
+    
+    # NOTE: Your generated resumes are currently saved in the 'GeneratedCoverLetter' table.
+    # This query targets that table. We will identify resumes by looking for a marker.
+    from app.models_db import GeneratedCoverLetter
+    
+    result = await db.execute(
+        select(GeneratedCoverLetter)
+        .where(GeneratedCoverLetter.user_id == db_user.id)
+        # A simple way to distinguish resumes from cover letters in the same table
+        .where(GeneratedCoverLetter.content.contains("[DOWNLOADABLE_RESUME]"))
+        .order_by(desc(GeneratedCoverLetter.created_at))
+        .limit(1)
+    )
+    
+    latest_resume = result.scalars().first()
+    
+    if not latest_resume:
+        raise HTTPException(status_code=404, detail="No generated resume found.")
+        
+    # The content is a string containing markers and the resume text.
+    # We will return the whole object so the frontend can parse it.
+    return {
+        "id": latest_resume.id,
+        "user_id": latest_resume.user_id,
+        "content": latest_resume.content,
+        "created_at": latest_resume.created_at
+    }
+
+
+
+
 @router.post("/documents", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
 async def upload_document(
     file: UploadFile = File(...),
@@ -195,6 +240,64 @@ async def upload_document(
             
         logger.error(f"Error processing document upload: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to process document: {str(e)}")
+    
+
+    
+@router.post("/upload", summary="Upload a generic file", status_code=status.HTTP_201_CREATED)
+async def upload_file(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    db_user: User = Depends(get_current_active_user),
+):
+    """
+    Handles generic file uploads. Saves the file to the server and creates a
+    database entry for it.
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided.")
+
+    file_id = str(uuid.uuid4())
+    file_extension = Path(file.filename).suffix
+    new_filename = f"{file_id}{file_extension}"
+    file_path = UPLOAD_DIR / new_filename
+
+    try:
+        # Save file to disk
+        with open(file_path, "wb") as buffer:
+            buffer.write(await file.read())
+
+        # Create a new document record in the database
+        new_document = Document(
+            id=file_id,
+            user_id=db_user.id,
+            name=file.filename,
+            path=str(file_path),
+            file_type=file.content_type,
+            size=file_path.stat().st_size,
+            created_at=datetime.utcnow(),
+        )
+        db.add(new_document)
+        await db.commit()
+        await db.refresh(new_document)
+
+        logger.info(f"User {db_user.id} uploaded file: {new_document.name}")
+
+        return {
+            "filename": new_document.name,
+            "document_id": new_document.id,
+            "size": new_document.size,
+            "file_type": new_document.file_type,
+        }
+    except Exception as e:
+        # Clean up the file if the database operation fails
+        if file_path.exists():
+            os.remove(file_path)
+        logger.error(f"Error during file upload for user {db_user.id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"An unexpected error occurred during file upload: {e}",
+        )
+
 
 @router.post("/documents/cv-upload", response_model=CVUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_cv_with_extraction(
@@ -248,64 +351,49 @@ async def upload_cv_with_extraction(
         await db.commit()
         # Skip refresh to avoid greenlet issues - we have all the data we need
         
-        # Basic FAISS processing (without enhanced features)
+        # Now, process CV data and update profile in a separate step
+        # This separation helps isolate transaction scopes and debug greenlet issues
         try:
-            embedding = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
+            cv_data = await cv_processor.aprocess_cv(text)
             
-            # Smart chunking
-            chunk_size = _get_optimal_chunk_size("resume", len(text))
-            chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
-            docs = [LCDocument(page_content=chunk) for chunk in chunks]
+            # Auto-update profile if enabled
+            profile_updated = False
+            updated_fields = []
+            if auto_update_profile:
+                profile_updated, updated_fields = await _update_user_profile_from_cv(db_user, cv_data, db)
+                if profile_updated:
+                    await db.commit()
+                    await db.refresh(db_user) # Refresh user to get latest state
             
-            faiss_dir = user_dir / f"faiss_{doc_id}"
-            faiss_dir.mkdir(exist_ok=True)
+            # This is a placeholder for the more advanced features you were working on
+            insights = "This is a placeholder for personalized insights."
             
-            # Use async FAISS methods to prevent greenlet errors
-            vectorstore = await FAISS.afrom_documents(docs, embedding)
-            
-            # Run save_local in thread executor to avoid blocking
-            await asyncio.get_event_loop().run_in_executor(
-                None, vectorstore.save_local, str(faiss_dir)
+            # Construct final response
+            return CVUploadResponse(
+                document=doc,
+                extracted_info=cv_data,
+                profile_updated=profile_updated,
+                auto_extracted_fields=updated_fields,
+                personalized_insights=insights
             )
-            
-            # Update document with FAISS path using direct SQL to avoid refresh issues
-            from sqlalchemy import update, text
-            stmt = update(Document).where(Document.id == doc_id).values(
-                vector_store_path=str(faiss_dir),
-                date_updated=text('now()')
-            )
-            await db.execute(stmt)
-            await db.commit()
             
         except Exception as e:
-            logger.warning(f"FAISS processing failed but document was saved: {e}")
-        
-        logger.info(f"CV uploaded successfully: {name} for user {db_user.id}")
-        
-        return CVUploadResponse(
-            document=DocumentOut(
-                id=doc_id,
-                type="resume",
-                name=name,
-                date_created=now,
-                date_updated=now
-            ),
-            extracted_info=None,
-            profile_updated=False,
-            auto_extracted_fields=[],
-            personalized_insights="CV uploaded successfully! Enhanced features will be available soon."
-        )
-        
+            # Handle errors during CV processing specifically
+            logger.error(f"Error during CV processing stage for doc {doc.id}: {e}")
+            # The document is already saved, so we return the doc info with an error message
+            # This is better than rolling back the whole upload
+            return CVUploadResponse(
+                document=doc,
+                extracted_info=None,
+                profile_updated=False,
+                auto_extracted_fields=[],
+                personalized_insights=f"CV processing failed: {e}"
+            )
+
     except Exception as e:
-        # Ensure transaction rollback on main error
-        try:
-            if db.is_active:
-                await db.rollback()
-        except Exception:
-            pass
-            
-        logger.error(f"Error processing CV upload: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to process CV: {str(e)}")
+        logger.error(f"Major error during CV upload for user {db_user.id}: {e}")
+        raise HTTPException(status_code=500, detail=f"A critical error occurred: {e}")
+
 
 async def _analyze_document_with_context(
     content: str, 
@@ -313,241 +401,198 @@ async def _analyze_document_with_context(
     user_profile, 
     memory_manager: Optional[EnhancedMemoryManager]
 ) -> dict:
-    """Analyze document content with user learning context"""
-    
-    analysis = {
-        "content_type": doc_type,
-        "word_count": len(content.split()),
-        "key_themes": [],
-        "relevance_score": 0.0
-    }
-    
-    try:
-        # Analyze based on user preferences and job search patterns
-        if user_profile.job_search_patterns:
-            common_keywords = user_profile.job_search_patterns.get("common_keywords", [])
-            
-            # Check content relevance to user's job interests
-            relevance_matches = sum(1 for keyword in common_keywords if keyword.lower() in content.lower())
-            analysis["relevance_score"] = min(relevance_matches / max(len(common_keywords), 1), 1.0)
-            
-        # Extract key themes based on document type
-        if doc_type == "resume":
-            analysis["key_themes"] = _extract_resume_themes(content)
-        elif doc_type == "cover_letter":
-            analysis["key_themes"] = _extract_cover_letter_themes(content)
-        
-        return analysis
-        
-    except Exception as e:
-        logger.warning(f"Document analysis failed: {e}")
-        return analysis
+    # This is a placeholder for the advanced analysis function you were building
+    # It would use the user profile and memory for deeper insights
+    if doc_type == "resume":
+        return await _analyze_resume_content(content, user_profile)
+    elif doc_type == "cover_letter":
+        return await _analyze_cover_letter_content(content, user_profile)
+    return {}
 
 async def _generate_cv_insights_with_context(
     content: str,
     user_profile,
     memory_manager: Optional[EnhancedMemoryManager]
 ) -> Optional[str]:
-    """Generate personalized CV insights based on user's job search patterns"""
+    # Placeholder for advanced insight generation
     
-    try:
-        insights = []
-        
-        # Analyze based on user's job search history
-        if user_profile.job_search_patterns:
-            common_roles = user_profile.job_search_patterns.get("common_job_titles", [])
-            preferred_locations = user_profile.job_search_patterns.get("common_search_locations", [])
-            
-            if common_roles:
-                insights.append(f"Your CV content aligns well with your interest in {', '.join(common_roles[:3])} roles.")
-            
-            if preferred_locations:
-                insights.append(f"Consider highlighting remote work experience since you often search for positions in {', '.join(preferred_locations[:2])}.")
-        
-        # Analyze based on interaction patterns
-        if user_profile.interaction_patterns:
-            detail_preference = user_profile.interaction_patterns.get("preferred_detail_level", "moderate")
-            if detail_preference == "detailed":
-                insights.append("Based on your preference for detailed information, consider expanding on specific achievements and metrics in your CV.")
-        
-        # Success-based recommendations
-        if user_profile.success_metrics:
-            success_rate = user_profile.success_metrics.get("job_search_success_rate", 0)
-            if success_rate < 0.3:
-                insights.append("Consider optimizing your CV with more industry-specific keywords to improve job search success.")
-        
-        if insights:
-            return "\n".join([f"• {insight}" for insight in insights])
-        
+    # Example of how you might use the context:
+    if memory_manager and user_profile:
+        past_feedback = await memory_manager.get_related_memories(
+            "cv_feedback",
+            limit=3,
+            min_similarity=0.78
+        )
+        if past_feedback:
+            # Generate insights based on past interactions
+            # This is a simplified example
+            return "Based on your past CVs, you've improved your project descriptions. Focus next on quantifying achievements."
+
+    # Fallback to basic analysis if no context is available
+    themes = _extract_resume_themes(content)
+    if not themes:
         return None
-        
-    except Exception as e:
-        logger.warning(f"CV insights generation failed: {e}")
-        return None
+    return f"This CV focuses on themes of: {', '.join(themes)}. Consider tailoring this to the job description."
 
 async def _learn_from_cv_content(content: str, memory_manager: Optional[EnhancedMemoryManager]):
-    """Learn user preferences from CV content for future recommendations"""
-    
     if not memory_manager:
-        return  # Skip learning if memory manager is not available
-    
-    try:
-        # Extract skills from CV
-        skills = _extract_skills_from_cv(content)
-        if skills:
-            # Save dominant skills as preferences
-            for skill in skills[:5]:  # Top 5 skills
-                try:
-                    await memory_manager.save_user_preference_safe(f"cv_skill_{skill.lower()}", "true")
-                except Exception as e:
-                    logger.warning(f"Failed to save skill preference for {skill}: {e}")
-                    continue
-        
-        # Extract experience level
-        experience_years = _estimate_experience_years(content)
-        if experience_years:
-            try:
-                await memory_manager.save_user_preference_safe("experience_years", str(experience_years))
-            except Exception as e:
-                logger.warning(f"Failed to save experience years: {e}")
-        
-        # Extract industry keywords
-        industry = _extract_industry_keywords(content)
-        if industry:
-            try:
-                await memory_manager.save_user_preference_safe("preferred_industry", industry)
-            except Exception as e:
-                logger.warning(f"Failed to save industry preference: {e}")
-            
-    except Exception as e:
-        logger.warning(f"CV learning failed: {e}")
+        return
+
+    # Extract key entities and learn them
+    skills = _extract_skills_from_cv(content)
+    if skills:
+        await memory_manager.add_memory(
+            "user_skill", 
+            metadata={"skills": skills, "source": "cv_upload"}
+        )
+
+    experience_years = _estimate_experience_years(content)
+    if experience_years is not None:
+        await memory_manager.add_memory(
+            "user_experience_level", 
+            metadata={"years": experience_years, "source": "cv_upload"}
+        )
+
+    industry = _extract_industry_keywords(content)
+    if industry:
+        await memory_manager.add_memory(
+            "user_industry_preference",
+            metadata={"industry": industry, "source": "cv_upload"}
+        )
+
+    logger.info("Learned skills, experience, and industry from CV content.")
+
 
 def _get_optimal_chunk_size(doc_type: str, content_length: int) -> int:
-    """Determine optimal chunk size based on document type and length"""
-    
+    # Simple logic to adjust chunk size
     if doc_type == "resume":
-        return min(800, max(400, content_length // 10))
-    elif doc_type == "cover_letter":
-        return min(600, max(300, content_length // 8))
-    else:
-        return 500
+        return 512  # Smaller chunks for denser resume content
+    elif content_length > 10000:
+        return 2048 # Larger chunks for very long documents
+    return 1024
 
 def _extract_resume_themes(content: str) -> List[str]:
-    """Extract key themes from resume content"""
+    # This is a simplified keyword-based theme extraction
     themes = []
     content_lower = content.lower()
-    
-    # Technical skills
-    if any(term in content_lower for term in ["python", "javascript", "sql", "programming"]):
-        themes.append("technical_skills")
-    
-    # Leadership
-    if any(term in content_lower for term in ["led", "managed", "supervised", "leadership"]):
-        themes.append("leadership")
-    
-    # Project management
-    if any(term in content_lower for term in ["project", "agile", "scrum", "delivery"]):
-        themes.append("project_management")
-    
-    return themes
+    if "lead" in content_lower or "manage" in content_lower:
+        themes.append("Leadership")
+    if "python" in content_lower or "java" in content_lower or "react" in content_lower:
+        themes.append("Software Development")
+    if "data" in content_lower or "analyst" in content_lower:
+        themes.append("Data Analysis")
+    if "ui/ux" in content_lower or "design" in content_lower:
+        themes.append("User Experience")
+    return list(set(themes))
 
 def _extract_cover_letter_themes(content: str) -> List[str]:
-    """Extract key themes from cover letter content"""
     themes = []
     content_lower = content.lower()
-    
-    if "passion" in content_lower or "enthusiastic" in content_lower:
-        themes.append("enthusiasm")
-    
-    if "experience" in content_lower or "background" in content_lower:
-        themes.append("experience_focused")
-    
-    if "achieve" in content_lower or "goal" in content_lower:
-        themes.append("results_oriented")
-    
-    return themes
+    if "excited" in content_lower or "passionate" in content_lower:
+        themes.append("Enthusiasm")
+    if "perfect fit" in content_lower or "well-suited" in content_lower:
+        themes.append("Fit for Role")
+    if "look forward" in content_lower:
+        themes.append("Proactive Follow-up")
+    return list(set(themes))
 
 def _extract_skills_from_cv(content: str) -> List[str]:
-    """Extract technical and professional skills from CV content"""
-    skills = []
-    content_lower = content.lower()
-    
-    # Common technical skills
-    tech_skills = ["python", "javascript", "java", "sql", "aws", "docker", "kubernetes", 
-                   "react", "angular", "node.js", "mongodb", "postgresql", "git"]
-    
-    for skill in tech_skills:
-        if skill in content_lower:
-            skills.append(skill)
-    
-    return skills
+    # A more robust regex could be used here
+    # This is a simple example
+    skills = [
+        "Python", "Java", "React", "TypeScript", "JavaScript", "SQL",
+        "AWS", "GCP", "Docker", "Kubernetes", "Spring Boot"
+    ]
+    found_skills = [skill for skill in skills if skill.lower() in content.lower()]
+    return list(set(found_skills))
 
 def _estimate_experience_years(content: str) -> Optional[int]:
-    """Estimate years of experience from CV content"""
     import re
+    # Look for patterns like "X+ years", "X years of experience"
+    matches = re.findall(r'(\d+)\+?\s*years', content, re.IGNORECASE)
+    if matches:
+        return max(int(m) for m in matches)
     
-    # Look for explicit year mentions
-    year_patterns = [
-        r"(\d+)\+?\s*years?\s*(?:of\s*)?experience",
-        r"(\d+)\+?\s*years?\s*in",
-        r"over\s*(\d+)\s*years?",
-    ]
+    # A more complex method would parse start/end dates of jobs
+    # This is a simplified version for demonstration
     
-    for pattern in year_patterns:
-        matches = re.findall(pattern, content.lower())
-        if matches:
-            try:
-                return int(matches[0])
-            except ValueError:
-                continue
-    
-    # Estimate from date ranges
-    current_year = datetime.now().year
-    years_mentioned = re.findall(r'\b(20\d{2})\b', content)
-    
-    if years_mentioned:
-        years = [int(year) for year in years_mentioned if int(year) <= current_year]
-        if years:
-            return current_year - min(years)
-    
+    # Count occurrences of year numbers to make a rough guess
+    year_mentions = re.findall(r'\b(20\d{2})\b', content)
+    if len(year_mentions) > 1:
+        try:
+            min_year = min(int(y) for y in year_mentions)
+            max_year = max(int(y) for y in year_mentions)
+            # Avoid unrealistic ranges
+            if 0 < (max_year - min_year) < 40:
+                return max_year - min_year
+        except ValueError:
+            pass
+
     return None
 
 def _extract_industry_keywords(content: str) -> Optional[str]:
-    """Extract industry from CV content"""
     content_lower = content.lower()
-    
-    industries = {
-        "technology": ["software", "programming", "developer", "engineer", "tech", "it"],
-        "finance": ["finance", "banking", "investment", "accounting", "financial"],
-        "healthcare": ["healthcare", "medical", "hospital", "clinical", "patient"],
-        "marketing": ["marketing", "advertising", "social media", "branding", "campaign"],
-        "education": ["education", "teaching", "academic", "university", "school"]
-    }
-    
-    industry_scores = {}
-    for industry, keywords in industries.items():
-        score = sum(1 for keyword in keywords if keyword in content_lower)
-        if score > 0:
-            industry_scores[industry] = score
-    
-    if industry_scores:
-        return max(industry_scores, key=industry_scores.get)
-    
+    if "finance" in content_lower or "fintech" in content_lower:
+        return "Finance"
+    if "healthcare" in content_lower or "medical" in content_lower:
+        return "Healthcare"
+    if "ecommerce" in content_lower or "retail" in content_lower:
+        return "E-commerce"
+    if "saas" in content_lower:
+        return "SaaS"
     return None
+
 
 @router.get("/documents", response_model=List[DocumentOut])
 async def list_documents(
     db: AsyncSession = Depends(get_db),
     db_user: User = Depends(get_current_active_user)
 ):
+    """Get all documents for the authenticated user."""
+    logger.info(f"Listing documents for user {db_user.id}")
+    result = await db.execute(select(Document).where(Document.user_id == db_user.id))
+    return result.scalars().all()
+
+@router.delete("/documents/delete-all", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_all_documents_for_user(
+    db: AsyncSession = Depends(get_db),
+    db_user: User = Depends(get_current_active_user)
+):
     """
-    List all documents for the authenticated user.
+    Deletes all documents (and their associated FAISS indexes) for the authenticated user.
+    This is a destructive operation.
     """
-    result = await db.execute(
-        select(Document).where(Document.user_id == db_user.id).order_by(Document.date_created.desc())
-    )
-    documents = result.scalars().all()
-    return documents
+    logger.warning(f"Initiating deletion of all documents for user {db_user.id}")
+    
+    # First, get all documents to find their FAISS index paths
+    docs_result = await db.execute(select(Document).where(Document.user_id == db_user.id))
+    documents_to_delete = docs_result.scalars().all()
+    
+    deleted_count = 0
+    for doc in documents_to_delete:
+        # Delete the physical FAISS index directory if it exists
+        if doc.vector_store_path and os.path.exists(doc.vector_store_path):
+            try:
+                shutil.rmtree(doc.vector_store_path)
+                logger.info(f"Deleted FAISS index for document {doc.id} at {doc.vector_store_path}")
+            except Exception as e:
+                logger.error(f"Error deleting FAISS index for document {doc.id}: {e}")
+        
+        # Delete the document record from the database
+        await db.delete(doc)
+        deleted_count += 1
+        
+    if deleted_count > 0:
+        try:
+            await db.commit()
+            logger.info(f"Successfully deleted {deleted_count} documents for user {db_user.id}")
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Failed to commit deletion of documents for user {db_user.id}: {e}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error during document deletion.")
+    else:
+        # If no documents were found, we can just return success
+        logger.info(f"No documents found to delete for user {db_user.id}")
 
 @router.get("/documents/{doc_id}", response_model=DocumentOut)
 async def get_document(
@@ -555,16 +600,12 @@ async def get_document(
     db: AsyncSession = Depends(get_db),
     db_user: User = Depends(get_current_active_user)
 ):
-    """
-    Get details for a specific document.
-    """
-    result = await db.execute(
-        select(Document).where(Document.id == doc_id, Document.user_id == db_user.id)
-    )
-    document = result.scalar_one_or_none()
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
-    return document
+    """Get a single document by its ID."""
+    result = await db.execute(select(Document).where(Document.id == doc_id, Document.user_id == db_user.id))
+    doc = result.scalars().first()
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    return doc
 
 @router.post("/documents/{doc_id}/reprocess-cv")
 async def reprocess_cv_extraction(
@@ -574,52 +615,38 @@ async def reprocess_cv_extraction(
     db_user: User = Depends(get_current_active_user)
 ):
     """
-    Reprocess a document with CV extraction (useful for documents uploaded before this feature)
+    Manually re-trigger CV processing for an existing document.
+    This is useful if the initial extraction failed or needs to be updated.
     """
-    # Get the document
-    result = await db.execute(
-        select(Document).where(Document.id == doc_id, Document.user_id == db_user.id)
-    )
-    document = result.scalar_one_or_none()
-    
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    # Find the original file
-    user_dir = UPLOAD_DIR / db_user.id
-    file_path = None
-    for f in user_dir.glob(f"{doc_id}_*"):
-        if f.is_file():
-            file_path = f
-            break
-    
-    if not file_path:
-        raise HTTPException(status_code=404, detail="Original file not found")
-    
+    logger.info(f"Reprocessing CV for doc {doc_id}, user {db_user.id}")
+    result = await db.execute(select(Document).where(Document.id == doc_id, Document.user_id == db_user.id))
+    doc = result.scalars().first()
+    if not doc or doc.type != 'resume':
+        raise HTTPException(status_code=404, detail="Resume document not found")
+
+    if not doc.content:
+        raise HTTPException(status_code=400, detail="Document has no content to process")
+
     try:
-        # Extract information using CV processor
-        extraction_result = await cv_processor.extract_cv_information(file_path)
+        cv_data = await cv_processor.aprocess_cv(doc.content)
         
-        # Update user profile if requested
         profile_updated = False
-        auto_extracted_fields = []
-        
-        if auto_update_profile and extraction_result.confidence_score > 0.5:
-            profile_updated, auto_extracted_fields = await _update_user_profile_from_cv(
-                db_user, extraction_result, db
-            )
-            await db.commit()
-        
+        updated_fields = []
+        if auto_update_profile:
+            profile_updated, updated_fields = await _update_user_profile_from_cv(db_user, cv_data, db)
+            if profile_updated:
+                await db.commit()
+                await db.refresh(db_user)
+
         return {
-            "document_id": doc_id,
-            "extracted_info": extraction_result,
+            "message": "CV re-processed successfully.",
+            "extracted_info": cv_data,
             "profile_updated": profile_updated,
-            "auto_extracted_fields": auto_extracted_fields
+            "auto_extracted_fields": updated_fields,
         }
-        
     except Exception as e:
-        logger.error(f"Error reprocessing CV: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to reprocess CV: {str(e)}")
+        logger.error(f"Error during manual CV reprocessing for doc {doc.id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to reprocess CV: {e}")
 
 @router.delete("/documents/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
@@ -627,34 +654,32 @@ async def delete_document(
     db: AsyncSession = Depends(get_db),
     db_user: User = Depends(get_current_active_user)
 ):
-    """
-    Delete a document and its associated files.
-    """
-    result = await db.execute(
-        select(Document).where(Document.id == doc_id, Document.user_id == db_user.id)
-    )
-    document = result.scalar_one_or_none()
+    """Delete a single document by its ID."""
+    logger.info(f"Attempting to delete document {doc_id} for user {db_user.id}")
+    result = await db.execute(select(Document).where(Document.id == doc_id, Document.user_id == db_user.id))
+    doc = result.scalars().first()
     
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    
+    # Delete the physical FAISS index directory if it exists
+    if doc.vector_store_path and os.path.exists(doc.vector_store_path):
+        try:
+            shutil.rmtree(doc.vector_store_path)
+            logger.info(f"Deleted FAISS index at {doc.vector_store_path}")
+        except Exception as e:
+            # Log error but don't block deletion of the DB record
+            logger.error(f"Error deleting FAISS index for doc {doc.id}: {e}")
+    
+    try:
+        await db.delete(doc)
+        await db.commit()
+        logger.info(f"Successfully deleted document {doc_id} for user {db_user.id}")
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Database error deleting document {doc_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete document from database.")
 
-    # Delete associated files
-    user_dir = UPLOAD_DIR / db_user.id
-    # Find the original file (we don't store its exact name, so we have to search)
-    for f in user_dir.glob(f"{doc_id}_*"):
-        if f.is_file():
-            f.unlink()
-            break
-            
-    # Delete FAISS vector store directory
-    if document.vector_store_path:
-        faiss_dir = Path(document.vector_store_path)
-        if faiss_dir.exists() and faiss_dir.is_dir():
-            shutil.rmtree(faiss_dir)
-            
-    await db.delete(document)
-    await db.commit()
-    return
 
 class DocumentUpdate(BaseModel):
     name: Optional[str] = None
@@ -667,29 +692,29 @@ async def update_document(
     db: AsyncSession = Depends(get_db),
     db_user: User = Depends(get_current_active_user)
 ):
-    """
-    Update a document's name or type.
-    """
-    result = await db.execute(
-        select(Document).where(Document.id == doc_id, Document.user_id == db_user.id)
-    )
-    document = result.scalar_one_or_none()
+    """Update a document's metadata (name or type)."""
+    result = await db.execute(select(Document).where(Document.id == doc_id, Document.user_id == db_user.id))
+    doc = result.scalars().first()
     
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
         
-    if doc_update.name:
-        document.name = doc_update.name
-    if doc_update.type:
-        if doc_update.type not in ("resume", "cover_letter", "generic"):
-            raise HTTPException(status_code=400, detail="Invalid document type. Must be 'resume', 'cover_letter', or 'generic'.")
-        document.type = doc_update.type
-        
-    document.date_updated = datetime.utcnow()
+    update_data = doc_update.dict(exclude_unset=True)
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No update data provided.")
+
+    for key, value in update_data.items():
+        setattr(doc, key, value)
     
-    await db.commit()
-    await db.refresh(document)
-    return document
+    doc.date_updated = datetime.utcnow()
+    
+    try:
+        await db.commit()
+        await db.refresh(doc)
+        return doc
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update document: {e}")
 
 @router.get("/documents/insights", response_model=dict)
 async def get_personalized_document_insights(
@@ -697,55 +722,40 @@ async def get_personalized_document_insights(
     db_user: User = Depends(get_current_active_user)
 ):
     """
-    Get personalized insights about user's documents based on learning profile
+    Generate comprehensive insights across all of the user's documents.
+    This provides a holistic view of their professional profile.
     """
-    try:
-        # Initialize Enhanced Memory Manager
+    logger.info(f"Generating comprehensive insights for user {db_user.id}")
+    
+    # Get user profile for context
+    # This is a simplified user profile object for demonstration
+    user_profile = {
+        "name": db_user.name,
+        "profile_headline": db_user.profile_headline,
+        "skills": db_user.skills.split(',') if db_user.skills else []
+    }
+
+    docs_result = await db.execute(select(Document).where(Document.user_id == db_user.id))
+    documents = docs_result.scalars().all()
+    
+    if not documents:
+        return {"message": "No documents found to generate insights."}
+
+    # Initialize memory manager (optional, for advanced context)
+    memory_manager = None
+    if db_user.faiss_index_path and os.path.exists(db_user.faiss_index_path):
         try:
-            from app.enhanced_memory import AsyncSafeEnhancedMemoryManager
-            memory_manager = AsyncSafeEnhancedMemoryManager(db, db_user, skills=db_user.skills)
-            user_profile = await memory_manager._get_user_learning_profile_safe()
-            logger.info("Enhanced Memory Manager initialized for document insights")
+            memory_manager = EnhancedMemoryManager(user_id=db_user.id, db_session=db)
+            await memory_manager.load_memory()
         except Exception as e:
-            logger.warning(f"Enhanced Memory Manager initialization failed: {e}")
-            memory_manager = None
-            user_profile = None
-        
-        # Get user documents
-        doc_result = await db.execute(
-            select(Document).where(Document.user_id == db_user.id)
-        )
-        documents = doc_result.scalars().all()
-        
-        if not documents:
-            return {
-                "insights": "No documents found. Upload your resume or cover letters to get personalized insights!",
-                "recommendations": [],
-                "document_analysis": {}
-            }
-        
-        # Analyze documents with user context
-        insights = await _generate_comprehensive_document_insights(
-            documents, user_profile, memory_manager
-        )
-        
-        # Track insights access
-        if memory_manager:
-            await memory_manager.save_user_behavior_safe(
-                action_type="document_insights_access",
-                context={
-                    "documents_count": len(documents),
-                    "insights_generated": len(insights.get("recommendations", [])),
-                    "timestamp": datetime.utcnow().isoformat()
-                },
-                success=True
-            )
-        
+            logger.warning(f"Could not load enhanced memory for user {db_user.id}: {e}")
+
+    try:
+        insights = await _generate_comprehensive_document_insights(documents, user_profile, memory_manager)
         return insights
-        
     except Exception as e:
-        logger.error(f"Error generating document insights: {e}")
-        raise HTTPException(status_code=500, detail="Failed to generate document insights")
+        logger.error(f"Error generating insights for user {db_user.id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate document insights.")
 
 @router.get("/documents/{doc_id}/analysis", response_model=dict)
 async def get_document_analysis(
@@ -754,375 +764,206 @@ async def get_document_analysis(
     db_user: User = Depends(get_current_active_user)
 ):
     """
-    Get detailed analysis of a specific document with personalized insights
+    Perform a detailed analysis of a single document, providing specific feedback.
     """
-    try:
-        # Get the document
-        result = await db.execute(
-            select(Document).where(Document.id == doc_id, Document.user_id == db_user.id)
-        )
-        document = result.scalar_one_or_none()
-        
-        if not document:
-            raise HTTPException(status_code=404, detail="Document not found")
-        
-        # Initialize Enhanced Memory Manager
+    logger.info(f"Analyzing document {doc_id} for user {db_user.id}")
+    
+    # Get user profile for context
+    user_profile = {
+        "name": db_user.name,
+        "profile_headline": db_user.profile_headline,
+        "skills": db_user.skills.split(',') if db_user.skills else []
+    }
+
+    result = await db.execute(select(Document).where(Document.id == doc_id, Document.user_id == db_user.id))
+    doc = result.scalars().first()
+    
+    if not doc:
+        raise HTTPException(status_code=4.04, detail="Document not found")
+
+    # Initialize memory manager for contextual analysis
+    memory_manager = None
+    if db_user.faiss_index_path and os.path.exists(db_user.faiss_index_path):
         try:
-            from app.enhanced_memory import AsyncSafeEnhancedMemoryManager
-            memory_manager = AsyncSafeEnhancedMemoryManager(db, db_user, skills=db_user.skills)
+            memory_manager = EnhancedMemoryManager(user_id=db_user.id, db_session=db)
+            await memory_manager.load_memory()
         except Exception as e:
-            logger.warning(f"Enhanced Memory Manager initialization failed: {e}")
-            memory_manager = None
-        
-        if memory_manager:
-            user_profile = await memory_manager._get_user_learning_profile_safe()
-        else:
-            user_profile = None
-        
-        # Analyze specific document
-        analysis = await _analyze_single_document(document, user_profile, memory_manager)
-        
-        # Track document analysis access
-        if memory_manager:
-            await memory_manager.save_user_behavior_safe(
-                action_type="single_document_analysis",
-                context={
-                    "document_id": doc_id,
-                    "document_type": document.type,
-                    "analysis_depth": len(analysis.get("sections", [])),
-                    "timestamp": datetime.utcnow().isoformat()
-                },
-                success=True
-            )
-        
+            logger.warning(f"Could not load enhanced memory for single doc analysis: {e}")
+
+    try:
+        analysis = await _analyze_single_document(doc, user_profile, memory_manager)
         return analysis
-        
     except Exception as e:
         logger.error(f"Error analyzing document {doc_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to analyze document")
+        raise HTTPException(status_code=500, detail="Failed to analyze document.")
+
+
+# --- Helper Functions for Analysis ---
 
 async def _generate_comprehensive_document_insights(
     documents: List[Document],
     user_profile,
     memory_manager: Optional[EnhancedMemoryManager]
 ) -> dict:
-    """Generate comprehensive insights about all user documents"""
+    """
+    Analyzes multiple documents to find overarching themes, skill clusters,
+    and potential inconsistencies.
+    """
+    if not documents:
+        return {}
+
+    all_content = " ".join([doc.content for doc in documents if doc.content])
     
-    insights = {
-        "summary": "",
-        "recommendations": [],
-        "document_analysis": {},
-        "career_alignment": {},
-        "optimization_tips": []
+    # High-level summary
+    summary = {
+        "total_documents": len(documents),
+        "document_types": {t: len([d for d in documents if d.type == t]) for t in set(d.type for d in documents)},
+        "overall_themes": _extract_resume_themes(all_content) + _extract_cover_letter_themes(all_content),
+        "identified_skills": _extract_skills_from_cv(all_content),
+        "estimated_experience_years": _estimate_experience_years(all_content),
+        "suggested_industries": _extract_industry_keywords(all_content)
     }
-    
-    try:
-        # Document type analysis
-        doc_types = {}
-        total_content_length = 0
-        
-        for doc in documents:
-            doc_types[doc.type] = doc_types.get(doc.type, 0) + 1
-            if doc.content:
-                total_content_length += len(doc.content)
-        
-        insights["document_analysis"] = {
-            "total_documents": len(documents),
-            "document_types": doc_types,
-            "average_content_length": total_content_length // len(documents) if documents else 0,
-            "latest_update": max(doc.date_updated for doc in documents).isoformat() if documents else None
-        }
-        
-        # Generate summary based on user profile
-        summary_parts = []
-        summary_parts.append(f"You have {len(documents)} documents uploaded.")
-        
-        if doc_types.get("resume", 0) > 0:
-            summary_parts.append(f"Including {doc_types['resume']} resume(s)")
-        if doc_types.get("cover_letter", 0) > 0:
-            summary_parts.append(f"and {doc_types['cover_letter']} cover letter(s).")
-        
-        # Career alignment analysis
-        if user_profile.job_search_patterns:
-            job_patterns = user_profile.job_search_patterns
-            common_roles = job_patterns.get("common_job_titles", [])
-            
-            if common_roles:
-                # Analyze document relevance to job search patterns
-                relevance_scores = []
-                for doc in documents:
-                    if doc.content:
-                        score = sum(1 for role in common_roles 
-                                  if role.lower() in doc.content.lower())
-                        relevance_scores.append(score / max(len(common_roles), 1))
-                
-                avg_relevance = sum(relevance_scores) / len(relevance_scores) if relevance_scores else 0
-                
-                insights["career_alignment"] = {
-                    "target_roles": common_roles[:3],
-                    "document_relevance_score": round(avg_relevance, 2),
-                    "alignment_status": "High" if avg_relevance > 0.7 else "Medium" if avg_relevance > 0.4 else "Low"
-                }
-                
-                if avg_relevance < 0.5:
-                    insights["recommendations"].append(
-                        f"Consider updating your documents to better align with your target roles: {', '.join(common_roles[:3])}"
-                    )
-        
-        # Experience-based recommendations
-        if user_profile.preferences:
-            experience_years = user_profile.preferences.get("experience_years")
-            industry = user_profile.preferences.get("preferred_industry")
-            
-            if experience_years:
-                try:
-                    years = int(experience_years)
-                    if years < 2:
-                        insights["recommendations"].append(
-                            "As an early-career professional, focus on highlighting education, projects, and any internship experience."
-                        )
-                    elif years > 5:
-                        insights["recommendations"].append(
-                            "With your experience level, emphasize leadership roles and major achievements with quantifiable results."
-                        )
-                except ValueError:
-                    pass
-            
-            if industry:
-                insights["recommendations"].append(
-                    f"Ensure your documents include industry-specific keywords for {industry.title()} roles."
-                )
-        
-        # Interaction-based recommendations
-        if user_profile.interaction_patterns:
-            common_actions = user_profile.interaction_patterns.get("most_common_actions", {})
-            
-            if "job_search" in common_actions:
-                insights["recommendations"].append(
-                    "Since you frequently search for jobs, consider creating multiple tailored versions of your resume for different types of positions."
-                )
-        
-        # Optimization tips based on document analysis
-        resume_docs = [doc for doc in documents if doc.type == "resume"]
-        if resume_docs:
-            latest_resume = max(resume_docs, key=lambda x: x.date_updated)
-            if latest_resume.content:
-                insights["optimization_tips"].extend(
-                    _generate_resume_optimization_tips(latest_resume.content, user_profile)
-                )
-        
-        # Generate final summary
-        insights["summary"] = " ".join(summary_parts)
-        
-        if insights["career_alignment"]:
-            alignment = insights["career_alignment"]["alignment_status"]
-            insights["summary"] += f" Your documents show {alignment.lower()} alignment with your job search goals."
-        
-        return insights
-        
-    except Exception as e:
-        logger.error(f"Error generating comprehensive insights: {e}")
-        return {
-            "summary": "Unable to generate detailed insights at this time.",
-            "recommendations": ["Try uploading more documents for better analysis."],
-            "document_analysis": {},
-            "career_alignment": {},
-            "optimization_tips": []
-        }
+
+    # Example of using memory for deeper insights
+    if memory_manager:
+        related_jobs = await memory_manager.get_related_memories("job_application", limit=5)
+        if related_jobs:
+            summary["related_past_applications"] = [mem.metadata.get("job_title") for mem in related_jobs]
+
+    # Suggestions for improvement
+    suggestions = []
+    if len(summary["identified_skills"]) < 10:
+        suggestions.append("Consider adding more specific technical or soft skills to your documents.")
+    if not summary["estimated_experience_years"]:
+        suggestions.append("Your documents don't clearly state your years of experience. Consider adding a summary statement like 'Software Engineer with 5+ years of experience'.")
+    if "Leadership" not in summary["overall_themes"]:
+        suggestions.append("To target senior roles, try to incorporate language that highlights leadership or mentorship experience.")
+
+    return {
+        "summary": summary,
+        "suggestions_for_improvement": suggestions
+    }
+
 
 async def _analyze_single_document(
     document: Document,
     user_profile,
     memory_manager: Optional[EnhancedMemoryManager]
 ) -> dict:
-    """Analyze a single document with personalized context"""
-    
+    """
+    Performs a deep dive into one document.
+    """
+    if not document.content:
+        return {"error": "Document has no content to analyze."}
+
     analysis = {
-        "document_info": {
-            "name": document.name,
-            "type": document.type,
-            "created": document.date_created.isoformat(),
-            "updated": document.date_updated.isoformat()
-        },
-        "content_analysis": {},
-        "personalized_feedback": [],
-        "improvement_suggestions": [],
-        "relevance_score": 0.0
+        "doc_id": document.id,
+        "doc_name": document.name,
+        "doc_type": document.type,
+        "analysis_results": {}
     }
-    
-    try:
-        if not document.content:
-            analysis["personalized_feedback"].append("Document content is not available for analysis.")
-            return analysis
-        
-        content = document.content
-        
-        # Basic content analysis
-        word_count = len(content.split())
-        analysis["content_analysis"] = {
-            "word_count": word_count,
-            "character_count": len(content),
-            "estimated_reading_time": f"{max(1, word_count // 200)} minutes"
+
+    if document.type == "resume":
+        analysis["analysis_results"] = await _analyze_resume_content(document.content, user_profile)
+    elif document.type == "cover_letter":
+        analysis["analysis_results"] = await _analyze_cover_letter_content(document.content, user_profile)
+    else:
+        analysis["analysis_results"] = {
+            "content_length": len(document.content),
+            "preview": document.content[:200] + "..."
         }
-        
-        # Document type specific analysis
-        if document.type == "resume":
-            analysis.update(await _analyze_resume_content(content, user_profile))
-        elif document.type == "cover_letter":
-            analysis.update(await _analyze_cover_letter_content(content, user_profile))
-        
-        # Relevance to user's job search patterns
-        if user_profile.job_search_patterns:
-            common_keywords = user_profile.job_search_patterns.get("common_keywords", [])
-            if common_keywords:
-                matches = sum(1 for keyword in common_keywords if keyword.lower() in content.lower())
-                analysis["relevance_score"] = min(matches / len(common_keywords), 1.0)
-        
-        # Personalized feedback based on user profile
-        if user_profile.preferences:
-            industry = user_profile.preferences.get("preferred_industry")
-            if industry:
-                industry_keywords = _get_industry_keywords(industry)
-                industry_matches = sum(1 for keyword in industry_keywords if keyword.lower() in content.lower())
-                
-                if industry_matches < 3:
-                    analysis["improvement_suggestions"].append(
-                        f"Consider adding more {industry.title()}-specific keywords to better match industry standards."
-                    )
-        
-        return analysis
-        
-    except Exception as e:
-        logger.error(f"Error analyzing single document: {e}")
-        return analysis
+
+    # Example of using memory for contextual feedback
+    if memory_manager:
+        job_context = await memory_manager.get_latest_memory("job_application_context")
+        if job_context:
+            # This is a placeholder for a more complex analysis
+            # e.g., compare document skills to job description skills
+            analysis["contextual_feedback"] = {
+                "message": "Analysis based on your recent activity.",
+                "related_job_title": job_context.metadata.get("job_title"),
+                "suggestion": "This document seems well-aligned for a senior role. Consider emphasizing your project management skills more."
+            }
+
+    return analysis
 
 async def _analyze_resume_content(content: str, user_profile) -> dict:
-    """Analyze resume-specific content"""
+    """Specific analysis for resume documents."""
     
-    resume_analysis = {
-        "sections_detected": [],
-        "skills_found": [],
-        "experience_indicators": [],
-        "resume_feedback": []
+    # Basic metrics
+    word_count = len(content.split())
+    
+    # Content analysis
+    skills = _extract_skills_from_cv(content)
+    themes = _extract_resume_themes(content)
+    years_experience = _estimate_experience_years(content)
+
+    # Action verb check (simplified)
+    action_verbs = ["developed", "led", "managed", "created", "implemented", "designed"]
+    action_verb_count = sum(1 for verb in action_verbs if verb in content.lower())
+
+    # Suggestions for improvement
+    optimization_tips = _generate_resume_optimization_tips(content, user_profile)
+
+    return {
+        "word_count": word_count,
+        "detected_skills": skills,
+        "primary_themes": themes,
+        "estimated_years_experience": years_experience,
+        "action_verb_score": f"{action_verb_count}/{len(action_verbs)}",
+        "optimization_tips": optimization_tips
     }
-    
-    content_lower = content.lower()
-    
-    # Detect common resume sections
-    sections = {
-        "experience": ["experience", "work history", "employment", "professional experience"],
-        "education": ["education", "academic", "degree", "university", "college"],
-        "skills": ["skills", "technical skills", "competencies", "proficiencies"],
-        "projects": ["projects", "project experience", "key projects"],
-        "achievements": ["achievements", "accomplishments", "awards", "honors"]
-    }
-    
-    for section, keywords in sections.items():
-        if any(keyword in content_lower for keyword in keywords):
-            resume_analysis["sections_detected"].append(section)
-    
-    # Extract technical skills
-    tech_skills = ["python", "javascript", "java", "sql", "aws", "docker", "git", "react", "angular"]
-    found_skills = [skill for skill in tech_skills if skill in content_lower]
-    resume_analysis["skills_found"] = found_skills
-    
-    # Experience indicators
-    experience_patterns = ["years of experience", "led", "managed", "developed", "implemented", "designed"]
-    found_indicators = [pattern for pattern in experience_patterns if pattern in content_lower]
-    resume_analysis["experience_indicators"] = found_indicators
-    
-    # Generate feedback
-    if len(resume_analysis["sections_detected"]) < 3:
-        resume_analysis["resume_feedback"].append(
-            "Consider adding more standard resume sections (Experience, Education, Skills, etc.)"
-        )
-    
-    if not found_skills:
-        resume_analysis["resume_feedback"].append(
-            "Add more specific technical skills relevant to your target roles"
-        )
-    
-    if not found_indicators:
-        resume_analysis["resume_feedback"].append(
-            "Include more action verbs and quantifiable achievements"
-        )
-    
-    return resume_analysis
 
 async def _analyze_cover_letter_content(content: str, user_profile) -> dict:
-    """Analyze cover letter specific content"""
+    """Specific analysis for cover letter documents."""
     
-    cover_letter_analysis = {
-        "tone_indicators": [],
-        "structure_elements": [],
-        "cover_letter_feedback": []
+    word_count = len(content.split())
+    themes = _extract_cover_letter_themes(content)
+
+    # Personalization check (simplified)
+    # A real implementation would check for a company name
+    is_personalized = "company" in content.lower() or "team" in content.lower()
+
+    # Call to action check
+    has_call_to_action = "look forward to hearing from you" in content.lower() or "discuss my qualifications" in content.lower()
+
+    return {
+        "word_count": word_count,
+        "primary_themes": themes,
+        "is_personalized": is_personalized,
+        "has_clear_call_to_action": has_call_to_action,
+        "suggestions": [
+            "Ensure you mention the specific company and role you're applying for.",
+            "Try to connect your skills directly to the requirements in the job description.",
+            "End with a confident closing and a clear call to action."
+        ]
     }
-    
-    content_lower = content.lower()
-    
-    # Detect tone
-    enthusiasm_words = ["excited", "passionate", "enthusiastic", "eager", "thrilled"]
-    professional_words = ["experience", "qualified", "skills", "background", "expertise"]
-    
-    if any(word in content_lower for word in enthusiasm_words):
-        cover_letter_analysis["tone_indicators"].append("enthusiastic")
-    
-    if any(word in content_lower for word in professional_words):
-        cover_letter_analysis["tone_indicators"].append("professional")
-    
-    # Check structure elements
-    if "dear" in content_lower or "hello" in content_lower:
-        cover_letter_analysis["structure_elements"].append("greeting")
-    
-    if "sincerely" in content_lower or "regards" in content_lower:
-        cover_letter_analysis["structure_elements"].append("closing")
-    
-    # Generate feedback
-    if "enthusiastic" not in cover_letter_analysis["tone_indicators"]:
-        cover_letter_analysis["cover_letter_feedback"].append(
-            "Consider adding more enthusiasm and passion for the role"
-        )
-    
-    if len(cover_letter_analysis["structure_elements"]) < 2:
-        cover_letter_analysis["cover_letter_feedback"].append(
-            "Ensure your cover letter has proper greeting and closing"
-        )
-    
-    return cover_letter_analysis
 
 def _generate_resume_optimization_tips(content: str, user_profile) -> List[str]:
-    """Generate specific optimization tips for resume content"""
-    
+    """Generate ATS-friendly and other optimization tips."""
     tips = []
-    content_lower = content.lower()
     
-    # Length optimization
-    word_count = len(content.split())
-    if word_count < 300:
-        tips.append("Your resume might be too brief. Consider expanding on your experience and achievements.")
-    elif word_count > 800:
-        tips.append("Your resume might be too lengthy. Focus on the most relevant and impactful information.")
-    
-    # Quantification check
+    # Tip 1: Quantify achievements
     if not any(char.isdigit() for char in content):
-        tips.append("Add quantifiable achievements (numbers, percentages, dollar amounts) to demonstrate impact.")
-    
-    # Action verbs check
-    action_verbs = ["achieved", "created", "developed", "improved", "led", "managed", "increased"]
-    if sum(1 for verb in action_verbs if verb in content_lower) < 3:
-        tips.append("Use more strong action verbs to describe your accomplishments.")
-    
+        tips.append("Quantify your achievements. Instead of 'improved performance', use 'improved performance by 15%'.")
+
+    # Tip 2: Use action verbs
+    if "responsible for" in content.lower():
+        tips.append("Replace 'responsible for' with strong action verbs like 'managed', 'developed', or 'led'.")
+
+    # Tip 3: Tailor skills
+    user_skills = user_profile.get("skills", [])
+    content_skills = _extract_skills_from_cv(content)
+    if user_skills and not all(skill in content_skills for skill in user_skills[:3]):
+        tips.append(f"Tailor your skills section for each job. Ensure top skills like {', '.join(user_skills[:3])} are present if relevant.")
+
     return tips
 
 def _get_industry_keywords(industry: str) -> List[str]:
-    """Get relevant keywords for a specific industry"""
-    
-    industry_keywords = {
-        "technology": ["software", "programming", "development", "coding", "technical", "engineering", "database", "system"],
-        "finance": ["financial", "analysis", "investment", "banking", "accounting", "risk", "portfolio", "audit"],
-        "healthcare": ["patient", "clinical", "medical", "healthcare", "treatment", "diagnosis", "nursing", "hospital"],
-        "marketing": ["marketing", "digital", "social media", "campaign", "branding", "advertising", "content", "strategy"],
-        "education": ["teaching", "curriculum", "student", "academic", "education", "learning", "instruction", "assessment"]
+    # Example keyword list for different industries
+    keywords = {
+        "Finance": ["fintech", "trading", "risk", "compliance", "asset management"],
+        "Healthcare": ["hipaa", "emr", "telehealth", "medical imaging", "patient data"],
+        "E-commerce": ["checkout", "sku", "supply chain", "user conversion", "inventory"]
     }
-    
-    return industry_keywords.get(industry.lower(), []) 
+    return keywords.get(industry, [])

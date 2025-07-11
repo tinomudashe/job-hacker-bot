@@ -47,6 +47,27 @@ async def create_page(
         last_opened_at=new_page.last_opened_at.isoformat() if new_page.last_opened_at else None
     )
 
+@router.get("/pages/recent", response_model=PageResponse)
+async def get_most_recent_page(
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get the most recent page/conversation for the user"""
+    result = await db.execute(
+        select(Page).where(Page.user_id == current_user.id).order_by(Page.created_at.desc()).limit(1)
+    )
+    page = result.scalars().first()
+    
+    if not page:
+        raise HTTPException(status_code=404, detail="No conversations found")
+    
+    return PageResponse(
+        id=page.id, 
+        title=page.title,
+        created_at=page.created_at.isoformat(),
+        last_opened_at=page.last_opened_at.isoformat() if page.last_opened_at else None
+    )
+
 @router.get("/pages/{page_id}", response_model=PageResponse)
 async def get_single_page(
     page_id: str,
@@ -62,7 +83,12 @@ async def get_single_page(
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
 
-    return page
+    return PageResponse(
+        id=page.id,
+        title=page.title,
+        created_at=page.created_at.isoformat(),
+        last_opened_at=page.last_opened_at.isoformat() if page.last_opened_at else None
+    )
 
 @router.get("/pages", response_model=List[PageResponse])
 async def get_pages(
@@ -85,26 +111,7 @@ async def get_pages(
         ) for page in pages
     ]
 
-@router.get("/pages/recent", response_model=PageResponse)
-async def get_most_recent_page(
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """Get the most recent page/conversation for the user"""
-    result = await db.execute(
-        select(Page).where(Page.user_id == current_user.id).order_by(Page.created_at.desc()).limit(1)
-    )
-    page = result.scalars().first()
-    
-    if not page:
-        raise HTTPException(status_code=404, detail="No conversations found")
-    
-    return PageResponse(
-        id=page.id, 
-        title=page.title,
-        created_at=page.created_at.isoformat(),
-        last_opened_at=page.last_opened_at.isoformat() if page.last_opened_at else None
-    )
+
 
 @router.delete("/pages/{page_id}")
 async def delete_page(

@@ -28,22 +28,26 @@ if not os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
             break
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from pydantic import BaseModel
+from pydantic import BaseModel,Field
+from typing import Literal, Union, Dict, Any
 from langsmith import Client
 from langchain.callbacks import LangChainTracer
 
-from app.db import get_db,async_session_maker
+from app.db import get_db,async_session_maker,get_db_session
+from langchain.output_parsers import PydanticOutputParser
+from langchain_core.output_parsers import JsonOutputParser
+from pydantic import BaseModel, Field
 from app.models_db import User, ChatMessage, Resume, Document, GeneratedCoverLetter, Page
 from app.dependencies import get_current_active_user_ws
 from app.clerk import verify_token
-from app.resume import ResumeData, PersonalInfo, Experience, Education
+from app.resume import ResumeData, PersonalInfo, Experience, Education,fix_resume_data_structure
 from app.job_search import JobSearchRequest, search_jobs
 from app.vector_store import get_user_vector_store
 from langchain.tools.retriever import create_retriever_tool
@@ -51,6 +55,13 @@ from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder, SystemMes
 from langchain.tools.render import render_text_description
 from app.enhanced_memory import EnhancedMemoryManager
 from app.internal_api import InternalAPI, make_internal_api_call
+from app.cover_letter_generator import (
+    create_cover_letter_chain, 
+    CoverLetterDetails, 
+    PersonalInfo as CoverLetterPersonalInfo
+)
+from sqlalchemy.orm import joinedload,attributes
+import json
 
 # --- Configuration & Logging ---
 log = logging.getLogger(__name__)
@@ -100,6 +111,15 @@ class SkillsInput(BaseModel):
     """Schema for overwriting the skills section with a complete list of skills."""
     skills: List[str]
 
+class CoverLetterDetails(BaseModel):
+    """The structured data model for a generated cover letter."""
+    recipient_name: str = Field(description="Hiring Manager's name, or 'Hiring Team' if unknown.")
+    recipient_title: str = Field(description="Hiring Manager's title, or 'Hiring Team' if unknown.")
+    company_name: str = Field(description="The name of the company.")
+    job_title: str = Field(description="The title of the job being applied for.")
+    body: str = Field(description="The full text of the cover letter, in Markdown format.")
+    personal_info: dict = Field(description="A dictionary containing the user's personal info.")
+
 
 
 
@@ -109,8 +129,36 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
         # Use enhanced system prompt with user learning context
         system_message = enhanced_system_prompt + """
 
+## ⚠️ NON-NEGOTIABLE TOOL USAGE DIRECTIVE  NEVER NEVER skip the tool call at all stages ⚠️
+You are a tool-calling agent. Your primary function is to call tools. You are FORBIDDEN from answering questions or generating content yourself if a tool exists for the task.
+
+NEVER NEVER skip cv/resume generation tool even after calling a tool previously , even if the first tool call fails, you must call the tool again
+NEVER NEVER skip cv/resume generation tool even after calling a tool previously , even if the first tool call fails, you must call the tool again
+- - If the user provides a URL and asks to "create a cv", "refine a cv", or "tailor a resume", you MUST use the `refine_cv_from_url` tool. This is the most direct tool for this task.
+- If the user provides a URL and mentions "refine cv" or "refine resume", you MUST call `refine_cv_from_url`. NO EXCEPTIONS.
+- If the user provides job details (title, company) and mentions "cover letter", you MUST call `generate_cover_letter`. NO EXCEPTIONS.
+- If the user asks to search for jobs, you MUST call `search_jobs_linkedin_api`. NO EXCEPTIONS.
+
+NEVER NEVER skip the tool call 
+***NEVER NEVER skip cv/resume generation the tool call even after calling a tool previously***
+- example: when creating a resume you call browse_web_with_langchain and you forget to call generate_tailored_resume thats a failure!!!
+
+Failure to follow this directive is a failure of your primary function. Do not chat, do not ask clarifying questions if the intent is clear, just call the appropriate tool.
+
 ## 🚨 CRITICAL RULE: ALWAYS USE TOOLS - NEVER GIVE GENERIC RESPONSES
+***For cover letter generation, you must use the generate_cover_letter_from_url tool if the user provides a job URL and if it fails, use the generate_cover_letter tool never write the cover letter yourself.***
+
+NEVER NEVER skip the tool call
+***NEVER NEVER skip cv/resume generation tool even after calling a tool previously***
+- example: when creating a resume you call browse_web_with_langchain and you forget to call generate_tailored_resume thats a big no no
+
+## 🚨 CRITICAL RULE: ALWAYS USE TOOLS - NEVER GIVE GENERIC RESPONSES
+***For cover letter generation, you must use the generate_cover_letter_from_url tool if the user provides a job URL and if it fails, use the generate_cover_letter tool never write the cover letter yourself.***
 **YOU MUST ACTUALLY CALL THE TOOLS! NEVER JUST SAY YOU WILL!**
+
+NEVER NEVER skip the tool call
+***NEVER NEVER skip the tool call even after calling a tool previously***
+- example: when creating a resume you call browse_web_with_langchain and you forget to call generate_tailored_resume thats a big no no
 
 ### IMPORTANT: All ways refer to the previous messages to understand the user's context and goals.###
 - Rules:Make sure to quote the previous messages in your response but don't repeat the same message.
@@ -121,6 +169,21 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
     -user:Create an interview preparation guide the same job
     -agent:Check to see which job you were talking about and create an interview preparation guide for that job
 
+NEVER NEVER skip the tool call
+***NEVER NEVER skip the tool call even after calling a tool previously***
+- example: when creating a resume you call browse_web_with_langchain and you forget to call generate_tailored_resume thats a big no no 
+
+NEVER NEVER skip the tool call
+***NEVER NEVER skip the tool call even after calling a tool previously***
+- example: when creating a resume you call browse_web_with_langchain and you forget to call generate_tailored_resume thats a big no no
+
+NEVER NEVER skip the tool call
+***NEVER NEVER skip the tool call even after calling a tool previously***
+- example: when creating a resume you call browse_web_with_langchain and you forget to call generate_tailored_resume thats a big no no
+
+NEVER NEVER skip the tool call
+***NEVER NEVER skip the tool call even after calling a tool previously***
+- example: when creating a resume you call browse_web_with_langchain and you forget to call generate_tailored_resume thats a big no no
 
 ### Tool Selection Rules:
 - CV/Resume requests → **IMMEDIATELY CALL** `refine_cv_for_role`, `generate_tailored_resume`, `create_resume_from_scratch`
@@ -129,17 +192,22 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
 
 ### CRITICAL: NO GENERIC RESPONSES ALLOWED!
 - ❌ NEVER say "I'll generate..." without calling the tool
-- ❌ NEVER say "A download button will appear..." without calling the tool  
+- ❌ NEVER say "A download button will appear..." without calling the tool
+- ❌ NEVER run without calling the tool- don't skip the tool call
 - ❌ NEVER give promises - always deliver results by calling tools
 - ❌ NEVER return an empty response if a tool returns an error message(e.g., 'Failed to access...', 'Could not find...')
 - ✅ Always return a response if a tool returns an error message by inform the user about the error in a helpful way
 - ✅ ALWAYS call the appropriate tool immediately
 - ✅ Let the tool's response speak for itself
 
+NEVER NEVER skip the tool call
+
 ## 🚀 CV & Career Development Assistance Priority:
 - **Be Proactive**: Actively help users improve their CVs and advance their careers
 - **Suggest Helpful Tools**: When users mention career goals, job searching, or CV issues, offer relevant guidance tools
 - **Complete Career Support**: You have comprehensive tools to help with every aspect of career development
+
+NEVER NEVER skip the tool call
 
 ## 📚 Comprehensive CV & Career Tools Available:
 ### CV Creation & Enhancement:
@@ -154,10 +222,14 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
 - **create_resume_from_scratch**: Build new CVs based on career goals
 - **enhance_resume_section**: Improve specific CV sections
 
+NEVER NEVER skip the tool call
+
 ### Career Development:
 - **get_interview_preparation_guide**: Comprehensive interview prep for specific roles (supports job URLs!)
 - **get_salary_negotiation_advice**: Strategic guidance for compensation discussions
 - **create_career_development_plan**: Long-term career planning with actionable steps
+
+NEVER NEVER skip the tool call
 
 ### When to Suggest CV Help:
 - **New Users**: Offer CV assessment and improvement suggestions
@@ -166,6 +238,8 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
 - **Skills Discussions**: Suggest skills gap analysis when users mention lacking abilities
 - **Interview Mentions**: Immediately offer interview preparation tools
 - **Salary Questions**: Provide negotiation guidance and market insights
+
+NEVER NEVER skip the tool call
 
 ## 💡 Proactive Assistance Examples:
 - User searches jobs → "I found these opportunities! Would you like me to analyze your CV against these job requirements or help optimize it for ATS systems?"
@@ -257,7 +331,7 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
 5. **ALWAYS do**:
    - ✅ **IMMEDIATELY call** the cover letter tools with available job info
    - ✅ The tools handle everything automatically and return the complete response
-   - ✅ Ask ONLY for job-specific details: company name, job title, job description OR job URL
+   - ✅ Ask ONLY for job-specific details: company name, job title, and job description OR job URL
    
 ### Supported Job Boards: 
 LinkedIn, Indeed, Glassdoor, Monster, company career pages, and more
@@ -265,7 +339,7 @@ LinkedIn, Indeed, Glassdoor, Monster, company career pages, and more
 ### What to ask users:
 - **For URL generation**: Just the job posting URL
 - **For manual generation**: Company name, job title, and job description  
-- **Optional**: Any specific points they want emphasized
+- **Optional**: Any specific points they want to emphasize
 
 ### What NOT to ask:
 - ❌ Their background/experience (tools access this automatically)
@@ -377,116 +451,136 @@ The generated cover letter will be automatically saved and available for downloa
     else:
         # Fallback to basic system prompt
         document_list = "\n".join(f"- {doc}" for doc in documents)
-        system_message = f"""You are Job Hacker Bot, a helpful and friendly assistant specialized in job searching and career development.
+        system_message = f"""
+    You are a world-class job application and career development assistant named 'Job Hacker Bot'.
+    Your goal is to help users apply for jobs efficiently by leveraging their professional background and the information available on the current web page.
+    You have access to a set of powerful tools to search for jobs, analyze documents, and generate application materials.
 
-## 🚀 Your Mission: Comprehensive Career Support
-You are an expert career coach and CV specialist. Your primary goal is to help users:
-- **Create outstanding CVs and resumes**
-- **Develop successful career strategies**
-- **Navigate job searches effectively**
-- **Prepare for interviews and negotiations**
-- **Advance in their chosen fields**
+    **Your Core Responsibilities:**
+    1.  **Analyze User Intent:** Carefully determine what the user is asking for. Are they searching for a job, asking a question, or trying to generate a document?
+    2.  **Use Tools Effectively:** You MUST use the provided tools whenever possible. Do not answer questions if a tool can provide a more accurate response. For example, if asked about jobs, use a job search tool.
+    3.  **Strict Tool Adherence:** When asked to perform an action like creating a resume or cover letter, you MUST use the corresponding tool.
+        -   **For Cover Letters:** If the user provides a job description or a URL, you may use other tools to get the job details, but the final step MUST be to call the `generate_cover_letter` tool. **You are FORBIDDEN from writing the cover letter content yourself.** Your only job is to gather information and call the correct tool. The tool will handle the generation and saving.
+        -   **For Resumes:** When asked to generate or tailor a resume, you MUST use one of a resume generation tools. Do not create the resume text yourself.
+    4.  **Context is Key:** Always consider the content of the user's uploaded documents and their profile information to provide personalized, high-quality responses.
+    5.  **Summarize Actions:** After executing a tool, briefly summarize what you have done in a helpful and friendly tone.
 
-**Be proactive in offering help!** When users mention careers, jobs, or professional development, suggest relevant guidance and tools.
+    **Interaction Flow:**
+    1.  The user gives a prompt.
+    2.  You decide which tool to use (if any).
+    3.  You execute the tool.
+    4.  The tool returns a result, which may include a special trigger like `[DOWNLOADABLE_COVER_LETTER]`.
+    5.  You present the result and the trigger to the user in your response.
 
-You have access to the following documents and the user's personal information (name, email, etc.):
-{document_list}
 
-## 🔴 CRITICAL: DOCUMENT ACCESS INSTRUCTIONS 🔴
-**YOU CAN ACCESS USER FILES! NEVER SAY YOU CANNOT!**
+    ## 🚀 Your Mission: Comprehensive Career Support
+    You are an expert career coach and CV specialist. Your primary goal is to help users:
+    - **Create outstanding CVs and resumes**
+    - **Develop successful career strategies**
+    - **Navigate job searches effectively**
+    - **Prepare for interviews and negotiations**
+    - **Advance in their chosen fields**
 
-When users mention their CV, resume, documents, experience, skills, or any file content:
-1. **IMMEDIATELY use enhanced_document_search tool** - you have full access to their uploaded documents
-2. **NEVER say "I cannot access" or "I don't have access to"** - this is WRONG
-3. **NEVER ask users to copy/paste their content** - you can read it directly
+    **Be proactive in offering help!** When users mention careers, jobs, or professional development, suggest relevant guidance and tools.
 
-### Examples of CORRECT responses:
-- User: "What's my experience?" → Use enhanced_document_search("experience")
-- User: "Summarize my CV" → Use enhanced_document_search("resume summary")  
-- User: "What skills do I have?" → Use enhanced_document_search("skills")
-- User: "From my resume, what..." → Use enhanced_document_search("[their question]")
+    You have access to the following documents and the user's personal information (name, email, etc.):
+    {document_list}
 
-### NEVER SAY THESE (WRONG):
-- ❌ "I can't access your files"
-- ❌ "I don't have access to your documents"
-- ❌ "Could you please provide me with..."
-- ❌ "I need you to tell me..."
+    ## 🔴 CRITICAL: DOCUMENT ACCESS INSTRUCTIONS 🔴
+    **YOU CAN ACCESS USER FILES! NEVER SAY YOU CANNOT!**
 
-### ALWAYS DO THIS (CORRECT):
-- ✅ Use enhanced_document_search immediately
-- ✅ "Let me search your documents for..."
-- ✅ "Looking at your uploaded documents..."
-- ✅ "From your CV, I can see..."
+    When users mention their CV, resume, documents, experience, skills, or any file content:
+    1. **IMMEDIATELY use enhanced_document_search tool** - you have full access to their uploaded documents
+    2. **NEVER say "I cannot access" or "I don't have access to"** - this is WRONG
+    3. **NEVER ask users to copy/paste their content** - you can read it directly
 
-## 📚 Your Comprehensive Career Toolkit:
-### CV & Resume Excellence:
-- **get_cv_best_practices**: Industry-specific CV guidelines and best practices
-- **analyze_skills_gap**: Identify skills needed for target roles with learning roadmap
-- **get_ats_optimization_tips**: Optimize CVs for Applicant Tracking Systems
-- **refine_cv_for_role**: Enhance existing CVs for specific positions  
-- **generate_tailored_resume**: Create complete resumes tailored to job descriptions
-- **create_resume_from_scratch**: Build new CVs based on career goals
-- **enhance_resume_section**: Improve specific CV sections (summary, experience, skills)
+    ### Examples of CORRECT responses:
+    - User: "What's my experience?" → Use enhanced_document_search("experience")
+    - User: "Summarize my CV" → Use enhanced_document_search("resume summary")  
+    - User: "What skills do I have?" → Use enhanced_document_search("skills")
+    - User: "From my resume, what..." → Use enhanced_document_search("[their question]")
 
-### Career Development:
-- **get_interview_preparation_guide**: Comprehensive interview prep for specific roles (supports job URLs!)
-- **get_salary_negotiation_advice**: Strategic guidance for compensation discussions  
-- **create_career_development_plan**: Long-term career planning with actionable steps
+    ### NEVER SAY THESE (WRONG):
+    - ❌ "I can't access your files"
+    - ❌ "I don't have access to your documents"
+    - ❌ "Could you please provide me with..."
+    - ❌ "I need you to tell me..."
 
-### Document Access Tools (YOU MUST USE THESE):
-- **enhanced_document_search**: Search through user's uploaded documents (USE THIS FIRST!)
-- **analyze_specific_document**: Detailed analysis of a particular document
-- **get_document_insights**: Comprehensive overview of all documents
-- **document_retriever**: Vector store access to all uploaded documents
+    ### ALWAYS DO THIS (CORRECT):
+    - ✅ Use enhanced_document_search immediately
+    - ✅ "Let me search your documents for..."
+    - ✅ "Looking at your uploaded documents..."
+    - ✅ "From your CV, I can see..."
 
-### Proactive Assistance Strategy:
-- **New Conversations**: Offer CV assessment and career guidance
-- **Job Search Queries**: Suggest CV optimization for found opportunities
-- **Career Discussions**: Provide comprehensive career development support
-- **Skills Questions**: Recommend skills gap analysis and learning plans
-- **Interview Mentions**: Immediately offer tailored interview preparation
+    ## 📚 Your Comprehensive Career Toolkit:
+    ### CV & Resume Excellence:
+    - **get_cv_best_practices**: Industry-specific CV guidelines and best practices
+    - **analyze_skills_gap**: Identify skills needed for target roles with learning roadmap
+    - **get_ats_optimization_tips**: Optimize CVs for Applicant Tracking Systems
+    - **refine_cv_for_role**: Enhance existing CVs for specific positions  
+    - **generate_tailored_resume**: Create complete resumes tailored to job descriptions
+    - **create_resume_from_scratch**: Build new CVs based on career goals
+    - **enhance_resume_section**: Improve specific CV sections (summary, experience, skills)
 
-## Resume Generation & CV Refinement Guidelines:
-- **IMPORTANT**: For CV/Resume refinement, enhancement, or generation requests, ALWAYS use these modern tools:
-  * **refine_cv_for_role**: PRIMARY TOOL for CV refinement - use for "refine CV", "enhance resume", etc.
-  * **generate_tailored_resume**: For creating complete resumes tailored to specific jobs
-  * **create_resume_from_scratch**: For building new resumes based on career goals
-  * **enhance_resume_section**: For improving specific resume sections
-  * **ALWAYS CALL the tools** - Never just say you will generate without calling them
-  * **ALL CV/resume responses MUST include [DOWNLOADABLE_RESUME] marker**
-- **NEVER use old RAG /rag/assist endpoint** - it's deprecated and causes delays
-- **CV Refinement Examples**:
-  * "Refine my CV for AI Engineering roles" → use refine_cv_for_role(target_role="AI Engineering")
-  * "Enhance my resume" → use refine_cv_for_role(target_role="[ask user]")
-  * "Improve my CV for tech jobs" → use refine_cv_for_role(target_role="Technology")
+    ### Career Development:
+    - **get_interview_preparation_guide**: Comprehensive interview prep for specific roles (supports job URLs!)
+    - **get_salary_negotiation_advice**: Strategic guidance for compensation discussions  
+    - **create_career_development_plan**: Long-term career planning with actionable steps
 
-## Job Search Guidelines:
-- **Basic Job Search**: Use linkedin_jobs_service standard searches
-- **Advanced Browser Search**: Use linkedin_jobs_service for more comprehensive results with browser automation
-- For general job searches, you can search with just a location (e.g., location="Poland")
-- For specific roles, include both query and location (e.g., query="software engineer", location="Warsaw")
-- Always provide helpful context about the jobs you find
+    ### Document Access Tools (YOU MUST USE THESE):
+    - **enhanced_document_search**: Search through user's uploaded documents (USE THIS FIRST!)
+    - **analyze_specific_document**: Detailed analysis of a particular document
+    - **get_document_insights**: Comprehensive overview of all documents
+    - **document_retriever**: Vector store access to all uploaded documents
 
-## Cover Letter Generation Guidelines:
-- When users ask for cover letters, CV letters, or application letters:
-  * **URL-based generation**: Use generate_cover_letter_from_url tool
-  * **Manual generation**: Use generate_cover_letter tool for provided job details
-  * **ALWAYS CALL the tools** - Never just say you will generate without calling them
-      * **ALL cover letter responses MUST include [DOWNLOADABLE_COVER_LETTER] marker**
-    * **ALWAYS show the FULL cover letter content in the message, not just a summary**
-- Always encourage users to provide specific skills they want to highlight (optional)
+    ### Proactive Assistance Strategy:
+    - **New Conversations**: Offer CV assessment and career guidance
+    - **Job Search Queries**: Suggest CV optimization for found opportunities
+    - **Career Discussions**: Provide comprehensive career development support
+    - **Skills Questions**: Recommend skills gap analysis and learning plans
+    - **Interview Mentions**: Immediately offer tailored interview preparation
 
-## Response Format:
-- Always respond in markdown format
-- Use headings, lists, and other formatting elements to make responses easy to read
-- Feel free to use emojis to make conversations more engaging and friendly!
-- **Be enthusiastic about helping with career development!**
+    ## Resume Generation & CV Refinement Guidelines:
+    - **IMPORTANT**: For CV/Resume refinement, enhancement, or generation requests, ALWAYS use these modern tools:
+    * **refine_cv_for_role**: PRIMARY TOOL for CV refinement - use for "refine CV", "enhance resume", etc.
+    * **generate_tailored_resume**: For creating complete resumes tailored to specific jobs
+    * **create_resume_from_scratch**: For building new resumes based on career goals
+    * **enhance_resume_section**: For improving specific resume sections
+    * **ALWAYS CALL the tools** - Never just say you will generate without calling them
+    * **ALL CV/resume responses MUST include [DOWNLOADABLE_RESUME] marker**
+    - **NEVER use old RAG /rag/assist endpoint** - it's deprecated and causes delays
+    - **CV Refinement Examples**:
+    * "Refine my CV for AI Engineering roles" → use refine_cv_for_role(target_role="AI Engineering")
+    * "Enhance my resume" → use refine_cv_for_role(target_role="[ask user]")
+    * "Improve my CV for tech jobs" → use refine_cv_for_role(target_role="Technology")
 
-## 💡 Example Proactive Responses:
-- User: "I'm looking for jobs" → "I'd be happy to help! I can search for jobs and also help optimize your CV for those opportunities. What type of role are you targeting?"
-- User: "I have an interview next week" → "Congratulations! I can create a comprehensive interview preparation guide tailored to your role. What position are you interviewing for?"
-- User: "I want to improve my career" → "Perfect! I can help you create a complete career development plan, analyze skills gaps, and enhance your CV. What's your target role or industry?"
-"""
+    ## Job Search Guidelines:
+    - **Basic Job Search**: Use linkedin_jobs_service standard searches
+    - **Advanced Browser Search**: Use linkedin_jobs_service for more comprehensive results with browser automation
+    - For general job searches, you can search with just a location (e.g., location="Poland")
+    - For specific roles, include both query and location (e.g., query="software engineer", location="Warsaw")
+    - Always provide helpful context about the jobs you find
+
+    ## Cover Letter Generation Guidelines:
+    - When users ask for cover letters, CV letters, or application letters:
+    * **URL-based generation**: Use generate_cover_letter_from_url tool
+    * **Manual generation**: Use generate_cover_letter tool for provided job details
+    * **ALWAYS CALL the tools** - Never just say you will generate without calling them
+        * **ALL cover letter responses MUST include [DOWNLOADABLE_COVER_LETTER] marker**
+        * **ALWAYS show the FULL cover letter content in the message, not just a summary**
+    - Always encourage users to provide specific skills they want to highlight (optional)
+
+    ## Response Format:
+    - Always respond in markdown format
+    - Use headings, lists, and other formatting elements to make responses easy to read
+    - Feel free to use emojis to make conversations more engaging and friendly!
+    - **Be enthusiastic about helping with career development!**
+
+    ## 💡 Example Proactive Responses:
+    - User: "I'm looking for jobs" → "I'd be happy to help! I can search for jobs and also help optimize your CV for those opportunities. What type of role are you targeting?"
+    - User: "I have an interview next week" → "Congratulations! I can create a comprehensive interview preparation guide tailored to your role. What position are you interviewing for?"
+    - User: "I want to improve my career" → "Perfect! I can help you create a complete career development plan, analyze skills gaps, and enhance your CV. What's your target role or industry?"
+    """
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_message),
@@ -563,7 +657,7 @@ async def orchestrator_websocket(
         """Choose the best extraction method based on URL characteristics."""
         # Always use browser-based extraction
         return "browser"
-    
+        
     async def _try_browser_extraction(url: str) -> tuple:
         """Try official Playwright Browser tool extraction."""
         try:
@@ -611,7 +705,7 @@ async def orchestrator_websocket(
                 return False, None
         except Exception as e:
             log.warning(f"Official Playwright extraction failed: {e}")
-            return False, None
+        return False, None
     
     async def _try_basic_extraction(url: str) -> tuple:
         """Try basic HTTP scraping as fallback."""
@@ -631,7 +725,7 @@ async def orchestrator_websocket(
                 return False, None
         except Exception as e:
             log.warning(f"Basic extraction failed: {e}")
-            return False, None
+        return False, None
 
     # --- Helper & Tool Definitions ---
     async def get_or_create_resume(session: AsyncSession):
@@ -640,21 +734,34 @@ async def orchestrator_websocket(
         Helper to get or create a resume for the current user using a specific session.
         This ensures transactional integrity within tools.
         """
+        import re
 
         result = await session.execute(select(Resume).where(Resume.user_id == user_id))
         db_resume = result.scalar_one_or_none()
 
         if db_resume and db_resume.data:
-            # Import the fix function from resume.py
             from app.resume import fix_resume_data_structure
-            # Fix missing ID fields in existing data before validation
+            
             fixed_data = fix_resume_data_structure(db_resume.data)
-            # Update the database with fixed data
-            db_resume.data = fixed_data
-            session.add(db_resume)
-            await session.flush()
 
-            resume_data_dict = db_resume.data if isinstance(db_resume.data, dict) else {}
+            # FIX: Add date parsing logic directly within this helper function.
+            # This ensures any tool calling this helper gets clean, valid data.
+            for section_key in ['experience', 'education']:
+                if section_key in fixed_data and isinstance(fixed_data[section_key], list):
+                    for item in fixed_data[section_key]:
+                        if isinstance(item, dict) and 'dates' in item and isinstance(item['dates'], str):
+                            date_match = re.match(r'^\s*(.*?)\s*–\s*(.*)\s*$', item['dates'])
+                            if date_match:
+                                start, end = date_match.groups()
+                                item['dates'] = {'start': start.strip(), 'end': end.strip()}
+                            else:
+                                item['dates'] = {'start': item['dates'].strip(), 'end': None}
+
+            # Update the database with the cleaned data before returning
+            db_resume.data = fixed_data
+            attributes.flag_modified(db_resume, "data")
+            await session.commit()
+            await session.refresh(db_resume)
 
             return db_resume, ResumeData(**fixed_data)
         
@@ -679,6 +786,9 @@ async def orchestrator_websocket(
         await db.commit()
         await db.refresh(new_db_resume)
         return new_db_resume, new_resume_data
+    
+    
+
     
     @tool
     async def search_jobs_tool(
@@ -1211,11 +1321,11 @@ async def orchestrator_websocket(
                         **Position:** {job_title}
                         **Company:** {company}
                         **Duration:** {date_range}
-                        {f"**Location:** {location}" if location else ""} 
+                        {f"**Location:** {location}" if location else ""}
                         {f"**Type:** {employment_type}" if employment_type else ""}
 
                         Your resume now has {len(resume_data.experience)} work experience entries."""
-                
+            
             except Exception as e:
                 if db.is_active:
                     await db.rollback()
@@ -1305,31 +1415,31 @@ async def orchestrator_websocket(
                     dates=date_range,
                     description=full_description
                 )
-                
+                        
                 # Ensure education list exists
                 if not hasattr(resume_data, 'education') or resume_data.education is None:
                     resume_data.education = []
-                    
+                        
                 resume_data.education.append(new_education)
 
                 db_resume.data = resume_data.dict()
-                await session.commit()
+                attributes.flag_modified(db_resume, "data") # <-- FIX: Mark data as modified
+                await session.commit() # <-- FIX: Commit the transaction
                 
                 return f"""✅ **Education Added Successfully!**
 
-            **Degree:** {full_degree}
-            **Institution:** {institution}
-            **Duration:** {date_range}
+                    **Degree:** {full_degree}
+                    **Institution:** {institution}
+                    **Duration:** {date_range}
 
-            Your resume now has {len(resume_data.education)} education entries."""
+                    Your resume now has {len(resume_data.education)} education entries."""
                 
             except Exception as e:
-                if session.is_active:
-                    await session.rollback()
-                log.error(f"Error adding education: {e}", exc_info=True)
-                return f"❌ Error adding education: {str(e)}"
-            
-            
+                    if session.is_active:
+                        await session.rollback()
+                    log.error(f"Error adding education: {e}", exc_info=True)
+                    return f"❌ Error adding education: {str(e)}"
+
     @tool
     async def set_skills(skills: List[str]) -> str:
         """Replaces the entire skills list with the provided list of skills."""
@@ -1758,548 +1868,292 @@ Your resume now has {len(resume_data.certifications)} certifications."""
             log.error(f"Error in LinkedIn API search: {e}")
             return f"🔍 No jobs found for '{keyword}' in {location}.\\n\\n💡 **Suggestions:**\\n• Try different keywords (e.g., 'developer', 'engineer')\\n• Expand location (e.g., 'Europe' instead of specific city)\\n• Try different job types or experience levels"
 
-   
-    @tool
-    async def generate_cover_letter_from_url(
-        job_url: str,
-        user_skills: Optional[str] = None,
-        extraction_method: str = "auto"
-    ) -> str:
-        """🔗 COVER LETTER FROM URL TOOL 🔗
-        
-        Use ONLY when users specifically ask for:
-        - "generate cover letter from [URL]"
-        - "create cover letter for this job: [URL]"
-        - "write a cover letter for [URL]"
-        
-        DO NOT use for CV/resume refinement requests!
+    @tool("generate_cover_letter_from_url", return_direct=False)
+    async def generate_cover_letter_from_url(job_url: str) -> str:
+        """
+        Generates a tailored cover letter by extracting job details from a provided URL.
         
         Args:
-            job_url: URL of the job posting (e.g., LinkedIn, Indeed, company website)
-            user_skills: Optional specific skills to highlight
-            extraction_method: Method to use ("auto", "browser", "lightweight", "basic")
-                - auto: Intelligently chooses best method based on URL
-                - browser: Full browser automation (most accurate, slower)
-                - lightweight: LangChain WebBrowser approach (fast, good for static sites)
-                - basic: Simple HTTP scraping (fastest, limited)
+            job_url (str): The URL of the job posting.
         
         Returns:
-            A professionally written cover letter based on the job posting URL
+            str: A confirmation message with a trigger to download the cover letter.
         """
+        log.info(f"Attempting to generate cover letter from URL: {job_url}")
         try:
-            log.info(f"Starting job extraction for: {job_url} using method: {extraction_method}")
+            current_user = user_id
+            if not current_user:
+                return "Authentication failed. Could not identify user."
+
+            # Step 1: Scrape the job description from the URL
+            from app.url_scraper import scrape_job_url, JobDetails
+
+            scraped_details = await scrape_job_url(job_url)
             
-            # Intelligent method selection
-            if extraction_method == "auto":
-                extraction_method = _choose_extraction_method(job_url)
-                log.info(f"Auto-selected extraction method: {extraction_method}")
-            
-            # Extract job details directly from shortened URLs
-            job_details = None
-            method_used = ""
-            
-            # Handle shortened LinkedIn URLs
-            if 'linkedin.com/jobs/view/' in job_url and not job_url.startswith('http'):
-                job_url = f"https://{job_url}"
+            if isinstance(scraped_details, dict) and 'error' in scraped_details:
+                log.error(f"Failed to scrape job details: {scraped_details['error']}")
+                return f"I'm sorry, I couldn't extract details from that URL. The error was: {scraped_details['error']}"
+
+            if not isinstance(scraped_details, JobDetails):
+                log.error(f"Scraping returned an unexpected type: {type(scraped_details)}")
+                return "I ran into an unexpected issue while reading the job posting. The website's structure might be too complex."
+
+            # Step 2: Use the generated details to create and save the cover letter
+            async with get_db_session() as db:
+                user = await db.get(User, current_user)
+                if not user:
+                    return "User not found in database session."
+
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.3)
+                parser = JsonOutputParser(pydantic_object=CoverLetterDetails)
                 
-            log.info(f"🔗 Extracting job details from: {job_url}")
-            
-            # Try browser-based extraction first
-            try:
-                success, job_info = await _try_browser_extraction(job_url)
-                if success and job_info:
-                    log.info(f"✅ Successfully extracted job details using browser automation")
-                    # Convert to job_details object
-                    job_details = type('JobDetails', (), {
-                        'title': job_info.get('job_title', 'Unknown Position'),
-                        'company': job_info.get('company_name', 'Unknown Company'),
-                        'location': job_info.get('location', 'Not specified'),
-                        'description': job_info.get('job_description', ''),
-                        'requirements': job_info.get('requirements', '')
-                    })()
-                    method_used = "Browser Extraction"
-            except Exception as e:
-                log.warning(f"Browser extraction failed: {e}")
-            
-            # Try basic extraction as fallback
-            if not job_details:
-                try:
-                    success, job_info = await _try_basic_extraction(job_url)
-                    if success and job_info:
-                        log.info(f"✅ Basic extraction successful")
-                        # Convert to job_details object
-                        job_details = type('JobDetails', (), {
-                            'title': job_info.get('job_title', 'Unknown Position'),
-                            'company': job_info.get('company_name', 'Unknown Company'),
-                            'location': job_info.get('location', 'Not specified'),
-                            'description': job_info.get('job_description', ''),
-                            'requirements': job_info.get('requirements', '')
-                        })()
-                        method_used = "Basic Extraction"
-                except Exception as e:
-                    log.warning(f"Basic extraction failed: {e}")
-                    
-            # If still no job details, create fallback from URL
-            if not job_details:
-                log.info("Creating fallback job details from URL")
-                # Extract company and title from URL pattern
-                url_parts = job_url.lower()
-                company_name = "the company"
-                job_title = "this position"
-                
-                if 'google' in url_parts:
-                    company_name = "Google"
-                elif 'netflix' in url_parts:
-                    company_name = "Netflix"
-                elif 'microsoft' in url_parts:
-                    company_name = "Microsoft"
-                elif 'amazon' in url_parts:
-                    company_name = "Amazon"
-                    
-                if 'software-engineer' in url_parts:
-                    job_title = "Software Engineer"
-                elif 'developer' in url_parts:
-                    job_title = "Developer"
-                elif 'engineer' in url_parts:
-                    job_title = "Engineer"
-                    
-                job_details = type('JobDetails', (), {
-                    'title': job_title,
-                    'company': company_name,
-                    'location': 'Not specified',
-                    'description': f'An exciting {job_title} opportunity at {company_name}.',
-                    'requirements': 'Please see the full job posting for detailed requirements.'
-                })()
-                method_used = "URL Pattern Extraction"
-            
-            # Always create valid job details - never fail completely
-            if (not job_details or 
-                not hasattr(job_details, 'title') or 
-                not hasattr(job_details, 'company') or 
-                not hasattr(job_details, 'description') or 
-                not hasattr(job_details, 'requirements')):
-                # Final fallback - ask user to provide details manually
-                return f"🔗 I can generate a cover letter for you! However, I need a bit more information since I couldn't automatically extract the job details from that URL.\n\n**Please tell me:**\n• Company name\n• Job title\n• Key requirements or skills mentioned\n\nThen I'll create a personalized cover letter using your profile data!"
-            
-            log.info(f"Successfully extracted job using {method_used}: {job_details.title} at {job_details.company}")
-            
-            # Combine description and requirements for full job context
-            full_job_description = f"{job_details.description}\n\nRequirements: {job_details.requirements}"
-            
-            # Use the existing cover letter generation logic by calling it directly
-            # Get user's name from Clerk profile
-            user_name = user.first_name or "User"
-            if user.last_name:
-                user_name = f"{user.first_name} {user.last_name}"
-            
-            # Build comprehensive user context from multiple sources
-            user_context_parts = []
-            
-            # 1. Get user's resume data from database (FIX: Access JSON data properly)
-            try:
-                result = await db.execute(select(Resume).where(Resume.user_id == user.id))
-                db_resume = result.scalars().first()
-                
-                if db_resume and db_resume.data:
-                    resume_info = []
-                    resume_data = db_resume.data  # Access the JSON data column
-                    
-                    # Access personalInfo (camelCase as stored in JSON)
-                    personal_info = resume_data.get('personalInfo', {})
-                    if personal_info:
-                        personal = personal_info
-                        if personal.get('summary'):
-                            resume_info.append(f"Professional Summary: {personal['summary']}")
-                        if personal.get('location'):
-                            resume_info.append(f"Location: {personal['location']}")
-                        if personal.get('phone'):
-                            resume_info.append(f"Phone: {personal['phone']}")
-                        if personal.get('email'):
-                            resume_info.append(f"Email: {personal['email']}")
-                    
-                    if db_resume.experience and isinstance(db_resume.experience, list):
-                        exp_details = []
-                        for exp in db_resume.experience[:3]:  # Top 3 experiences
-                            if isinstance(exp, dict):
-                                exp_text = f"{exp.get('job_title', '')} at {exp.get('company', '')} ({exp.get('dates', '')})"
-                                if exp.get('description'):
-                                    exp_text += f": {exp['description'][:200]}..."
-                                exp_details.append(exp_text)
-                        if exp_details:
-                            resume_info.append("Recent Experience:\n" + "\n".join(exp_details))
-                    
-                    if db_resume.education and isinstance(db_resume.education, list):
-                        edu_details = []
-                        for edu in db_resume.education[:2]:  # Top 2 education entries
-                            if isinstance(edu, dict):
-                                edu_text = f"{edu.get('degree', '')} from {edu.get('institution', '')} ({edu.get('dates', '')})"
-                                edu_details.append(edu_text)
-                        if edu_details:
-                            resume_info.append("Education:\n" + "\n".join(edu_details))
-                    
-                    if db_resume.skills and isinstance(db_resume.skills, list):
-                        skills_text = ", ".join(db_resume.skills[:15])  # Top 15 skills
-                        resume_info.append(f"Technical Skills: {skills_text}")
-                    
-                    if resume_info:
-                        user_context_parts.append("RESUME DATABASE:\n" + "\n\n".join(resume_info))
-            except Exception as e:
-                log.warning(f"Could not retrieve resume data: {e}")
-            
-            # 2. Get uploaded documents content
-            try:
-                doc_result = await db.execute(
-                    select(Document).where(Document.user_id == user.id)
-                    .order_by(Document.date_created.desc()).limit(3)
+                prompt_template = PromptTemplate(
+                    template="""
+                    You are a helpful assistant that generates structured cover letters based on user information and a job description.
+                    Analyze the user's profile and the provided job details to create a compelling and tailored cover letter.
+                    The user's personal information is: {user_info}.
+                    The job details are: {job_details}.
+                    You must respond using the following JSON format.
+                    {format_instructions}
+                    """,
+                    input_variables=["user_info", "job_details"],
+                    partial_variables={"format_instructions": parser.get_format_instructions()},
                 )
-                documents = doc_result.scalars().all()
                 
-                if documents:
-                    doc_content = []
-                    for doc in documents:
-                        if doc.content:
-                            # Get first 500 chars from each document
-                            content_preview = doc.content[:500].strip()
-                            if content_preview:
-                                doc_content.append(f"From {doc.name}: {content_preview}...")
-                    
-                    if doc_content:
-                        user_context_parts.append("UPLOADED DOCUMENTS:\n" + "\n\n".join(doc_content))
-            except Exception as e:
-                log.warning(f"Could not retrieve documents: {e}")
-            
-            # 3. Try vector store as fallback
-            if vector_store and not user_context_parts:
-                try:
-                    search_queries = [
-                        "resume experience skills",
-                        "work experience background",
-                        "education qualifications"
-                    ]
-                    
-                    vector_parts = []
-                    for query in search_queries:
-                        docs = await vector_store.asimilarity_search(query, k=2)
-                        if docs:
-                            for doc in docs:
-                                if doc.page_content not in vector_parts:
-                                    vector_parts.append(doc.page_content[:300])
-                    
-                    if vector_parts:
-                        user_context_parts.append("VECTOR STORE:\n" + "\n".join(vector_parts))
-                except Exception as ve:
-                    log.warning(f"Could not retrieve vector store data: {ve}")
-            
-            # Combine all context
-            user_context = "\n\n".join(user_context_parts) if user_context_parts else ""
-            
-            # Build user_skills from available data
-            if not user_skills:
-                if db_resume and db_resume.data and db_resume.data.get('skills'):
-                    skills_list = db_resume.data.get('skills', [])
-                    if isinstance(skills_list, list) and skills_list:
-                        user_skills = f"Technical skills including: {', '.join(skills_list[:10])}"
-                    else:
-                        user_skills = "Professional skills and experience as detailed in background"
+                chain = prompt_template | llm | parser
+
+                user_info_str = f"Name: {user.name}, Email: {user.email}, LinkedIn: {user.linkedin}"
+                job_details_str = f"Job Title: {scraped_details.title}, Company: {scraped_details.company}, Description: {scraped_details.description}, Requirements: {scraped_details.requirements}"
+
+                response_data = await chain.ainvoke({"user_info": user_info_str, "job_details": job_details_str})
+                
+                # The model might return a dict or a Pydantic model, ensure it's a dict
+                if isinstance(response_data, BaseModel):
+                    response_dict = response_data.model_dump()
                 else:
-                    user_skills = "Professional skills and experience as detailed in background"
-            
-            # Create the cover letter generation prompt with vector store context
-            prompt = ChatPromptTemplate.from_template(
-                "You are an expert career coach. Write a professional and compelling cover letter.\n\n"
-                "**Candidate Information:**\n"
-                "Name: {user_name}\n"
-                "Skills/Experience: {user_skills}\n\n"
-                "**Additional Background Context:**\n"
-                "{user_context}\n\n"
-                "**Job Details:**\n"
-                "Company: {company_name}\n"
-                "Position: {job_title}\n"
-                "Job Description: {job_description}\n\n"
-                "Instructions:\n"
-                "- Write a professional cover letter using the candidate's actual name: {user_name}\n"
-                "- Begin with 'Dear Hiring Manager' and sign with '{user_name}'\n"
-                "- Use real information from the background context - NO placeholders or generic statements\n"
-                "- Highlight specific achievements and experiences that match the job requirements\n"
-                "- Make it engaging, personal, and specific to this exact role\n"
-                "- Show genuine enthusiasm for the role and company\n"
-                "- Keep it concise but impactful (3-4 paragraphs)\n"
-                "- Write in first person as {user_name}"
-            )
-            
-            llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.7)
-            chain = prompt | llm
-            
-            # Generate the cover letter
-            result = await chain.ainvoke({
-                "user_name": user_name,
-                "user_skills": user_skills,
-                "user_context": user_context or f"I am {user_name}, a professional seeking to contribute my skills and experience to your organization.",
-                "company_name": job_details.company,
-                "job_title": job_details.title,
-                "job_description": full_job_description,
-            })
-            
-            cover_letter_text = result.content
-            
-            # Save the cover letter to database
-            new_cover_letter = GeneratedCoverLetter(
-                id=str(uuid.uuid4()),
-                user_id=user.id,
-                content=cover_letter_text
-            )
-            db.add(new_cover_letter)
-            await db.commit()
-            
-            # Get user's first name for personalization
-            user_first_name = user.first_name or "there"
-            
-            # Return simple text response with downloadable marker (much faster)
-            return f"""Hey {user_first_name}!
+                    response_dict = response_data
+                
+                # Serialize the entire dictionary to a JSON string for storing
+                content_json_string = json.dumps(response_dict)
 
-Your cover letter for the **{job_details.title}** position at **{job_details.company}** is ready!I've crafted a personalized cover letter for you, highlighting your relevant skills and experience based on the job description from the URL you provided.
+                # Create and save the new cover letter object
+                new_cover_letter = GeneratedCoverLetter(
+                    id=str(uuid.uuid4()),
+                    user_id=user.id,
+                    content=content_json_string,
+                )
+                db.add(new_cover_letter)
+                await db.commit()
+                log.info(f"Successfully generated and saved cover letter {new_cover_letter.id} for user {user.id}")
 
-[DOWNLOADABLE_COVER_LETTER]
+            # Step 3: Return the trigger to the user
+            return "I have successfully generated the cover letter based on the URL. You can view and download it now. [DOWNLOADABLE_COVER_LETTER]"
 
-{cover_letter_text}
-
----
-
-**🚀 What I included for you:**
-- Personalized greeting using your actual name
-- Your relevant skills and experience  
-- Specific connection to the job requirements
-- Professional closing that shows enthusiasm
-
-**📥 Ready to download?** Click the download button (📥) that appears on this message to get your cover letter in different styles - Modern, Classic, or Minimal. You can preview and make any tweaks before downloading.
-
-<!-- content_id={new_cover_letter.id} company_name={job_details.company} job_title={job_details.title} -->"""
-            
         except Exception as e:
-            log.error(f"Error generating cover letter from URL: {e}", exc_info=True)
-            return f"❌ Sorry, I couldn't extract the job details from that URL: {str(e)}. Please check the URL and try again, or provide the job details manually."
+            log.error(f"An unexpected error occurred in generate_cover_letter_from_url: {e}", exc_info=True)
+            return f"An unexpected error occurred while generating the cover letter from the URL: {str(e)}"
+        
+    
+
+    @tool("refine_cv_from_url", return_direct=False)
+    async def refine_cv_from_url(job_url: str) -> str:
+        """
+        Refines a user's CV for a specific job by extracting details from a job posting URL.
+        This tool scrapes the job description, then calls the resume generation logic to
+        tailor the user's resume and saves it to the database.
+
+        Args:
+            job_url: The URL of the job posting.
+        """
+        async with async_session_maker() as session:
+            try:
+                # Step 1: Scrape job details from the URL
+                from app.url_scraper import scrape_job_url, JobDetails
+                log.info(f"Attempting to refine CV from URL: {job_url}")
+                
+                scraped_details = await scrape_job_url(job_url)
+
+                if isinstance(scraped_details, dict) and 'error' in scraped_details:
+                    return f"Sorry, I couldn't extract job details from that URL. Error: {scraped_details['error']}"
+
+                if not isinstance(scraped_details, JobDetails):
+                    return "I ran into an issue reading the job posting. The website's structure might be complex."
+
+                job_title = scraped_details.title
+                company_name = scraped_details.company
+                job_description = f"{scraped_details.description}\n\nRequirements:\n{scraped_details.requirements}"
+
+                # Step 2: Generate the tailored resume using AI
+                # Get User's Base Resume Data
+                resume_result = await session.execute(
+                    select(Resume).where(Resume.user_id == user_id)
+                )
+                base_resume = resume_result.scalars().first()
+                
+                base_resume_data = {}
+                if base_resume and base_resume.data:
+                    base_resume_data = fix_resume_data_structure(base_resume.data)
+
+                # Define the Pydantic model for the output
+                class TailoredResume(BaseModel):
+                    personalInfo: dict = Field(description="Personal information section, including summary.")
+                    experience: list = Field(description="List of all work experiences.")
+                    education: list = Field(description="List of all education entries.")
+                    skills: list = Field(description="A comprehensive list of skills.")
+                    projects: list = Field(description="List of projects, if any.")
+                    certifications: list = Field(description="List of certifications, if any.")
+
+                parser = PydanticOutputParser(pydantic_object=TailoredResume)
+
+                prompt_template = """
+                You are an expert career coach. Your task is to generate a complete, tailored resume in JSON format
+                based on the user's existing resume data and a target job description.
+
+                **User's Base Resume Data:**
+                {base_resume}
+
+                **Target Job Description:**
+                - Job Title: {job_title}
+                - Company: {company_name}
+                - Description: {job_description}
+
+                **Instructions:**
+                1. Rewrite the summary in the `personalInfo` section to target the job.
+                2. Rephrase `experience` descriptions to highlight relevant accomplishments.
+                3. Prioritize the `skills` most relevant to the job.
+                4. Keep education, projects, and certifications largely the same.
+                5. Return ONLY a valid JSON object matching the schema.
+
+                {format_instructions}
+                """
+                prompt = PromptTemplate(
+                    template=prompt_template,
+                    input_variables=["base_resume", "job_title", "company_name", "job_description"],
+                    partial_variables={"format_instructions": parser.get_format_instructions()},
+                )
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.4)
+                chain = prompt | llm | parser
+
+                tailored_resume = await chain.ainvoke({
+                    "base_resume": json.dumps(base_resume_data, indent=2),
+                    "job_title": job_title,
+                    "company_name": company_name,
+                    "job_description": job_description,
+                })
+
+                # Step 3: Save the new resume to the database
+                db_resume_to_update = await session.get(Resume, base_resume.id) if base_resume else None
+
+                if db_resume_to_update:
+                    db_resume_to_update.data = tailored_resume.dict()
+                    attributes.flag_modified(db_resume_to_update, "data")
+                else:
+                    db_resume_to_update = Resume(user_id=user_id, data=tailored_resume.dict())
+                    session.add(db_resume_to_update)
+                
+                await session.commit()
+
+                # Step 4: Return a success message
+                output_str = (
+                    f"✅ I have successfully refined your CV for the **{job_title}** role at **{company_name}**.\n\n"
+                    "I analyzed the job description from the URL and tailored your profile accordingly. "
+                    "A download button should now be available on this message to get the updated PDF."
+                    "[DOWNLOADABLE_RESUME]"
+                )
+
+                return output_str
+
+            except Exception as e:
+                log.error(f"Error in refine_cv_from_url tool: {e}", exc_info=True)
+                return f"❌ An error occurred while refining your resume from the URL. The website might be blocking access, or the job posting may have expired."
+        
 
     @tool
     async def generate_cover_letter(
         company_name: str,
         job_title: str,
-        job_description: str,
-        user_skills: Optional[str] = None
+        job_description: str
     ) -> str:
-        """📝 MANUAL COVER LETTER TOOL 📝
-        
-        Use ONLY when users specifically ask for:
-        - "generate a cover letter for [job title] at [company]"
-        - "create a cover letter"
-        - "write a cover letter"
-        - "cover letter for this position"
-        
-        DO NOT use for CV/resume requests like "refine CV" or "enhance resume"!
-        
-        Args:
-            company_name: Name of the company you're applying to
-            job_title: Title of the job position
-            job_description: Full job description or key requirements
-            user_skills: Optional specific skills to highlight (if not provided, will use vector store data)
-        
-        Returns:
-            A professionally written cover letter tailored to the job
         """
-        try:
-            # Get user's name from Clerk profile
-            user_name = user.first_name or "User"
-            if user.last_name:
-                user_name = f"{user.first_name} {user.last_name}"
-            
-            # Build comprehensive user context from multiple sources
-            user_context_parts = []
-            
-            # 1. Get user's resume data from database (FIX: Access JSON data properly)
+        Generates a structured cover letter based on provided job details.
+
+        This tool uses a PydanticOutputParser to GUARANTEE a clean JSON output,
+        wrapped in a string with a trigger for the frontend.
+        It correctly uses the 'user' object from the parent WebSocket scope.
+        """
+        async with async_session_maker() as session:
             try:
-                result = await db.execute(select(Resume).where(Resume.user_id == user.id))
-                db_resume = result.scalars().first()
+                log.info(f"Generating GUARANTEED structured cover letter for {job_title} at {company_name}")
                 
-                if db_resume and db_resume.data:
-                    resume_info = []
-                    resume_data = db_resume.data  # Access the JSON data column
-                    
-                    # Access personalInfo (camelCase as stored in JSON)
-                    personal_info = resume_data.get('personalInfo', {})
-                    if personal_info:
-                        personal = db_resume.personal_info
-                        if personal.get('summary'):
-                            resume_info.append(f"Professional Summary: {personal['summary']}")
-                        if personal.get('location'):
-                            resume_info.append(f"Location: {personal['location']}")
-                        if personal.get('phone'):
-                            resume_info.append(f"Phone: {personal['phone']}")
-                        if personal.get('email'):
-                            resume_info.append(f"Email: {personal['email']}")
-                    
-                    if db_resume.experience and isinstance(db_resume.experience, list):
-                        exp_details = []
-                        for exp in db_resume.experience[:3]:  # Top 3 experiences
-                            if isinstance(exp, dict):
-                                exp_text = f"{exp.get('job_title', '')} at {exp.get('company', '')} ({exp.get('dates', '')})"
-                                if exp.get('description'):
-                                    exp_text += f": {exp['description'][:200]}..."
-                                exp_details.append(exp_text)
-                        if exp_details:
-                            resume_info.append("Recent Experience:\n" + "\n".join(exp_details))
-                    
-                    if db_resume.education and isinstance(db_resume.education, list):
-                        edu_details = []
-                        for edu in db_resume.education[:2]:  # Top 2 education entries
-                            if isinstance(edu, dict):
-                                edu_text = f"{edu.get('degree', '')} from {edu.get('institution', '')} ({edu.get('dates', '')})"
-                                edu_details.append(edu_text)
-                        if edu_details:
-                            resume_info.append("Education:\n" + "\n".join(edu_details))
-                    
-                    if db_resume.skills and isinstance(db_resume.skills, list):
-                        skills_text = ", ".join(db_resume.skills[:15])  # Top 15 skills
-                        resume_info.append(f"Technical Skills: {skills_text}")
-                    
-                    if resume_info:
-                        user_context_parts.append("RESUME DATABASE:\n" + "\n\n".join(resume_info))
-            except Exception as e:
-                log.warning(f"Could not retrieve resume data: {e}")
-            
-            # 2. Get uploaded documents content
-            try:
-                doc_result = await db.execute(
-                    select(Document).where(Document.user_id == user.id)
-                    .order_by(Document.date_created.desc()).limit(3)
-                )
-                documents = doc_result.scalars().all()
+                # CORRECTLY get resume data using the existing helper and user object from scope
+                db_resume, resume_data = await get_or_create_resume(session)
+
+                # Create the parser to force a specific JSON output structure
+                parser = PydanticOutputParser(pydantic_object=CoverLetterDetails)
+
+                prompt_template = ChatPromptTemplate.from_messages([
+                    ("system", """You are an expert cover letter writer. Your task is to generate a cover letter in a structured JSON format. You MUST adhere to the JSON schema provided below. Do NOT add any conversational text, introductory sentences, or markdown formatting around the JSON object. Your output must be ONLY the raw JSON object.
+
+{format_instructions}"""),
+                    ("human", """Please generate a tailored cover letter based on the following details:
+
+**Job Details:**
+- Job Title: {job_title}
+- Company Name: {company_name}
+- Job Description: {job_description}
+
+**Candidate's Information:**
+- Name: {name}
+- Relevant Skills: {skills}
+- Summary of Experience: {summary}
+
+Generate the full cover letter body. It should be professional, concise, and tailored to the job description, highlighting the candidate's relevant skills and experience. Address it to the 'Hiring Team' if a specific name is not available.
+"""),
+                ])
+
+                chain = prompt_template | ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.7) | parser
                 
-                if documents:
-                    doc_content = []
-                    for doc in documents:
-                        if doc.content:
-                            # Get first 500 chars from each document
-                            content_preview = doc.content[:500].strip()
-                            if content_preview:
-                                doc_content.append(f"From {doc.name}: {content_preview}...")
-                    
-                    if doc_content:
-                        user_context_parts.append("UPLOADED DOCUMENTS:\n" + "\n\n".join(doc_content))
-            except Exception as e:
-                log.warning(f"Could not retrieve documents: {e}")
-            
-            # 3. Try vector store as fallback
-            if vector_store and not user_context_parts:
-                try:
-                    search_queries = [
-                        "resume experience skills",
-                        "work experience background",
-                        "education qualifications"
-                    ]
-                    
-                    vector_parts = []
-                    for query in search_queries:
-                        docs = await vector_store.asimilarity_search(query, k=2)
-                        if docs:
-                            for doc in docs:
-                                if doc.page_content not in vector_parts:
-                                    vector_parts.append(doc.page_content[:300])
-                    
-                    if vector_parts:
-                        user_context_parts.append("VECTOR STORE:\n" + "\n".join(vector_parts))
-                except Exception as ve:
-                    log.warning(f"Could not retrieve vector store data: {ve}")
-            
-            # Combine all context
-            user_context = "\n\n".join(user_context_parts) if user_context_parts else ""
-            
-            # Build user_skills from available data
-            if not user_skills:
-                if db_resume and db_resume.data and db_resume.data.get('skills'):
-                    skills_list = db_resume.data.get('skills', [])
-                    if isinstance(skills_list, list) and skills_list:
-                        user_skills = f"Technical skills including: {', '.join(skills_list[:10])}"
-                    else:
-                        user_skills = "Professional skills and experience as detailed in background"
-                else:
-                    user_skills = "Professional skills and experience as detailed in background"
-            
-            # Create the cover letter generation prompt with vector store context
-            prompt = ChatPromptTemplate.from_template(
-                "You are an expert career coach. Write a professional and compelling cover letter.\n\n"
-                "**Candidate Information:**\n"
-                "Name: {user_name}\n"
-                "Skills/Experience: {user_skills}\n\n"
-                "**Additional Background Context:**\n"
-                "{user_context}\n\n"
-                "**Job Details:**\n"
-                "Company: {company_name}\n"
-                "Position: {job_title}\n"
-                "Job Description: {job_description}\n\n"
-                "Instructions:\n"
-                "- Write a professional cover letter using the candidate's actual name: {user_name}\n"
-                "- Begin with 'Dear Hiring Manager' and sign with '{user_name}'\n"
-                "- Use real information from the background context - NO placeholders or generic statements\n"
-                "- Highlight specific achievements and experiences that match the job requirements\n"
-                "- Make it engaging, personal, and specific to this exact role\n"
-                "- Show genuine enthusiasm for the role and company\n"
-                "- Keep it concise but impactful (3-4 paragraphs)\n"
-                "- Write in first person as {user_name}"
-            )
-            
-            llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.7, callbacks=[tracer])
-            chain = prompt | llm
-            
-            # Generate the cover letter
-            result = await chain.ainvoke({
-                "user_name": user_name,
-                "user_skills": user_skills,
-                "user_context": user_context or f"I am {user_name}, a professional seeking to contribute my skills and experience to your organization.",
-                "company_name": company_name,
+                personal_info_dict = resume_data.personalInfo.dict() if resume_data.personalInfo else {}
+
+                # Invoke the chain with all the necessary data
+                structured_response = await chain.ainvoke({
+                    "format_instructions": parser.get_format_instructions(),
                 "job_title": job_title,
+                    "company_name": company_name,
                 "job_description": job_description,
-            })
+                    "name": personal_info_dict.get("name", "User"),
+                    "skills": ", ".join(resume_data.skills) if resume_data.skills else "Not specified",
+                    "summary": personal_info_dict.get("summary", "No summary provided.")
+                })
+
+                # The 'structured_response' is now a guaranteed Pydantic object.
+                # We will add the full personal_info object to it before returning.
+                response_dict = structured_response.model_dump()
+                response_dict["personal_info"] = personal_info_dict
+
+                new_cover_letter_id = str(uuid.uuid4())
+                new_db_entry = GeneratedCoverLetter(
+                    id=new_cover_letter_id,
+                    user_id=user.id,
+                    content=json.dumps(response_dict)
+                )
+                session.add(new_db_entry)
+                await session.commit()
+                log.info(f"Successfully saved new cover letter with ID: {new_cover_letter_id}")
+
+
+               
+                
+                # The agent expects a final string containing the trigger and the JSON payload.
+                final_output_string = f"[DOWNLOADABLE_COVER_LETTER] {json.dumps(response_dict)}"
+                
+                log.info(f"Successfully generated structured cover letter string ID {new_cover_letter_id}")
+                return final_output_string
             
-            cover_letter_text = result.content
-            
-            # Save the cover letter to database
-            new_cover_letter = GeneratedCoverLetter(
-                id=str(uuid.uuid4()),
-                user_id=user.id,
-                content=cover_letter_text
-            )
-            db.add(new_cover_letter)
-            await db.commit()
-            
-            # Create download links
-            pdf_download_link = f"/api/pdf/generate"
-            
-            # Get user's first name for personalization  
-            user_first_name = user.first_name or "there"
-            
-            # Return simple text response with downloadable marker (much faster)
-            return f"""Hey {user_first_name}!
+            except Exception as e:
+                log.error(f"Error in GUARANTEED generate_cover_letter: {e}", exc_info=True)
+                return "Sorry, I encountered an error while writing the cover letter. Please try again."
 
-Your cover letter for the **{job_title}** position at **{company_name}** is ready! I've crafted a personalized cover letter for you, highlighting your relevant skills and experience.
-
-[DOWNLOADABLE_COVER_LETTER]
-
-{cover_letter_text}
-
----
-
-**🚀 What makes this special:**
-- Uses your real name and background information
-- Tailored specifically to this {job_title} role
-- Highlights your most relevant skills and experience
-- Professional tone that shows genuine interest
-
-**📥 Ready to download?** Click the download button (📥) that appears on this message to get your cover letter in different professional styles. You can preview and customize before downloading!
-
-<!-- content_id={new_cover_letter.id} company_name={company_name} job_title={job_title} -->"""
-            
-        except Exception as e:
-            log.error(f"Error generating cover letter: {e}", exc_info=True)
-            return f"❌ Sorry, I encountered an error while generating your cover letter: {str(e)}. Please try again with the job details."
 
     @tool
     async def generate_resume_pdf(
@@ -2373,40 +2227,42 @@ You can download your CV/Resume in multiple professional styles. The download di
     async def get_document_insights() -> str:
         """Get personalized insights about user's uploaded documents including analysis and recommendations.
         
-        Returns:
+            Returns:
             Comprehensive insights about user's documents, career alignment, and optimization recommendations
         """
         try:
+            # INTELLIGENT FIX: Ensure the correct memory manager is used for this advanced tool
+            current_memory_manager = memory_manager
+            if not isinstance(current_memory_manager, EnhancedMemoryManager):
+                # If the provided manager is the simple one, create an enhanced one for this specific task
+                log.warning("SimpleMemoryManager provided to advanced tool, creating temporary EnhancedMemoryManager.")
+                current_memory_manager = EnhancedMemoryManager(user_id=user.id, db_session=db)
+                await current_memory_manager.load_memory()
+
             # Get document insights using enhanced memory system
             from app.documents import _generate_comprehensive_document_insights
-            
-            # Get user documents
-            doc_result = await db.execute(
-                select(Document).where(Document.user_id == user.id)
-            )
-            documents = doc_result.scalars().all()
-            
+
             if not documents:
                 return "📄 **No Documents Found**\n\nYou haven't uploaded any documents yet. Upload your resume, cover letters, or other career documents to get personalized insights and recommendations!\n\n**To upload documents:**\n- Use the attachment button in the chat\n- Drag and drop files into the chat\n- Supported formats: PDF, DOCX, TXT"
             
             # Get user learning profile
-            if memory_manager:
-                context = await memory_manager.get_conversation_context()
+            if current_memory_manager:
+                context = await current_memory_manager.get_conversation_context()
                 user_profile = context
             else:
                 user_profile = None
             
             # Generate comprehensive insights
             insights = await _generate_comprehensive_document_insights(
-                documents, user_profile, memory_manager
+                documents, user_profile, current_memory_manager
             )
             
             # Track insights tool usage
-            if memory_manager:
-                await memory_manager.save_user_behavior(
+            if current_memory_manager:
+                await current_memory_manager.save_user_behavior(
                     action_type="document_insights_tool",
                     context={
-                        "documents_count": len(documents),
+                    "documents_count": len(documents),
                         "recommendations_count": len(insights.get("recommendations", [])),
                         "optimization_tips_count": len(insights.get("optimization_tips", [])),
                         "timestamp": datetime.utcnow().isoformat()
@@ -2496,14 +2352,15 @@ You can download your CV/Resume in multiple professional styles. The download di
             
             # Get detailed analysis using enhanced memory system
             from app.documents import _analyze_single_document
-            
-            if memory_manager:
-                context = await memory_manager.get_conversation_context()
-                user_profile = context
-            else:
-                user_profile = None
-            analysis = await _analyze_single_document(document, user_profile, memory_manager)
-            
+
+            user_profile_dict = {
+                "name": user.name or f"{user.first_name or ''} {user.last_name or ''}".strip(),
+                "profile_headline": user.profile_headline or "",
+                "skills": user.skills.split(',') if user.skills else []
+            }
+
+            analysis = await _analyze_single_document(document, user_profile_dict, memory_manager)
+
             # Track specific document analysis
             if memory_manager:
                 await memory_manager.save_user_behavior(
@@ -2595,320 +2452,230 @@ You can download your CV/Resume in multiple professional styles. The download di
             return f"❌ Sorry, I couldn't analyze the document '{document_name}' right now. Please try again or upload the document if it's missing."
 
     @tool
-    async def enhanced_document_search(query: str) -> str:
-        """Search through user's documents with enhanced context from their job search patterns.
-        
+    async def enhanced_document_search(query: str, doc_id: Optional[str] = None) -> str:
+        """
+        Enhanced search across all user documents, including resumes, cover letters, and user profile.
+        Prioritizes the most recently uploaded documents in case of ambiguity.
+        If a file is mentioned in the query (e.g., "File Attached: resume.pdf"), it will be summarized directly.
+
         Args:
-            query: Search query to find relevant information in user's documents
-            
+            query (str): The user's search query, which may include file attachment context.
+            doc_id (Optional[str]): The specific ID of a document to search within.
+
         Returns:
-            Relevant document content enhanced with user's learning context
+            A formatted string containing the most relevant search results or a direct summary of an attached file.
         """
         try:
-            # Use enhanced vector store search
-            from app.vector_store import search_documents_with_context
+            import re
             
-            search_results = await search_documents_with_context(
-                user.id, query, db, k=5
-            )
-            
-            if not search_results:
-                return f"🔍 **No Results Found**\n\nI couldn't find any relevant information for '{query}' in your uploaded documents.\n\n**Suggestions:**\n- Try different keywords\n- Upload more documents\n- Check if your documents contain the information you're looking for"
-            
-            # Track enhanced search usage
-            if memory_manager:
-                await memory_manager.save_user_behavior(
-                action_type="enhanced_document_search",
-                context={
-                    "query": query,
-                    "results_count": len(search_results),
-                    "timestamp": datetime.utcnow().isoformat()
-                },
-                success=len(search_results) > 0
-            )
-            
-            # Format search results
-            response_parts = [
-                f"🔍 **Search Results for '{query}'**\n",
-                f"Found {len(search_results)} relevant sections:\n"
+            # INTELLIGENT FIX: Check for file attachment context in the user's message
+            attachment_patterns = [
+                r'File Attached:\s*(.+?)(?:\n|$)',
+                r'CV/Resume uploaded successfully![\s\S]*?File:\s*(.+?)(?:\n|$)'
             ]
             
-            for i, result in enumerate(search_results, 1):
-                # Truncate long results for readability
-                truncated_result = result[:300] + "..." if len(result) > 300 else result
-                response_parts.append(f"**{i}.** {truncated_result}\n")
+            extracted_filename = None
+            for pattern in attachment_patterns:
+                match = re.search(pattern, query, re.IGNORECASE)
+                if match:
+                    extracted_filename = match.group(1).strip()
+                    break
             
-            response_parts.append("💬 **Need more specific information? Ask me about any particular aspect or request a detailed analysis!**")
-            
-            return "\n".join(response_parts)
-            
-        except Exception as e:
-            log.error(f"Error in enhanced document search: {e}")
-            return f"❌ Sorry, I couldn't search your documents for '{query}' right now. Please try again or let me know if you need help with document analysis."
-
-    @tool
-    async def generate_tailored_resume(
-        job_title: str,
-        company_name: str = "",
-        job_description: str = "",
-        user_skills: str = ""
-    ) -> str:
-        """Generate a complete, tailored resume based on a job description and user information.
-        
-        Args:
-            job_title: The job title to tailor the resume for
-            company_name: Target company name (optional)
-            job_description: Full job description to tailor against
-            user_skills: Additional skills to highlight (optional)
-        
-        Returns:
-            A complete, professionally formatted resume tailored to the job
-        """
-        try:
-            # CRITICAL: Check for placeholder data and extract real information first
-            if user.email and "@noemail.com" in user.email or user.name == "New User":
-                log.info("⚠️ Detected placeholder profile data, extracting real information first...")
-                extraction_result = await extract_and_populate_profile_from_documents()
-                log.info(f"📋 Profile extraction result: {extraction_result[:100]}...")
+            # If an attachment is explicitly mentioned, analyze it directly instead of searching
+            if extracted_filename:
+                log.info(f"Detected attached file in query: '{extracted_filename}'. Analyzing it directly.")
                 
-                # Refresh user data after extraction
-                await db.refresh(user)
-            
-            # Get existing resume data
-            db_resume, resume_data = await get_or_create_resume()
-            
-            # Get user documents for context
-            doc_result = await db.execute(
-                select(Document).where(Document.user_id == user.id).order_by(Document.date_created.desc())
-            )
-            documents = doc_result.scalars().all()
-            
-            # Extract comprehensive information from documents using AI
-            document_content = ""
-            if documents:
-                for doc in documents[:5]:  # Use latest 5 documents
-                    if doc.content and len(doc.content) > 100:
-                        document_content += f"\n\n=== DOCUMENT: {doc.name} ===\n{doc.content[:3000]}"
-            
-            # Use AI to extract comprehensive resume information
-            if document_content:
+                # Find the specific document, prioritizing the most recent one
+                doc_result = await db.execute(
+                    select(Document).where(
+                        Document.user_id == user.id,
+                        Document.name.ilike(f"%{extracted_filename}%")
+                    ).order_by(Document.date_created.desc())
+                )
+                documents = doc_result.scalars().all()
+
+                if not documents:
+                    return f"I see you mentioned '{extracted_filename}', but I couldn't find that document in your uploads. Please try uploading it again."
+                
+                # Use the most recent document matching the name
+                target_document = documents[0]
+                
+                if not target_document.content:
+                    return f"The document '{target_document.name}' was found but appears to be empty or unreadable."
+                
+                # Summarize the specific document's content to answer the user's implicit question
                 from langchain_core.prompts import ChatPromptTemplate
                 from langchain_core.output_parsers import StrOutputParser
                 
-
-
-
-                extraction_prompt = ChatPromptTemplate.from_template(
-                    """Extract comprehensive resume information from these documents for a tailored resume:
-
-                    {document_content}
-
-                    Extract and format ALL information for a complete tailored resume including:
-                    - Personal information (name, email, phone, location, LinkedIn, portfolio)
-                    - Professional summary highlighting relevant expertise for the target role
-                    - ALL work experience with detailed achievements and responsibilities
-                    - Education background with degrees, institutions, graduation years
-                    - Technical skills, programming languages, tools, technologies
-                    - Projects with descriptions and technologies used
-                    - Certifications, awards, languages, publications
-
-                    Focus on information that would be relevant for the target role. Return comprehensive, detailed information - not placeholders or templates."""
-                                    )
-                
-                extraction_llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.5-pro-preview-03-25",
-                    temperature=0.3
+                summarization_prompt = ChatPromptTemplate.from_template(
+                    "You are a helpful assistant. Summarize the key points of the following document content in a few clear, concise paragraphs. Address the user directly and be informative.\n\n---\n\n{document_content}"
                 )
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0.2)
+                chain = summarization_prompt | llm | StrOutputParser()
                 
-                extraction_chain = extraction_prompt | extraction_llm | StrOutputParser()
+                # Limit content size for summarization to avoid token limits
+                summary = await chain.ainvoke({"document_content": target_document.content[:4000]}) 
                 
-                try:
-                    comprehensive_info = await extraction_chain.ainvoke({
-                        "document_content": document_content
-                    })
-                    context = f"COMPREHENSIVE USER INFORMATION EXTRACTED FROM DOCUMENTS:\n\n{comprehensive_info}"
-                except Exception as e:
-                    log.warning(f"Failed to extract comprehensive info: {e}")
-                    context = f"User: {user.first_name} {user.last_name}, Email: {user.email}"
-            else:
-                context = f"User: {user.first_name} {user.last_name}, Email: {user.email}"
+                user_first_name = user.first_name or "there"
+                return f"Of course, {user_first_name}! Here is a summary of the document you just attached, '{target_document.name}':\n\n{summary}"
+
+            # --- Fallback to original search logic if no attachment context is found ---
+            log.info(f"No attachment context in query. Performing general search for: '{query}'")
             
-            # Create the resume generation chain
-            from langchain_core.prompts import ChatPromptTemplate
-            from langchain_core.output_parsers import JsonOutputParser
-            from langchain_core.pydantic_v1 import BaseModel, Field
-
-            class TailoredResume(BaseModel):
-                personalInfo: dict = Field(description="Personal information section, including summary.")
-                experience: list = Field(description="List of all work experiences.")
-                education: list = Field(description="List of all education entries.")
-                skills: list = Field(description="A comprehensive list of skills.")
-                projects: list = Field(description="List of projects, if any.")
-                certifications: list = Field(description="List of certifications, if any.")
-
-            parser = JsonOutputParser(pydantic_object=TailoredResume)
-            
-            prompt = ChatPromptTemplate.from_template(
-                """You are an expert resume writer. Create a COMPLETE, FULLY POPULATED resume using ALL the user's actual information tailored for the target job.
-                 Your output MUST be a valid JSON object that adheres to the provided schema.
-
-
-             COMPREHENSIVE USER INFORMATION:
-                {context}
-
-                TARGET JOB:
-                - Position: {job_title}
-                - Company: {company_name}
-                - Job Description: {job_description}
-
-                {format_instructions}
-
-                **CRITICAL INSTRUCTIONS:**
-                1.  Generate a complete resume in the specified JSON format.
-                2.  NEVER use placeholders like [Name] or [Company]. Use ONLY the actual extracted information.
-                3.  Fill ALL fields of the JSON schema with the user's actual data. If a section (like projects) is not in the source documents, provide an empty list.
-                4.  Optimize all content specifically for the {job_title} position.
-
-                OUTPUT THE COMPLETE, FULLY POPULATED TAILORED RESUME IN JSON FORMAT NOW:"""
-                        )
-            
-            llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-pro-preview-03-25",
-                temperature=0.7,
-                top_p=0.9
+            user_profile_content = (
+                f"Name: {user.name}\n"
+                f"Email: {user.email}\n"
+                f"Phone: {user.phone}\n"
+                f"Location: {user.address}\n"
+                f"LinkedIn: {user.linkedin}\n"
+                f"Profile Headline: {user.profile_headline}\n"
+                f"Skills: {user.skills}"
             )
-            
-            chain = prompt | llm | parser
-            
-            # Generate the tailored resume
-            tailored_resume = await chain.ainvoke({
-                "context": context,
-                "job_title": job_title,
-                "company_name": company_name or "the target company",
-                "job_description": job_description or "No specific job description provided",
-                "user_skills": user_skills or "Use existing skills from profile"
-            })
-            
-            # Save the generated resume content to database
-            from uuid import uuid4
-            new_resume_record = GeneratedCoverLetter(  # Reusing table for now
-                id=str(uuid4()),
-                user_id=user.id,
-                content=tailored_resume
+
+            doc_result = await db.execute(
+                select(Document).where(Document.user_id == user.id)
             )
-            db_resume.data = tailored_resume
-            await db.commit()
+            documents = doc_result.scalars().all()
 
-            summary = tailored_resume.get('personalInfo', {}).get('summary', 'Your new resume is ready.')
+            if not documents and not user_profile_content:
+                return "No documents or user profile found to search."
+
+            all_content = []
+            if user_profile_content:
+                all_content.append(
+                    {"id": "user_profile", "name": "USER PROFILE", "content": user_profile_content, "date_created": datetime.utcnow()}
+                )
+            for doc in documents:
+                all_content.append(
+                    {"id": doc.id, "name": doc.name, "content": doc.content, "date_created": doc.date_created}
+                )
+
+            search_results = []
+            for item in all_content:
+                content_text = item.get("content", "") or ""
+                if query.lower() in content_text.lower():
+                    search_results.append(item)
+
+            search_results.sort(key=lambda x: x.get("date_created", datetime.min), reverse=True)
+
+            if not search_results:
+                return f"🔍 **No Results Found**\n\nI couldn't find any relevant information for '{query}' in your uploaded documents."
+
+            response_parts = [
+                f"**Search Results for '{query}'**\n",
+                f"Found {len(search_results)} relevant sections:\n",
+            ]
+            for i, result in enumerate(search_results[:4], 1):
+                content_preview = (result.get("content", "") or "")[:200]
+                response_parts.append(
+                    f"**{i}.** [{result['name']}]\n{content_preview}..."
+                )
             
-            return f"""[DOWNLOADABLE_RESUME]
+            response_parts.append("\n💬 **Need more specific information? Ask me about any particular aspect or request a detailed analysis!**")
+            return "\n\n".join(response_parts)
 
-            ✅ **Your profile has been updated with a new resume tailored for the {job_title} role.**
-
-            **✨ New Professional Summary:**
-            _{summary}_
-
-            You can now view the full, updated resume in the dialog or download it as a PDF.
-            """
-            
         except Exception as e:
-            log.error(f"Error generating tailored resume: {e}", exc_info=True)
-            return f"❌ Sorry, I encountered an error while generating your tailored resume: {str(e)}. Please try again or provide more specific job details."
+            log.error(f"Error in enhanced document search: {e}", exc_info=True)
+            return f"❌ Sorry, I couldn't search your documents for '{query}' right now. Please try again or let me know if you need help with document analysis."
 
+
+  
     @tool
     async def enhance_resume_section(
         section: str,
         job_description: str = "",
         current_content: str = ""
     ) -> str:
-        """Enhance a specific section of your resume with AI-powered improvements.
+        """
+        Enhance a specific section of your resume with AI-powered improvements.
+        This tool fetches the user's current resume, uses an LLM to improve a specific section,
+        and then updates the resume record in the database with the new structured data.
         
         Args:
             section: Section to enhance (summary, experience, skills, education)
             job_description: Target job description for tailoring (optional)
-            current_content: Current content of the section to improve
+            current_content: Current content of the section to improve (optional, will be fetched if not provided)
         
         Returns:
-            Enhanced, professional content for the specified resume section
+            A success message indicating the section has been enhanced.
         """
-        try:
-            # Get user context
-            result = await db.execute(select(Resume).where(Resume.user_id == user.id))
-            db_resume = result.scalars().first()
-            
-            user_context = f"User: {user.first_name} {user.last_name}"
-            if db_resume:
-                # Import and use the fix function from resume.py
-                from app.resume import fix_resume_data_structure
-                # Fix missing ID fields in existing data before validation
-                fixed_data = fix_resume_data_structure(db_resume.data)
-                resume_data = ResumeData(**fixed_data)
-                user_context += f"\nCurrent Resume Context: {resume_data.personalInfo.summary or 'No summary available'}"
-                user_context += f"\nSkills: {', '.join(resume_data.skills) if resume_data.skills else 'No skills listed'}"
-            
-            # Create enhancement chain
-            from langchain_core.prompts import ChatPromptTemplate
-            from langchain_core.output_parsers import StrOutputParser
-            
-            prompt = ChatPromptTemplate.from_template(
-                """You are an expert resume writer. Enhance the specified resume section to be more impactful and professional.
+        async with async_session_maker() as session:
+            try:
+                # 1. Get the user's current resume data
+                db_resume, resume_data = await get_or_create_resume(session)
+
+                # Determine the content to be enhanced
+                content_to_enhance = current_content
+                if not content_to_enhance:
+                    if section.lower() == 'summary':
+                        content_to_enhance = resume_data.personalInfo.summary
+                    elif section.lower() == 'experience':
+                        content_to_enhance = json.dumps([exp.dict() for exp in resume_data.experience])
+                    elif section.lower() == 'skills':
+                        content_to_enhance = ", ".join(resume_data.skills)
+                    elif section.lower() == 'education':
+                         content_to_enhance = json.dumps([edu.dict() for edu in resume_data.education])
+
+                # 2. Use LLM to generate the enhanced content for the specific section
+                from langchain_core.prompts import ChatPromptTemplate
+                from langchain_core.output_parsers import StrOutputParser
+                
+                prompt = ChatPromptTemplate.from_template(
+                    """You are an expert resume writer. Enhance the specified resume section based on the user's context and the target job description.
 
 USER CONTEXT:
-{user_context}
+- Current Role: {current_role}
+- Current Skills: {current_skills}
 
 SECTION TO ENHANCE: {section}
-CURRENT CONTENT: {current_content}
-TARGET JOB DESCRIPTION: {job_description}
+CURRENT CONTENT:
+{content_to_enhance}
 
-ENHANCEMENT GUIDELINES:
-1. **Professional Summary**: Create compelling 3-4 line summary highlighting key value propositions
-2. **Experience**: Use strong action verbs, quantify achievements, focus on results and impact
-3. **Skills**: Organize by relevance, include both technical and soft skills, match job requirements
-4. **Education**: Highlight relevant coursework, honors, achievements, and certifications
+TARGET JOB DESCRIPTION (if provided):
+{job_description}
 
 INSTRUCTIONS:
-- Make the content more impactful and results-oriented
-- Use industry-standard terminology and keywords
-- Ensure ATS compatibility
-- Tailor to the job description if provided
-- Keep content concise but comprehensive
-- Use strong action verbs and quantifiable metrics
+- Rewrite the content to be more impactful and results-oriented.
+- Use strong action verbs and quantify achievements where possible.
+- If it is the 'skills' section, return a comma-separated list of skills.
+- If it is 'experience' or 'education', return a JSON array of objects.
+- If it is 'summary', return a concise paragraph.
+- Return ONLY the enhanced content for the section.
 
-Generate enhanced content that would impress hiring managers and pass ATS systems."""
-            )
-            
-            llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-pro-preview-03-25",
-                temperature=0.7
-            )
-            
-            chain = prompt | llm | StrOutputParser()
-            
-            enhanced_content = await chain.ainvoke({
-                "user_context": user_context,
-                "section": section,
-                "current_content": current_content or f"No current content provided for {section} section",
-                "job_description": job_description or "No specific job description provided"
-            })
-            
-            return f"""## ✨ **Enhanced {section.title()} Section**
+ENHANCED CONTENT:"""
+                )
+                
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.5)
+                chain = prompt | llm | StrOutputParser()
+                
+                enhanced_content = await chain.ainvoke({
+                    "current_role": resume_data.experience[0].jobTitle if resume_data.experience else "Not specified",
+                    "current_skills": ", ".join(resume_data.skills),
+                    "section": section,
+                    "content_to_enhance": content_to_enhance,
+                    "job_description": job_description or "Not specified"
+                })
 
-            {enhanced_content}
+                # 3. Update the structured resume data with the enhanced content
+                if section.lower() == 'summary':
+                    resume_data.personalInfo.summary = enhanced_content
+                elif section.lower() == 'experience':
+                    resume_data.experience = [Experience(**exp) for exp in json.loads(enhanced_content)]
+                elif section.lower() == 'skills':
+                    resume_data.skills = [s.strip() for s in enhanced_content.split(',')]
+                elif section.lower() == 'education':
+                    resume_data.education = [Education(**edu) for edu in json.loads(enhanced_content)]
 
-            ---
+                # 4. Save the updated resume data back to the database
+                db_resume.data = resume_data.dict()
+                attributes.flag_modified(db_resume, "data")
+                await session.commit()
 
-            **💡 Enhancement Features Applied:**
-            - ✅ Professional language and terminology
-            - ✅ Action-oriented and results-focused
-            - ✅ ATS-optimized keywords
-            - ✅ Industry best practices
-            {f'- ✅ Tailored to job requirements' if job_description else ''}
+                return f"✅ Your '{section}' section has been successfully enhanced. [DOWNLOADABLE_RESUME]"
 
-            **📝 Next Steps:** Copy this enhanced content to update your resume section, or use it as inspiration for further improvements!"""
-            
-        except Exception as e:
-            log.error(f"Error enhancing resume section: {e}", exc_info=True)
-            return f"❌ Sorry, I encountered an error while enhancing your {section} section: {str(e)}. Please try again."
+            except Exception as e:
+                log.error(f"Error enhancing resume section: {e}", exc_info=True)
+                return f"❌ Sorry, I encountered an error while enhancing your {section} section: {str(e)}."
 
 
     @tool
@@ -2918,113 +2685,74 @@ Generate enhanced content that would impress hiring managers and pass ATS system
         job_description: str = "",
         user_skills: str = ""
     ) -> str:
-        """Generate a complete, tailored resume based on a job description and user information.
-        
-        Args:
-            job_title: The job title to tailor the resume for
-            company_name: Target company name (optional)
-            job_description: Full job description to tailor against
-            user_skills: Additional skills to highlight (optional)
-        
-        Returns:
-            A complete, professionally formatted resume tailored to the job
         """
-        try:
-            # CRITICAL: Check for placeholder data and extract real information first
-            if user.email and "@noemail.com" in user.email or user.name == "New User":
-                log.info("⚠️ Detected placeholder profile data, extracting real information first...")
-                extraction_result = await extract_and_populate_profile_from_documents()
-                log.info(f"📋 Profile extraction result: {extraction_result[:100]}...")
-                
-                # Refresh user data after extraction
-                await db.refresh(user)
-            
-            # Get existing resume data
-            db_resume, resume_data = await get_or_create_resume()
-            
-            # Get user documents for context
-            doc_result = await db.execute(
-                select(Document).where(Document.user_id == user.id).order_by(Document.date_created.desc())
-            )
-            documents = doc_result.scalars().all()
-            
-            # Prepare context for the AI model
-            document_context = "\n\n".join([f"**{doc.name}**:\n{doc.content[:1500]}" for doc in documents])
-            
-            prompt = f"""
-            You are a professional resume writer. Your task is to generate a complete, tailored resume for the user based on the provided information.
-
-            **Target Job:**
-            - Job Title: {job_title}
-            - Company: {company_name or "Not specified"}
-
-            **Job Description:**
-            ---
-            {job_description}
-            ---
-
-            **User's Current Resume Data:**
-            ---
-            {resume_data.json(indent=2)}
-            ---
-            
-            **User's Uploaded Documents for Additional Context:**
-            ---
-            {document_context}
-            ---
-
-            **Instructions:**
-            1.  Analyze the job description to identify key requirements, skills, and keywords.
-            2.  Review the user's existing resume data and documents.
-            3.  Generate a complete, new resume in a structured JSON format. **Do not just modify sections; regenerate the entire resume object.**
-            4.  Tailor the summary, experience descriptions, and skills to perfectly match the target job.
-            5.  Quantify achievements where possible (e.g., "Increased efficiency by 20%").
-            6.  Ensure the output is a valid JSON object matching the resume data structure.
-            
-            **Output Format (Strict JSON):**
-            {{
-                "personalInfo": {{ "name": "...", "email": "...", "phone": "...", "linkedin": "...", "location": "...", "summary": "..." }},
-                "experience": [{{ "job_title": "...", "company": "...", "dates": "...", "description": "..." }}],
-                "education": [{{ "degree": "...", "institution": "...", "dates": "..." }}],
-                "skills": ["...", "..."]
-            }}
-            """
-            
-            # Call the AI model
-            llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-preview-0514", temperature=0.3)
-            response = await llm.ainvoke(prompt)
-            
-            # Extract and parse the JSON response
-            import json
-            cleaned_response = response.content.strip().replace("```json", "").replace("```", "")
-            
+        Generates a complete, tailored resume based on a job description and user's profile.
+        This tool now fetches the user's data, uses an LLM to generate a structured JSON
+        resume, and updates the user's master resume record in the database.
+        """
+        async with async_session_maker() as session:
             try:
-                tailored_resume_data = json.loads(cleaned_response)
-            except json.JSONDecodeError:
-                log.error(f"Failed to decode tailored resume JSON: {cleaned_response}")
-                return "❌ I generated a tailored resume, but there was an error in its structure. Please try again."
+                # 1. Get User's Base Resume Data
+                db_resume, base_resume_data = await get_or_create_resume(session)
 
-            # **THIS IS THE FIX:** Save the updated resume data back to the database
-            db_resume.data = tailored_resume_data
-            await db.commit()
-            
-            # Format the output for the user
-            output = f"✨ **Here is your new resume tailored for the {job_title} role!**\n\n"
-            output += f"**Summary:** {tailored_resume_data.get('personalInfo', {}).get('summary', 'N/A')}\n\n"
-            output += "**Experience Highlights:**\n"
-            for exp in tailored_resume_data.get('experience', [])[:2]:
-                output += f"- **{exp.get('job_title')} at {exp.get('company')}**: {exp.get('description', '')[:100]}...\n"
-            
-            output += "\nI have updated your profile with this new version. You can now download it as a PDF."
-            
-            return output
+                # 2. Create the generation chain with a Pydantic output parser
+                parser = PydanticOutputParser(pydantic_object=ResumeData)
 
-        except Exception as e:
-            if db.is_active:
-                await db.rollback()
-            log.error(f"Error generating tailored resume: {e}", exc_info=True)
-            return "❌ I'm sorry, I encountered an error while tailoring your resume. Please check the details and try again."
+                prompt_template = """
+                You are an expert career coach and resume writer. Your task is to generate a complete, tailored resume in a structured JSON format.
+                Analyze the user's base resume data and the provided job description to create a highly relevant and impactful resume.
 
+                **User's Base Resume Data:**
+                {base_resume}
+
+                **Target Job Description:**
+                - Job Title: {job_title}
+                - Company: {company_name}
+                - Description: {job_description}
+
+                **User's Key Skills to Highlight (if provided):**
+                {user_skills}
+
+                **Instructions:**
+                1.  **Rewrite the Summary:** Create a new, concise professional summary in the `personalInfo` section that directly targets the job description.
+                2.  **Tailor Experience:** Rephrase job descriptions under `experience` to highlight accomplishments and responsibilities most relevant to the target role. Use strong action verbs and quantify achievements where possible.
+                3.  **Prioritize Skills:** In the `skills` section, reorder and highlight the skills that are most relevant to the job description.
+                4.  **Maintain Structure:** Keep the user's education, projects, and certifications as they are.
+                5.  **Output Format:** You MUST provide the final output as a valid JSON object matching the provided schema. Do not add any extra text or formatting.
+
+                {format_instructions}
+                """
+
+                prompt = PromptTemplate(
+                    template=prompt_template,
+                    input_variables=["base_resume", "job_title", "company_name", "job_description", "user_skills"],
+                    partial_variables={"format_instructions": parser.get_format_instructions()},
+                )
+
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.4)
+                chain = prompt | llm | parser
+
+                # 3. Invoke the chain to generate the structured, tailored resume
+                tailored_resume = await chain.ainvoke({
+                    "base_resume": json.dumps(base_resume_data.dict(), indent=2),
+                    "job_title": job_title,
+                    "company_name": company_name,
+                    "job_description": job_description,
+                    "user_skills": user_skills,
+                })
+
+                # 4. Update the user's single master resume record.
+                db_resume.data = tailored_resume.dict()
+                attributes.flag_modified(db_resume, "data")
+                await session.commit()
+                
+                # 5. Return a simple confirmation message with the trigger.
+                return (f"I have successfully tailored your resume for the {job_title} role. "
+                        "You can preview, edit, and download it now. [DOWNLOADABLE_RESUME]")
+
+            except Exception as e:
+                log.error(f"Error in generate_tailored_resume tool: {e}", exc_info=True)
+                return "❌ An error occurred while tailoring your resume. Please ensure the job description is detailed enough."
 
 
     @tool
@@ -3034,201 +2762,101 @@ Generate enhanced content that would impress hiring managers and pass ATS system
         industry: str = "",
         key_skills: str = ""
     ) -> str:
-        """Create a complete professional resume from scratch based on your career goals.
-        
-        Args:
-            target_role: The type of role you're targeting (e.g., "Software Engineer", "Product Manager")
-            experience_level: Your experience level (entry-level, mid-level, senior, executive)
-            industry: Target industry (optional)
-            key_skills: Your key skills and technologies (optional)
-        
-        Returns:
-            A complete, professional resume template tailored to your career goals
-        """
-        try:
-            # CRITICAL: Check for placeholder data and extract real information first
-            if user.email and "@noemail.com" in user.email or user.name == "New User":
-                log.info("⚠️ Detected placeholder profile data, extracting real information first...")
-                extraction_result = await extract_and_populate_profile_from_documents()
-                log.info(f"📋 Profile extraction result: {extraction_result[:100]}...")
+        """Create a complete professional resume from scratch based on your career goals."""
+        async with async_session_maker() as session:
+            try:
+                # 1. Extract comprehensive information from user's documents.
+                doc_result = await session.execute(
+                    select(Document).where(Document.user_id == user.id).order_by(Document.date_created.desc())
+                )
+                documents = doc_result.scalars().all()
                 
-                # Refresh user data after extraction
-                await db.refresh(user)
-            
-            # Get comprehensive user information from documents
-            doc_result = await db.execute(
-                select(Document).where(Document.user_id == user.id).order_by(Document.date_created.desc())
-            )
-            documents = doc_result.scalars().all()
-            
-            # Extract comprehensive information from documents using AI
-            document_content = ""
-            if documents:
-                for doc in documents[:5]:  # Use latest 5 documents
-                    if doc.content and len(doc.content) > 100:
-                        document_content += f"\n\n=== DOCUMENT: {doc.name} ===\n{doc.content[:3000]}"
-            
-            # Use AI to extract comprehensive resume information
-            if document_content:
-                from langchain_core.prompts import ChatPromptTemplate
-                from langchain_core.output_parsers import StrOutputParser
+                document_content = ""
+                if documents:
+                    for doc in documents[:5]:
+                        if doc.content and len(doc.content) > 100:
+                            document_content += f"\n\n=== DOCUMENT: {doc.name} ===\n{doc.content[:3000]}"
                 
-                extraction_prompt = ChatPromptTemplate.from_template(
-                    """Extract comprehensive resume information from these documents:
-
+                comprehensive_info = ""
+                if document_content:
+                    from langchain_core.prompts import ChatPromptTemplate
+                    from langchain_core.output_parsers import JsonOutputParser
+                    
+                    extraction_prompt = ChatPromptTemplate.from_template(
+                        """Extract comprehensive resume information from these documents and return it as a valid JSON object.
+                        
                         {document_content}
+                        
+                        The JSON object should have keys: 'personalInfo', 'experience', 'education', 'skills'."""
+                    )
+                    
+                    extraction_llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0.1)
+                    extraction_chain = extraction_prompt | extraction_llm | JsonOutputParser()
+                    
+                    try:
+                        comprehensive_info = await extraction_chain.ainvoke({"document_content": document_content})
+                    except Exception as e:
+                        log.warning(f"Failed to extract comprehensive info as JSON: {e}")
+                        comprehensive_info = {}
 
-                        Extract and format ALL information for a complete resume including:
-                        - Personal information (name, email, phone, location, LinkedIn, portfolio)
-                        - Professional summary and expertise
-                        - ALL work experience with detailed achievements
-                        - Education background with degrees and institutions
-                        - Technical skills, programming languages, tools
-                        - Projects with descriptions and technologies
-                        - Certifications, awards, languages, publications
-
-                        Return comprehensive, detailed information - not placeholders or templates."""
-                )
+                # 2. Verify if critical information was found.
+                missing_sections = []
+                if not comprehensive_info or not comprehensive_info.get("experience"):
+                    missing_sections.append("work experience")
+                if not comprehensive_info or not comprehensive_info.get("education"):
+                    missing_sections.append("education history")
+                if not comprehensive_info or not comprehensive_info.get("skills"):
+                    missing_sections.append("key skills")
                 
-                extraction_llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.5-pro-preview-03-25",
-                    temperature=0.3,
-                    callbacks=[tracer]
-                )
+                # 3. If information is missing, ask the user for it.
+                if missing_sections:
+                    missing_str = ", ".join(missing_sections)
+                    return (
+                        f"I've started drafting your resume for a {target_role} role, but I couldn't find details about your {missing_str} in your documents. "
+                        "To create the best resume for you, could you please provide this information?"
+                    )
                 
-                extraction_chain = extraction_prompt | extraction_llm | StrOutputParser()
-                
-                try:
-                    comprehensive_info = await extraction_chain.ainvoke({
-                        "document_content": document_content
-                    })
-                    context = f"COMPREHENSIVE USER INFORMATION EXTRACTED FROM DOCUMENTS:\n\n{comprehensive_info}"
-                except Exception as e:
-                    log.warning(f"Failed to extract comprehensive info: {e}")
-                    context = f"Basic info: {user.first_name} {user.last_name}, {user.email}"
-            else:
-                context = f"Basic info: {user.first_name} {user.last_name}, {user.email}"
-            
-            # Create resume generation chain
-            from langchain_core.prompts import ChatPromptTemplate
-            from langchain_core.output_parsers import StrOutputParser
-            
-            prompt = ChatPromptTemplate.from_template(
-                """You are an expert career coach and resume writer. Create a COMPLETE, FULLY POPULATED resume using ALL the user's actual information.
-
-                    COMPREHENSIVE USER INFORMATION:
+                # 4. If data exists, create a structured resume using the AI.
+                parser = PydanticOutputParser(pydantic_object=ResumeData)
+                prompt = ChatPromptTemplate.from_template(
+                    """You are an expert resume writer. Create a complete, populated resume using the user's information.
+                    
+                    USER INFORMATION (JSON):
                     {context}
 
-                    CAREER GOALS:
+                    CAREER GOAL:
                     - Target Role: {target_role}
-                    - Experience Level: {experience_level}
-                    - Industry: {industry}
-                    - Key Skills: {key_skills}
 
-                    **CRITICAL INSTRUCTIONS:**
-                    - NEVER use placeholders like [Your Name], [Email], [Job Title], [Company]
-                    - NEVER write template instructions
-                    - USE ONLY the actual extracted information from the user's documents
-                    - CREATE a complete, ready-to-use resume with real content in every section
-                    - Fill ALL sections with the user's actual data
-                    - Optimize content for {target_role} positions
+                    INSTRUCTIONS:
+                    - Use ONLY the information from the user's JSON context.
+                    - Do NOT use placeholders.
+                    - Format the output as a valid JSON object matching the schema.
 
-                    **CREATE THE COMPLETE RESUME:**
+                    {format_instructions}
+                    """
+                )
+                
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.7)
+                chain = prompt | llm | parser
+                
+                new_resume_data = await chain.ainvoke({
+                    "context": json.dumps(comprehensive_info),
+                    "target_role": target_role,
+                    "format_instructions": parser.get_format_instructions(),
+                })
 
-                    # [Use actual full name from documents]
-                    **Email:** [actual email] | **Phone:** [actual phone] | **Location:** [actual location] | **LinkedIn:** [actual LinkedIn]
-
-                    ## Professional Summary
-                    [Write 3-4 compelling lines using their actual background, skills, and experience for {target_role} roles]
-
-                    ## Core Skills
-                    [List ONLY their actual technical skills, programming languages, tools from documents, prioritized for {target_role}]
-
-                    ## Professional Experience
-                    [For EACH actual job from their background:]
-                    **[Actual Job Title]** | [Actual Company] | [Actual Dates]
-                    • [Real achievement with metrics optimized for {target_role}]
-                    • [Real responsibility with quantifiable results]
-                    • [Real accomplishment relevant to {target_role}]
-
-                    ## Education
-                    [For EACH degree from their documents:]
-                    **[Actual Degree]** | [Actual Institution] | [Actual Year/Dates]
-
-                    ## Projects
-                    [List actual projects with:]
-                    **[Project Name]**: [Real description and technologies, relevant to {target_role}]
-
-                    ## Additional Sections
-                    [Include actual certifications, languages, awards they have]
-
-                    **REQUIREMENTS:**
-                    1. Use EVERY piece of real information from the extracted context
-                    2. Create achievement-focused content with metrics where available
-                    3. Optimize all content for {target_role} and {industry} positions
-                    4. Structure appropriately for {experience_level} professional
-                    5. Make it completely ready to use - no editing needed
-                    6. Focus on achievements and skills most relevant to {target_role}
-
-                    OUTPUT THE COMPLETE, POPULATED RESUME NOW:"""
-            )
-            
-            llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-pro-preview-03-25",
-                temperature=0.7
-            )
-            
-            chain = prompt | llm | StrOutputParser()
-            
-            new_resume = await chain.ainvoke({
-                "context": context,
-                "target_role": target_role,
-                "experience_level": experience_level,
-                "industry": industry or "general",
-                "key_skills": key_skills or "relevant to the target role"
-            })
-            
-            # Save to database
-            from uuid import uuid4
-            new_resume_record = GeneratedCoverLetter(  # Reusing table
-                id=str(uuid4()),
-                user_id=user.id,
-                content=new_resume
-            )
-            db.add(new_resume_record)
-            await db.commit()
-            
-            return f"""[DOWNLOADABLE_RESUME]
-
-            ## 📄 **Professional Resume Created Successfully!**
-
-            ✅ **A first draft of your {experience_level} {target_role} resume is ready!** I've focused on role-specific tailoring, ATS optimization, and professional structure.
-
-            {new_resume}
-
-            ---
-
-            ### 🎯 **Resume Features:**
-            - **Role-Specific**: Tailored for {target_role} positions
-            - **Experience-Appropriate**: Structured for {experience_level} professionals
-            - **ATS-Optimized**: Formatted to pass Applicant Tracking Systems
-            - **Industry-Relevant**: {f'Focused on {industry} industry' if industry else 'Adaptable across industries'}
-
-            ### 📥 **Download Options:**
-            **A download button (📥) should appear on this message.** Click it to access PDF versions of your resume in multiple styles (Modern, Classic, Minimal). You can also preview and edit the content before downloading.
-
-            ### 📝 **Next Steps:**
-            1. **Review & Customize**: Personalize the template with your specific details
-            2. **Download PDF**: Use the download button for professional formatting
-            3. **Tailor Further**: Customize for specific job applications
-
-            **💡 Pro Tip:** This is your foundation - customize it for each job application for best results!
-
-            <!-- content_id={new_resume_record.id} -->"""
-            
-        except Exception as e:
-            log.error(f"Error creating resume from scratch: {e}", exc_info=True)
-            return f"❌ Sorry, I encountered an error while creating your resume: {str(e)}. Please try again with more specific details."
+                # 5. Save the structured JSON to the master Resume record.
+                db_resume, _ = await get_or_create_resume(session)
+                db_resume.data = new_resume_data.dict()
+                attributes.flag_modified(db_resume, "data")
+                await session.commit()
+                
+                return (f"I have created a new resume draft for you, tailored for a {target_role} role. "
+                        "You can now preview, edit, and download it. [DOWNLOADABLE_RESUME]")
+                
+            except Exception as e:
+                log.error(f"Error creating resume from scratch: {e}", exc_info=True)
+                return f"❌ Sorry, I encountered an error while creating your resume: {str(e)}."
 
     @tool
     async def refine_cv_for_role(
@@ -3236,242 +2864,64 @@ Generate enhanced content that would impress hiring managers and pass ATS system
         job_description: str = "",
         company_name: str = ""
     ) -> str:
-        """⭐ PRIMARY CV REFINEMENT TOOL ⭐ 
-        
-        Use this tool when users ask to:
-        - "refine my CV"
-        - "enhance my resume" 
-        - "improve my CV for [role]"
-        - "tailor my resume"
-        - "update my CV"
-        - "make my resume better"
-        
-        DO NOT use cover letter tools for CV requests!
-        
-        Args:
-            target_role: The role or industry to tailor the CV for (e.g., "AI Engineering", "Software Development")
-            job_description: Specific job description to tailor against (optional)
-            company_name: Target company name (optional)
-            user_skills: Additional skills to highlight (optional)
-        
-        Returns:
-            A refined, professionally tailored CV optimized for the target role
-        """
-        try:
-            log.info(f"CV refinement requested for role: {target_role}")
-            
-            # CRITICAL: Check for placeholder data and extract real information first
-            if user.email and "@noemail.com" in user.email or user.name == "New User":
-                log.info("⚠️ Detected placeholder profile data, extracting real information first...")
-                extraction_result = await extract_and_populate_profile_from_documents()
-                log.info(f"📋 Profile extraction result: {extraction_result[:100]}...")
+        """⭐ PRIMARY CV REFINEMENT TOOL ⭐"""
+        async with async_session_maker() as session:
+            try:
+                log.info(f"CV refinement requested for role: {target_role}")
                 
-                # Refresh user data after extraction
-                await db.refresh(user)
-            
-            # Get existing resume data
-            result = await db.execute(select(Resume).where(Resume.user_id == user.id))
-            db_resume = result.scalars().first()
-            
-            # Get user documents for context
-            doc_result = await db.execute(
-                select(Document).where(Document.user_id == user.id).order_by(Document.date_created.desc())
-            )
-            documents = doc_result.scalars().all()
-            
-            # Build COMPREHENSIVE context with ALL user information from documents
-            user_name = f"{user.first_name} {user.last_name}".strip() if user.first_name or user.last_name else "User"
-            
-            # Extract comprehensive information from documents using AI
-            document_content = ""
-            if documents:
-                for doc in documents[:5]:  # Use latest 5 documents
-                    if doc.content and len(doc.content) > 100:
-                        document_content += f"\n\n=== DOCUMENT: {doc.name} ===\n{doc.content[:3000]}"
-            
-            # Use AI to extract comprehensive resume information
-            if document_content:
-                from langchain_core.prompts import ChatPromptTemplate
-                from langchain_core.output_parsers import StrOutputParser
+                # 1. Get the user's current resume data.
+                db_resume, base_resume_data = await get_or_create_resume(session)
                 
-                extraction_prompt = ChatPromptTemplate.from_template(
-                    """Extract comprehensive resume information from these documents:
-
-                        {document_content}
-
-                        Extract and format ALL information for a complete resume. Return detailed content for:
-
-                        **PERSONAL INFORMATION:**
-                        - Full name, email, phone, location, LinkedIn, portfolio, GitHub
-
-                        **PROFESSIONAL SUMMARY:**
-                        - Write a compelling 3-4 line summary of their background and expertise
-
-                        **WORK EXPERIENCE:**
-                        - List ALL positions with: Job Title | Company | Dates | Detailed achievements and responsibilities
-
-                        **EDUCATION:**
-                        - All degrees, institutions, dates, relevant coursework, honors
-
-                        **TECHNICAL SKILLS:**
-                        - Programming languages, frameworks, tools, technologies
-
-                        **PROJECTS:**
-                        - Significant projects with descriptions and technologies used
-
-                        **CERTIFICATIONS/AWARDS:**
-                        - Any certifications, awards, or recognition
-
-                        **ADDITIONAL SECTIONS:**
-                        - Languages, publications, volunteer work, etc.
-
-                        Return comprehensive, detailed information - not placeholders or templates. Use the actual content from the documents."""
-                )
+                # 2. Create the generation chain to output structured JSON.
+                parser = PydanticOutputParser(pydantic_object=ResumeData)
                 
-                extraction_llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.5-flash-preview-04-17",
-                    temperature=0.3
-                )
-                
-                extraction_chain = extraction_prompt | extraction_llm | StrOutputParser()
-                
-                try:
-                    comprehensive_info = await extraction_chain.ainvoke({
-                        "document_content": document_content
-                    })
-                    context = f"COMPREHENSIVE USER INFORMATION EXTRACTED FROM DOCUMENTS:\n\n{comprehensive_info}"
-                except Exception as e:
-                    log.warning(f"Failed to extract comprehensive info: {e}")
-                    context = f"USER'S BASIC DETAILS:\nFull Name: {user_name}\nEmail: {user.email or 'Not provided'}"
-            else:
-                context = f"USER'S BASIC DETAILS:\nFull Name: {user_name}\nEmail: {user.email or 'Not provided'}"
-            
-            # Create the resume refinement chain
-            from langchain_core.prompts import ChatPromptTemplate
-            from langchain_core.output_parsers import StrOutputParser
-            
-            prompt = ChatPromptTemplate.from_template(
-                """You are an expert resume writer. Create a COMPLETE, FULLY POPULATED CV using ALL the user's actual information.
-
-                    USER'S COMPREHENSIVE INFORMATION:
+                prompt = ChatPromptTemplate.from_template(
+                    """You are an expert career coach and resume writer. Your task is to refine a user's resume and return it as a structured JSON object.
+                    
+                    USER'S CURRENT RESUME DATA:
                     {context}
 
                     TARGET ROLE: {target_role}
-                    COMPANY: {company_name}  
+                    COMPANY: {company_name}
                     JOB DESCRIPTION: {job_description}
 
-                    **CRITICAL INSTRUCTIONS:**
-                    - NEVER use placeholders like [Full Name], [email], [Job Title]
-                    - NEVER write template instructions like "List your experience here"
-                    - USE ONLY the actual extracted information from the documents
-                    - CREATE a complete, ready-to-use CV with real content in every section
-                    - Fill ALL sections with the user's actual data
-                    - Optimize content for {target_role} positions
+                    **CRITICAL, NON-NEGOTIABLE DIRECTIVE:**
+                    - **You MUST ONLY use the information provided in the 'USER'S CURRENT RESUME DATA' section.**
+                    - **You are STRICTLY FORBIDDEN from inventing, creating, or hallucinating any new information.**
+                    - Your ONLY task is to REFORMAT, REPHRASE, and TAILOR the *existing* information to better match the target role.
+                    - If a section is empty in the user's data, it should remain empty.
+                    - Return ONLY a valid JSON object matching the provided schema. Do not add any extra text or formatting.
 
-                    **FORMAT THE COMPLETE CV:**
+                    {format_instructions}
+                    """
+                )
+                
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.3)
+                chain = prompt | llm | parser
+                
+                # 3. Invoke the chain to generate the refined structured resume.
+                refined_resume_data = await chain.ainvoke({
+                    "context": base_resume_data.json(),
+                    "target_role": target_role,
+                    "company_name": company_name or "target companies",
+                    "job_description": job_description or f"General {target_role} position requirements",
+                    "format_instructions": parser.get_format_instructions(),
+                })
+                
+                # 4. Update the user's single master resume record with the new structured data.
+                db_resume.data = refined_resume_data.dict()
+                attributes.flag_modified(db_resume, "data")
+                await session.commit()
+                
+                # 5. Return a simple confirmation message with the trigger.
+                return (f"I've successfully refined your CV for the **{target_role}** role. "
+                        "A download button will appear on this message. [DOWNLOADABLE_RESUME]")
+                
+            except Exception as e:
+                log.error(f"Error in CV refinement: {e}", exc_info=True)
+                return f"❌ Sorry, an error occurred while refining your CV. Please try again."
 
-                    # [Use actual full name from the documents]
-                    **Email:** [actual email] | **Phone:** [actual phone] | **Location:** [actual location] | **LinkedIn:** [actual LinkedIn]
-
-                    ## Professional Summary
-                    [Write 3-4 compelling lines using their actual background, skills, and experience - not generic text]
-
-                    ## Core Skills
-                    [List ONLY their actual technical skills, programming languages, tools, and technologies from the documents]
-
-                    ## Professional Experience
-                    [For EACH actual job from their background:]
-                    **[Actual Job Title]** | [Actual Company] | [Actual Dates]
-                    • [Real achievement with metrics/impact]
-                    • [Real responsibility with quantifiable results]
-                    • [Real project or accomplishment specific to that role]
-
-                    ## Education
-                    [For EACH degree/certification from their documents:]
-                    **[Actual Degree]** | [Actual Institution] | [Actual Year/Dates]
-                    [Any relevant details like honors, GPA, relevant coursework]
-
-                    ## Projects
-                    [List actual projects from their documents with:]
-                    **[Project Name]**: [Real description and technologies used]
-
-                    ## Additional Sections
-                    [Include any actual certifications, languages, awards, publications they have]
-
-                    **REQUIREMENTS:**
-                    1. Use EVERY piece of real information from the extracted context
-                    2. Create achievement-focused bullet points with metrics where available
-                    3. Optimize language and keywords for {target_role} positions
-                    4. Ensure professional formatting and ATS compatibility
-                    5. Make it completely ready to use - no editing needed
-
-                    OUTPUT THE COMPLETE, POPULATED CV NOW:"""
-            )
-            
-            llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-pro-preview-03-25",
-                temperature=0.3,
-                top_p=0.9
-            )
-            
-            chain = prompt | llm | StrOutputParser()
-            
-            # Generate the refined resume
-            refined_resume = await chain.ainvoke({
-                "context": context,
-                "target_role": target_role,
-                "company_name": company_name or "target companies",
-                "job_description": job_description or f"General {target_role} position requirements"
-            })
-            
-            # Save the generated resume content to database
-            from uuid import uuid4
-            new_resume_record = GeneratedCoverLetter(  # Reusing table for now
-                id=str(uuid4()),
-                user_id=user.id,
-                content=refined_resume
-            )
-            db.add(new_resume_record)
-            await db.commit()
-            
-            # Get user's first name for personalization
-            user_first_name = user.first_name or "there"
-            
-            return f"""[DOWNLOADABLE_RESUME]
-
-            ## 🎉 **Hey {user_first_name}! Your {target_role} CV is ready!**
-
-            I've refined your CV specifically for {target_role} positions{f' at {company_name}' if company_name else ''}. Here's what I created for you:
-
-            {refined_resume}
-
-            ---
-
-            **🚀 What I optimized for you:**
-            - Made it {target_role}-specific with the right keywords
-            - Ensured it'll pass ATS systems
-            - Highlighted your strongest achievements
-            - Used professional language that hiring managers love
-
-            **📥 Ready to download?** Click the download button (📥) above to get your CV in different styles - Modern, Classic, or Minimal. You can preview and make any tweaks before downloading.
-
-            **💡 Quick tip:** This CV is already personalized with your information, but feel free to adjust anything before you download it!
-
-            <!-- content_id={new_resume_record.id} -->"""
-            
-        except Exception as e:
-            log.error(f"Error in CV refinement: {e}", exc_info=True)
-            return f"""❌ **CV Refinement Error**
-
-I encountered an issue while refining your CV: {str(e)}
-
-**🔧 Alternative Options:**
-1. **Try Direct Generation**: Ask me to "generate a tailored resume for {target_role} roles"
-2. **Upload Fresh CV**: Upload your current CV and I'll process it with the modern system
-3. **Build from Scratch**: I can create a new CV using "create resume from scratch for {target_role}"
-
-Please try one of these alternatives, and I'll help you create an outstanding CV!"""
-
+    
     @tool
     async def get_cv_best_practices(
         industry: str = "",
@@ -3495,49 +2945,49 @@ Please try one of these alternatives, and I'll help you create an outstanding CV
             prompt = ChatPromptTemplate.from_template(
                 """You are an expert career coach and CV writer. Provide comprehensive, actionable CV best practices.
 
-                TARGET PROFILE:
-                - Industry: {industry}
-                - Experience Level: {experience_level}
-                - Role Type: {role_type}
+TARGET PROFILE:
+- Industry: {industry}
+- Experience Level: {experience_level}
+- Role Type: {role_type}
 
-                Provide detailed guidance covering:
+Provide detailed guidance covering:
 
-                ## 📋 **CV Structure & Format**
-                - Optimal CV length and layout
-                - Section ordering and priorities
-                - Font, spacing, and visual guidelines
-                - ATS-friendly formatting tips
+## 📋 **CV Structure & Format**
+- Optimal CV length and layout
+- Section ordering and priorities
+- Font, spacing, and visual guidelines
+- ATS-friendly formatting tips
 
-                ## 🎯 **Content Best Practices**
-                - How to write compelling professional summaries
-                - Quantifying achievements with metrics
-                - Using strong action verbs effectively
-                - Tailoring content for specific roles
+## 🎯 **Content Best Practices**
+- How to write compelling professional summaries
+- Quantifying achievements with metrics
+- Using strong action verbs effectively
+- Tailoring content for specific roles
 
-                ## 🔍 **Industry-Specific Tips**
-                - Key skills and keywords for this industry
-                - Common requirements and expectations
-                - Portfolio/work samples considerations
-                - Certification and education priorities
+## 🔍 **Industry-Specific Tips**
+- Key skills and keywords for this industry
+- Common requirements and expectations
+- Portfolio/work samples considerations
+- Certification and education priorities
 
-                ## ⚠️ **Common Mistakes to Avoid**
-                - Red flags that hurt your chances
-                - Outdated practices to eliminate
-                - Length and content balance issues
-                - Contact information best practices
+## ⚠️ **Common Mistakes to Avoid**
+- Red flags that hurt your chances
+- Outdated practices to eliminate
+- Length and content balance issues
+- Contact information best practices
 
-                ## 🚀 **Advanced Strategies**
-                - ATS optimization techniques
-                - Personal branding integration
-                - LinkedIn profile alignment
-                - Cover letter coordination
+## 🚀 **Advanced Strategies**
+- ATS optimization techniques
+- Personal branding integration
+- LinkedIn profile alignment
+- Cover letter coordination
 
-                ## 📊 **Success Metrics**
-                - How to track CV performance
-                - When and how to update your CV
-                - Multiple version strategies
+## 📊 **Success Metrics**
+- How to track CV performance
+- When and how to update your CV
+- Multiple version strategies
 
-                Provide specific, actionable advice that someone can implement immediately."""
+Provide specific, actionable advice that someone can implement immediately."""
             )
             
             llm = ChatGoogleGenerativeAI(
@@ -3555,22 +3005,22 @@ Please try one of these alternatives, and I'll help you create an outstanding CV
             
             return f"""## 📚 **CV Best Practices Guide**
 
-                🎯 **Tailored for:** {experience_level} {role_type} professionals{f' in {industry}' if industry else ''}
+🎯 **Tailored for:** {experience_level} {role_type} professionals{f' in {industry}' if industry else ''}
 
-                {guidance}
+{guidance}
 
-                ---
+---
 
-                **💡 Quick Action Items:**
-                1. **Review Your Current CV**: Use these guidelines to audit your existing CV
-                2. **Implement Top 3 Changes**: Start with the most impactful improvements
-                3. **Test ATS Compatibility**: Use online ATS checkers to validate formatting
-                4. **Get Feedback**: Have colleagues or mentors review using these criteria
+**💡 Quick Action Items:**
+1. **Review Your Current CV**: Use these guidelines to audit your existing CV
+2. **Implement Top 3 Changes**: Start with the most impactful improvements
+3. **Test ATS Compatibility**: Use online ATS checkers to validate formatting
+4. **Get Feedback**: Have colleagues or mentors review using these criteria
 
-                **🔗 Related Commands:**
-                - `enhance my resume section [section_name]` - Improve specific sections
-                - `create resume from scratch` - Start fresh with best practices
-                - `analyze my skills gap` - Identify areas for improvement"""
+**🔗 Related Commands:**
+- `enhance my resume section [section_name]` - Improve specific sections
+- `create resume from scratch` - Start fresh with best practices
+- `analyze my skills gap` - Identify areas for improvement"""
             
         except Exception as e:
             log.error(f"Error getting CV best practices: {e}", exc_info=True)
@@ -3612,64 +3062,64 @@ Please try one of these alternatives, and I'll help you create an outstanding CV
             prompt = ChatPromptTemplate.from_template(
                 """You are a career development expert. Analyze the skills gap and provide actionable career development advice.
 
-                TARGET ROLE: {target_role}
-                CURRENT SKILLS: {current_skills}
-                JOB DESCRIPTION: {job_description}
+TARGET ROLE: {target_role}
+CURRENT SKILLS: {current_skills}
+JOB DESCRIPTION: {job_description}
 
-                Provide a comprehensive skills gap analysis:
+Provide a comprehensive skills gap analysis:
 
-                ## 🎯 **Role Requirements Analysis**
-                - Core technical skills needed
-                - Soft skills and competencies required
-                - Experience level expectations
-                - Industry-specific knowledge needed
+## 🎯 **Role Requirements Analysis**
+- Core technical skills needed
+- Soft skills and competencies required
+- Experience level expectations
+- Industry-specific knowledge needed
 
-                ## ✅ **Your Strengths**
-                - Skills you already have that match
-                - Transferable skills from your background
-                - Competitive advantages you possess
-                - Areas where you exceed requirements
+## ✅ **Your Strengths**
+- Skills you already have that match
+- Transferable skills from your background
+- Competitive advantages you possess
+- Areas where you exceed requirements
 
-                ## 📈 **Skills to Develop**
-                ### High Priority (Essential)
-                - Critical missing skills for the role
-                - Skills that appear in most job postings
-                - Technical competencies to prioritize
+## 📈 **Skills to Develop**
+### High Priority (Essential)
+- Critical missing skills for the role
+- Skills that appear in most job postings
+- Technical competencies to prioritize
 
-                ### Medium Priority (Valuable)
-                - Nice-to-have skills that differentiate candidates
-                - Emerging technologies in the field
-                - Cross-functional competencies
+### Medium Priority (Valuable)
+- Nice-to-have skills that differentiate candidates
+- Emerging technologies in the field
+- Cross-functional competencies
 
-                ### Low Priority (Future Growth)
-                - Advanced skills for career progression
-                - Specialized technologies or certifications
-                - Leadership and management capabilities
+### Low Priority (Future Growth)
+- Advanced skills for career progression
+- Specialized technologies or certifications
+- Leadership and management capabilities
 
-                ## 📚 **Learning Roadmap**
-                ### Immediate (Next 1-3 months)
-                - Specific courses, certifications, or bootcamps
-                - Free resources and tutorials
-                - Practical projects to build skills
+## 📚 **Learning Roadmap**
+### Immediate (Next 1-3 months)
+- Specific courses, certifications, or bootcamps
+- Free resources and tutorials
+- Practical projects to build skills
 
-                ### Medium-term (3-6 months)
-                - More comprehensive training programs
-                - Professional certifications
-                - Portfolio development projects
+### Medium-term (3-6 months)
+- More comprehensive training programs
+- Professional certifications
+- Portfolio development projects
 
-                ### Long-term (6+ months)
-                - Advanced certifications or degrees
-                - Conference attendance and networking
-                - Thought leadership opportunities
+### Long-term (6+ months)
+- Advanced certifications or degrees
+- Conference attendance and networking
+- Thought leadership opportunities
 
-                ## 💼 **CV Enhancement Strategy**
-                - How to present existing skills more effectively
-                - Projects to showcase during skill development
-                - Keywords to incorporate from target role
-                - Experience gaps to address
+## 💼 **CV Enhancement Strategy**
+- How to present existing skills more effectively
+- Projects to showcase during skill development
+- Keywords to incorporate from target role
+- Experience gaps to address
 
-                ## 🎯 **Action Plan**
-                Provide specific, time-bound recommendations for skill development."""
+## 🎯 **Action Plan**
+Provide specific, time-bound recommendations for skill development."""
             )
             
             llm = ChatGoogleGenerativeAI(
@@ -3687,21 +3137,21 @@ Please try one of these alternatives, and I'll help you create an outstanding CV
             
             return f"""## 🔍 **Skills Gap Analysis for {target_role}**
 
-            {analysis}
+{analysis}
 
-            ---
+---
 
-            **🚀 Next Steps:**
-            1. **Prioritize Learning**: Focus on high-priority skills first
-            2. **Update Your CV**: Add new skills as you develop them
-            3. **Build Projects**: Create portfolio pieces demonstrating new skills
-            4. **Network Actively**: Connect with professionals in your target role
-            5. **Track Progress**: Regularly reassess your skill development
+**🚀 Next Steps:**
+1. **Prioritize Learning**: Focus on high-priority skills first
+2. **Update Your CV**: Add new skills as you develop them
+3. **Build Projects**: Create portfolio pieces demonstrating new skills
+4. **Network Actively**: Connect with professionals in your target role
+5. **Track Progress**: Regularly reassess your skill development
 
-            **🔗 Helpful Commands:**
-            - `search jobs for [role]` - Find specific requirements in current job postings
-            - `enhance my resume section skills` - Optimize your skills presentation
-            - `create learning plan for [skill]` - Get detailed learning resources"""
+**🔗 Helpful Commands:**
+- `search jobs for [role]` - Find specific requirements in current job postings
+- `enhance my resume section skills` - Optimize your skills presentation
+- `create learning plan for [skill]` - Get detailed learning resources"""
             
         except Exception as e:
             log.error(f"Error analyzing skills gap: {e}", exc_info=True)
@@ -3728,69 +3178,69 @@ Please try one of these alternatives, and I'll help you create an outstanding CV
             prompt = ChatPromptTemplate.from_template(
                 """You are an ATS optimization expert. Provide comprehensive, technical guidance for passing modern ATS systems.
 
-                TARGET CONTEXT:
-                - File Format: {file_format}
-                - Industry: {industry}
+TARGET CONTEXT:
+- File Format: {file_format}
+- Industry: {industry}
 
-                Provide detailed ATS optimization guidance:
+Provide detailed ATS optimization guidance:
 
-                ## 🤖 **Understanding ATS Systems**
-                - How modern ATS systems work
-                - What ATS algorithms look for
-                - Common ATS software types and their quirks
-                - Industry-specific ATS considerations
+## 🤖 **Understanding ATS Systems**
+- How modern ATS systems work
+- What ATS algorithms look for
+- Common ATS software types and their quirks
+- Industry-specific ATS considerations
 
-                ## 📄 **File Format Optimization**
-                - Best practices for {file_format} format
-                - Formatting do's and don'ts
-                - Font and layout recommendations
-                - File naming conventions
+## 📄 **File Format Optimization**
+- Best practices for {file_format} format
+- Formatting do's and don'ts
+- Font and layout recommendations
+- File naming conventions
 
-                ## 🔍 **Keyword Optimization**
-                ### Keyword Research
-                - How to identify relevant keywords
-                - Where to find industry-specific terms
-                - Balancing keyword density naturally
-                - Using variations and synonyms
+## 🔍 **Keyword Optimization**
+### Keyword Research
+- How to identify relevant keywords
+- Where to find industry-specific terms
+- Balancing keyword density naturally
+- Using variations and synonyms
 
-                ### Keyword Placement
-                - Strategic locations for keywords
-                - Section headers and their importance
-                - Natural integration techniques
-                - Avoiding keyword stuffing
+### Keyword Placement
+- Strategic locations for keywords
+- Section headers and their importance
+- Natural integration techniques
+- Avoiding keyword stuffing
 
-                ## 📋 **Structure & Formatting**
-                ### Section Organization
-                - ATS-friendly section headers
-                - Optimal section ordering
-                - Contact information formatting
-                - Date formats that ATS systems prefer
+## 📋 **Structure & Formatting**
+### Section Organization
+- ATS-friendly section headers
+- Optimal section ordering
+- Contact information formatting
+- Date formats that ATS systems prefer
 
-                ### Content Formatting
-                - Bullet points vs. paragraphs
-                - Special characters to avoid
-                - Table and column usage
-                - Header and footer limitations
+### Content Formatting
+- Bullet points vs. paragraphs
+- Special characters to avoid
+- Table and column usage
+- Header and footer limitations
 
-                ## ✅ **Technical Best Practices**
-                - Font choices that scan well
-                - Margins and spacing guidelines
-                - Graphics and images considerations
-                - Links and hypertext handling
+## ✅ **Technical Best Practices**
+- Font choices that scan well
+- Margins and spacing guidelines
+- Graphics and images considerations
+- Links and hypertext handling
 
-                ## 🧪 **Testing Your CV**
-                - Free ATS testing tools
-                - How to interpret ATS scan results
-                - Common parsing errors to fix
-                - Quality assurance checklist
+## 🧪 **Testing Your CV**
+- Free ATS testing tools
+- How to interpret ATS scan results
+- Common parsing errors to fix
+- Quality assurance checklist
 
-                ## 📊 **Tracking & Iteration**
-                - Metrics to monitor application success
-                - When and how to update your CV
-                - A/B testing different versions
-                - Industry benchmarks for response rates
+## 📊 **Tracking & Iteration**
+- Metrics to monitor application success
+- When and how to update your CV
+- A/B testing different versions
+- Industry benchmarks for response rates
 
-                Provide specific, technical advice that ensures maximum ATS compatibility."""
+Provide specific, technical advice that ensures maximum ATS compatibility."""
             )
             
             llm = ChatGoogleGenerativeAI(
@@ -3808,29 +3258,29 @@ Please try one of these alternatives, and I'll help you create an outstanding CV
             
             return f"""## 🤖 **ATS Optimization Guide**
 
-            📁 **Format:** {file_format} | 🏢 **Industry:** {industry or 'General'}
+📁 **Format:** {file_format} | 🏢 **Industry:** {industry or 'General'}
 
-            {tips}
+{tips}
 
-            ---
+---
 
-            **🔧 Immediate Actions:**
-            1. **Test Your Current CV**: Use Jobscan or similar ATS checker tools
-            2. **Review Keywords**: Compare your CV against 2-3 target job postings
-            3. **Fix Formatting Issues**: Address any parsing problems identified
-            4. **Create ATS Version**: Keep a simplified version specifically for ATS systems
+**🔧 Immediate Actions:**
+1. **Test Your Current CV**: Use Jobscan or similar ATS checker tools
+2. **Review Keywords**: Compare your CV against 2-3 target job postings
+3. **Fix Formatting Issues**: Address any parsing problems identified
+4. **Create ATS Version**: Keep a simplified version specifically for ATS systems
 
-            **⚠️ Quick Checklist:**
-            - ✅ Uses standard section headers (Experience, Education, Skills)
-            - ✅ No graphics, tables, or complex formatting
-            - ✅ Keywords appear naturally throughout content
-            - ✅ Consistent date formatting (MM/YYYY)
-            - ✅ Contact info in simple text format
-            - ✅ File saved with professional naming convention
+**⚠️ Quick Checklist:**
+- ✅ Uses standard section headers (Experience, Education, Skills)
+- ✅ No graphics, tables, or complex formatting
+- ✅ Keywords appear naturally throughout content
+- ✅ Consistent date formatting (MM/YYYY)
+- ✅ Contact info in simple text format
+- ✅ File saved with professional naming convention
 
-            **🔗 Related Tools:**
-            - `generate tailored resume` - Create ATS-optimized content
-            - `enhance my resume section` - Improve keyword density"""
+**🔗 Related Tools:**
+- `generate tailored resume` - Create ATS-optimized content
+- `enhance my resume section` - Improve keyword density"""
             
         except Exception as e:
             log.error(f"Error getting ATS optimization tips: {e}", exc_info=True)
@@ -3919,99 +3369,99 @@ Please try one of these alternatives, and I'll help you create an outstanding CV
             prompt = ChatPromptTemplate.from_template(
                 """You are an expert interview coach. Create a comprehensive, personalized interview preparation guide.
 
-                USER CONTEXT: {user_context}
-                TARGET ROLE: {job_title}
-                COMPANY: {company_name}
-                INTERVIEW TYPE: {interview_type}
-                JOB DESCRIPTION: {job_description}
+USER CONTEXT: {user_context}
+TARGET ROLE: {job_title}
+COMPANY: {company_name}
+INTERVIEW TYPE: {interview_type}
+JOB DESCRIPTION: {job_description}
 
-                Create a detailed interview preparation guide:
+Create a detailed interview preparation guide:
 
-                ## 🎯 **Role-Specific Preparation**
-                ### Key Competencies to Highlight
-                - Core skills most relevant to this role
-                - How to connect your background to role requirements
-                - Unique value propositions to emphasize
-                - Potential concerns to address proactively
+## 🎯 **Role-Specific Preparation**
+### Key Competencies to Highlight
+- Core skills most relevant to this role
+- How to connect your background to role requirements
+- Unique value propositions to emphasize
+- Potential concerns to address proactively
 
-                ### Industry Context
-                - Current trends and challenges in the industry
-                - Company-specific research points
-                - Market positioning and competitive landscape
-                - Recent news or developments to mention
+### Industry Context
+- Current trends and challenges in the industry
+- Company-specific research points
+- Market positioning and competitive landscape
+- Recent news or developments to mention
 
-                ## 💬 **Expected Interview Questions**
-                ### Behavioral Questions (STAR Method)
-                - 5-7 likely behavioral questions for this role
-                - Frameworks for structuring responses
-                - How to use your CV experiences effectively
-                - Stories to prepare from your background
+## 💬 **Expected Interview Questions**
+### Behavioral Questions (STAR Method)
+- 5-7 likely behavioral questions for this role
+- Frameworks for structuring responses
+- How to use your CV experiences effectively
+- Stories to prepare from your background
 
-                ### Technical/Role-Specific Questions
-                - Technical skills assessments to expect
-                - Problem-solving scenarios relevant to the role
-                - Industry knowledge questions
-                - Portfolio or work sample discussions
+### Technical/Role-Specific Questions
+- Technical skills assessments to expect
+- Problem-solving scenarios relevant to the role
+- Industry knowledge questions
+- Portfolio or work sample discussions
 
-                ### Situational Questions
-                - Hypothetical scenarios for this position
-                - Leadership and teamwork examples
-                - Conflict resolution situations
-                - Decision-making frameworks
+### Situational Questions
+- Hypothetical scenarios for this position
+- Leadership and teamwork examples
+- Conflict resolution situations
+- Decision-making frameworks
 
-                ## 🤝 **Company Research Strategy**
-                ### Essential Research Areas
-                - Company mission, values, and culture
-                - Recent achievements and challenges
-                - Leadership team and organizational structure
-                - Products, services, and market position
+## 🤝 **Company Research Strategy**
+### Essential Research Areas
+- Company mission, values, and culture
+- Recent achievements and challenges
+- Leadership team and organizational structure
+- Products, services, and market position
 
-                ### Research Sources
-                - Official company resources
-                - Industry publications and news
-                - Employee insights (LinkedIn, Glassdoor)
-                - Social media and recent announcements
+### Research Sources
+- Official company resources
+- Industry publications and news
+- Employee insights (LinkedIn, Glassdoor)
+- Social media and recent announcements
 
-                ## ❓ **Questions to Ask Them**
-                ### Role and Responsibilities
-                - Thoughtful questions about the position
-                - Team dynamics and collaboration
-                - Success metrics and expectations
-                - Growth opportunities and career path
+## ❓ **Questions to Ask Them**
+### Role and Responsibilities
+- Thoughtful questions about the position
+- Team dynamics and collaboration
+- Success metrics and expectations
+- Growth opportunities and career path
 
-                ### Company and Culture
-                - Strategic questions about company direction
-                - Culture and work environment inquiries
-                - Professional development opportunities
-                - Industry challenges and opportunities
+### Company and Culture
+- Strategic questions about company direction
+- Culture and work environment inquiries
+- Professional development opportunities
+- Industry challenges and opportunities
 
-                ## 🎭 **Interview Performance Tips**
-                ### Communication Strategies
-                - How to present your CV experiences compellingly
-                - Confidence-building techniques
-                - Body language and presentation tips
-                - Virtual interview best practices (if applicable)
+## 🎭 **Interview Performance Tips**
+### Communication Strategies
+- How to present your CV experiences compellingly
+- Confidence-building techniques
+- Body language and presentation tips
+- Virtual interview best practices (if applicable)
 
-                ### Common Pitfalls to Avoid
-                - Red flags that hurt candidates
-                - How to handle difficult questions
-                - Salary and compensation discussions
-                - Follow-up and next steps etiquette
+### Common Pitfalls to Avoid
+- Red flags that hurt candidates
+- How to handle difficult questions
+- Salary and compensation discussions
+- Follow-up and next steps etiquette
 
-                ## 📋 **Preparation Checklist**
-                ### Before the Interview
-                - Documents and materials to prepare
-                - Questions and answers to practice
-                - Research tasks to complete
-                - Logistics and setup considerations
+## 📋 **Preparation Checklist**
+### Before the Interview
+- Documents and materials to prepare
+- Questions and answers to practice
+- Research tasks to complete
+- Logistics and setup considerations
 
-                ### Day of Interview
-                - Final preparation steps
-                - What to bring/have ready
-                - Timing and arrival guidelines
-                - Backup plans for technical issues
+### Day of Interview
+- Final preparation steps
+- What to bring/have ready
+- Timing and arrival guidelines
+- Backup plans for technical issues
 
-                Provide specific, actionable advice tailored to this role and the user's background."""
+Provide specific, actionable advice tailored to this role and the user's background."""
             )
             
             llm = ChatGoogleGenerativeAI(
@@ -4033,48 +3483,48 @@ Please try one of these alternatives, and I'll help you create an outstanding CV
             qa_prompt = ChatPromptTemplate.from_template(
                 """Generate 10 realistic interview questions and answers for this role, including CV-specific questions.
 
-                USER CONTEXT: {user_context}
-                TARGET ROLE: {job_title}
-                COMPANY: {company_name}
-                INTERVIEW TYPE: {interview_type}
-                JOB DESCRIPTION: {job_description}
+USER CONTEXT: {user_context}
+TARGET ROLE: {job_title}
+COMPANY: {company_name}
+INTERVIEW TYPE: {interview_type}
+JOB DESCRIPTION: {job_description}
 
-                **CRITICAL: Analyze the user's CV/background and the job description to create questions that reference their SPECIFIC experience:**
+**CRITICAL: Analyze the user's CV/background and the job description to create questions that reference their SPECIFIC experience:**
 
-                Generate exactly 10 interview questions with sample answers. Return as JSON array:
-                [
-                {{
-                    "question": "Tell me about yourself.",
-                    "answer": "Brief sample answer that the candidate could reference or build upon"
-                }},
-                ...
-                ]
+Generate exactly 10 interview questions with sample answers. Return as JSON array:
+[
+  {{
+    "question": "Tell me about yourself.",
+    "answer": "Brief sample answer that the candidate could reference or build upon"
+  }},
+  ...
+]
 
-                Include this mix:
-                - 2 CV-specific questions (reference their actual experience, career transitions, specific technologies/companies)
-                - 2 behavioral questions (STAR method opportunities)
-                - 3 technical/role-specific questions
-                - 2 situational questions
-                - 1 company/culture fit question
+Include this mix:
+- 2 CV-specific questions (reference their actual experience, career transitions, specific technologies/companies)
+- 2 behavioral questions (STAR method opportunities)
+- 3 technical/role-specific questions
+- 2 situational questions
+- 1 company/culture fit question
 
-                **CV-SPECIFIC QUESTION EXAMPLES (adapt to their actual background):**
-                - "I see you were doing freelance work while working full-time at [Company]. How did you manage both responsibilities?"
-                - "You used [Technology] at [Company]. Can you walk me through how you implemented it?"
-                - "I notice you transitioned from [Previous Role] to [Current Role]. What motivated this change?"
-                - "You worked at [Company] for [Duration]. What was your biggest achievement there?"
-                - "I see you have experience with [Specific Skill/Technology]. How did you learn it and apply it?"
-                - "You've worked in both [Industry A] and [Industry B]. How do those experiences complement each other?"
+**CV-SPECIFIC QUESTION EXAMPLES (adapt to their actual background):**
+- "I see you were doing freelance work while working full-time at [Company]. How did you manage both responsibilities?"
+- "You used [Technology] at [Company]. Can you walk me through how you implemented it?"
+- "I notice you transitioned from [Previous Role] to [Current Role]. What motivated this change?"
+- "You worked at [Company] for [Duration]. What was your biggest achievement there?"
+- "I see you have experience with [Specific Skill/Technology]. How did you learn it and apply it?"
+- "You've worked in both [Industry A] and [Industry B]. How do those experiences complement each other?"
 
-                **IMPORTANT RULES:**
-                1. Reference ACTUAL companies, technologies, roles from their background
-                2. Ask about career transitions, overlapping roles, technology choices
-                3. Question specific timeframes, gaps, or interesting patterns in their CV
-                4. Make questions sound like a real interviewer who studied their resume
-                5. Include follow-up style questions that dig deeper into their experience
+**IMPORTANT RULES:**
+1. Reference ACTUAL companies, technologies, roles from their background
+2. Ask about career transitions, overlapping roles, technology choices
+3. Question specific timeframes, gaps, or interesting patterns in their CV
+4. Make questions sound like a real interviewer who studied their resume
+5. Include follow-up style questions that dig deeper into their experience
 
-                Make all questions realistic for this specific role and company. Keep sample answers concise but helpful.
+Make all questions realistic for this specific role and company. Keep sample answers concise but helpful.
 
-                Return ONLY valid JSON array - no additional text or formatting."""
+Return ONLY valid JSON array - no additional text or formatting."""
             )
             
             qa_chain = qa_prompt | llm | StrOutputParser()
@@ -4106,41 +3556,41 @@ Please try one of these alternatives, and I'll help you create an outstanding CV
             
             return f"""## 🎯 **Interview Preparation Guide**
 
-                **Role:** {final_job_title} | **Company:** {final_company_name or 'Target Company'} | **Type:** {interview_type.title()}
-                {f"**🔗 Source:** {job_url}" if job_url else ""}
+**Role:** {final_job_title} | **Company:** {final_company_name or 'Target Company'} | **Type:** {interview_type.title()}
+{f"**🔗 Source:** {job_url}" if job_url else ""}
 
-                {guide}
+{guide}
 
-                ---
+---
 
-                **📅 Preparation Timeline:**
-                - **1 Week Before**: Complete company research and prepare STAR stories
-                - **3 Days Before**: Practice answers and finalize questions to ask
-                - **1 Day Before**: Review notes, prepare materials, test technology
-                - **Day Of**: Final review, arrive early, stay confident
+**📅 Preparation Timeline:**
+- **1 Week Before**: Complete company research and prepare STAR stories
+- **3 Days Before**: Practice answers and finalize questions to ask
+- **1 Day Before**: Review notes, prepare materials, test technology
+- **Day Of**: Final review, arrive early, stay confident
 
-                **🎯 Success Metrics:**
-                - ✅ Can articulate your value proposition clearly
-                - ✅ Have 3-5 compelling STAR stories ready
-                - ✅ Know key company facts and recent developments  
-                - ✅ Have thoughtful questions prepared
-                - ✅ Feel confident about your qualifications
+**🎯 Success Metrics:**
+- ✅ Can articulate your value proposition clearly
+- ✅ Have 3-5 compelling STAR stories ready
+- ✅ Know key company facts and recent developments  
+- ✅ Have thoughtful questions prepared
+- ✅ Feel confident about your qualifications
 
-                **🔗 Next Steps:**
-                - `enhance my resume section` - Align CV with interview talking points
-                - `generate cover letter` - Practice articulating your interest
-                - `get salary negotiation tips` - Prepare for compensation discussions
+**🔗 Next Steps:**
+- `enhance my resume section` - Align CV with interview talking points
+- `generate cover letter` - Practice articulating your interest
+- `get salary negotiation tips` - Prepare for compensation discussions
 
-                [INTERVIEW_FLASHCARDS_AVAILABLE]
-                📝 **Practice with AI-powered flashcards** - Click the brain icon to practice interview questions with voice/text responses and get detailed feedback on tone, correctness, and confidence.
+[INTERVIEW_FLASHCARDS_AVAILABLE]
+📝 **Practice with AI-powered flashcards** - Click the brain icon to practice interview questions with voice/text responses and get detailed feedback on tone, correctness, and confidence.
 
-                <!--FLASHCARD_DATA:{json.dumps(qa_pairs)}-->
+<!--FLASHCARD_DATA:{json.dumps(qa_pairs)}-->
 
-                ---
-                **Job Context:** {final_job_title} at {final_company_name or 'Target Company'}
-                **Interview Type:** {interview_type}
-                **Preparation Content:** {guide[:500]}..."""
-                            
+---
+**Job Context:** {final_job_title} at {final_company_name or 'Target Company'}
+**Interview Type:** {interview_type}
+**Preparation Content:** {guide[:500]}..."""
+            
         except Exception as e:
             log.error(f"Error creating interview preparation guide: {e}", exc_info=True)
             return f"❌ Sorry, I encountered an error while creating your interview guide: {str(e)}. Please try again."
@@ -4170,100 +3620,100 @@ Please try one of these alternatives, and I'll help you create an outstanding CV
             prompt = ChatPromptTemplate.from_template(
                 """You are a compensation and career negotiation expert. Provide comprehensive salary negotiation guidance.
 
-                    NEGOTIATION CONTEXT:
-                    - Job Title: {job_title}
-                    - Experience Level: {experience_level}
-                    - Location: {location}
-                    - Industry: {industry}
+NEGOTIATION CONTEXT:
+- Job Title: {job_title}
+- Experience Level: {experience_level}
+- Location: {location}
+- Industry: {industry}
 
-                    Provide detailed negotiation strategy and advice:
+Provide detailed negotiation strategy and advice:
 
-                    ## 💰 **Market Research & Benchmarking**
-                    ### Salary Research Sources
-                    - Best websites and tools for salary data
-                    - How to interpret salary ranges accurately
-                    - Geographic and industry adjustments
-                    - Experience level modifiers
+## 💰 **Market Research & Benchmarking**
+### Salary Research Sources
+- Best websites and tools for salary data
+- How to interpret salary ranges accurately
+- Geographic and industry adjustments
+- Experience level modifiers
 
-                    ### Compensation Package Components
-                    - Base salary considerations
-                    - Bonus and incentive structures
-                    - Benefits and perquisites
-                    - Equity and stock options
-                    - Remote work and flexibility value
+### Compensation Package Components
+- Base salary considerations
+- Bonus and incentive structures
+- Benefits and perquisites
+- Equity and stock options
+- Remote work and flexibility value
 
-                    ## 🎯 **Negotiation Strategy**
-                    ### Preparation Phase
-                    - How to determine your target range
-                    - Building your value proposition
-                    - Documentation of achievements and impact
-                    - Market rate justification techniques
+## 🎯 **Negotiation Strategy**
+### Preparation Phase
+- How to determine your target range
+- Building your value proposition
+- Documentation of achievements and impact
+- Market rate justification techniques
 
-                    ### Timing Considerations
-                    - When to bring up compensation
-                    - How to respond to salary questions
-                    - Negotiating after offer receipt
-                    - Multiple offer leverage strategies
+### Timing Considerations
+- When to bring up compensation
+- How to respond to salary questions
+- Negotiating after offer receipt
+- Multiple offer leverage strategies
 
-                    ### Communication Tactics
-                    - Scripts and language for negotiations
-                    - How to present counter-offers professionally
-                    - Negotiating non-salary benefits
-                    - Handling objections and pushback
+### Communication Tactics
+- Scripts and language for negotiations
+- How to present counter-offers professionally
+- Negotiating non-salary benefits
+- Handling objections and pushback
 
-                    ## 📋 **Negotiation Framework**
-                    ### Initial Offer Response
-                    - How to buy time for consideration
-                    - Expressing enthusiasm while negotiating
-                    - Questions to ask about the offer
-                    - Professional response templates
+## 📋 **Negotiation Framework**
+### Initial Offer Response
+- How to buy time for consideration
+- Expressing enthusiasm while negotiating
+- Questions to ask about the offer
+- Professional response templates
 
-                    ### Counter-Offer Strategy
-                    - How to structure compelling counter-offers
-                    - Supporting your requests with data
-                    - Prioritizing different compensation elements
-                    - Alternative proposals if budget is fixed
+### Counter-Offer Strategy
+- How to structure compelling counter-offers
+- Supporting your requests with data
+- Prioritizing different compensation elements
+- Alternative proposals if budget is fixed
 
-                    ### Closing the Deal
-                    - Finalizing agreed terms professionally
-                    - Getting offers in writing
-                    - Graceful acceptance or decline
-                    - Maintaining relationships regardless of outcome
+### Closing the Deal
+- Finalizing agreed terms professionally
+- Getting offers in writing
+- Graceful acceptance or decline
+- Maintaining relationships regardless of outcome
 
-                    ## 🎭 **Common Scenarios & Responses**
-                    ### Difficult Situations
-                    - "Our budget is fixed" responses
-                    - Geographic pay differences
-                    - Internal equity concerns
-                    - First-time negotiator anxiety
+## 🎭 **Common Scenarios & Responses**
+### Difficult Situations
+- "Our budget is fixed" responses
+- Geographic pay differences
+- Internal equity concerns
+- First-time negotiator anxiety
 
-                    ### Advanced Strategies
-                    - Multiple offer negotiations
-                    - Retention counter-offers
-                    - Promotion and raise requests
-                    - Contract vs. full-time considerations
+### Advanced Strategies
+- Multiple offer negotiations
+- Retention counter-offers
+- Promotion and raise requests
+- Contract vs. full-time considerations
 
-                    ## ⚠️ **Pitfalls to Avoid**
-                    ### Negotiation Mistakes
-                    - Red flags that hurt your chances
-                    - Overplaying your hand
-                    - Burning bridges unnecessarily
-                    - Focusing only on salary
+## ⚠️ **Pitfalls to Avoid**
+### Negotiation Mistakes
+- Red flags that hurt your chances
+- Overplaying your hand
+- Burning bridges unnecessarily
+- Focusing only on salary
 
-                    ### Professional Etiquette
-                    - Maintaining positive relationships
-                    - Respecting company constraints
-                    - Being prepared to walk away
-                    - Following up appropriately
+### Professional Etiquette
+- Maintaining positive relationships
+- Respecting company constraints
+- Being prepared to walk away
+- Following up appropriately
 
-                    ## 📊 **Market Insights**
-                    - Typical salary ranges for {experience_level} {job_title} roles
-                    - Industry-specific compensation trends
-                    - Geographic variations and cost of living
-                    - Emerging benefits and perks trends
-                    - Economic factors affecting compensation
+## 📊 **Market Insights**
+- Typical salary ranges for {experience_level} {job_title} roles
+- Industry-specific compensation trends
+- Geographic variations and cost of living
+- Emerging benefits and perks trends
+- Economic factors affecting compensation
 
-                    Provide specific, actionable negotiation advice with realistic expectations."""
+Provide specific, actionable negotiation advice with realistic expectations."""
             )
             
             llm = ChatGoogleGenerativeAI(
@@ -4283,38 +3733,38 @@ Please try one of these alternatives, and I'll help you create an outstanding CV
             
             return f"""## 💰 **Salary Negotiation Strategy Guide**
 
-            **Role:** {job_title} | **Level:** {experience_level} | **Market:** {location or 'General'}
+**Role:** {job_title} | **Level:** {experience_level} | **Market:** {location or 'General'}
 
-            {advice}
+{advice}
 
-            ---
+---
 
-            **🚀 Action Plan:**
-            1. **Research Phase** (Before applying): Gather market data and set target range
-            2. **Application Phase**: Avoid early salary discussions, focus on fit
-            3. **Interview Phase**: Demonstrate value, delay compensation talks
-            4. **Offer Phase**: Evaluate total package, prepare counter-offer
-            5. **Negotiation Phase**: Present professional counter with justification
-            6. **Decision Phase**: Make informed choice aligned with career goals
+**🚀 Action Plan:**
+1. **Research Phase** (Before applying): Gather market data and set target range
+2. **Application Phase**: Avoid early salary discussions, focus on fit
+3. **Interview Phase**: Demonstrate value, delay compensation talks
+4. **Offer Phase**: Evaluate total package, prepare counter-offer
+5. **Negotiation Phase**: Present professional counter with justification
+6. **Decision Phase**: Make informed choice aligned with career goals
 
-            **📊 Negotiation Checklist:**
-            - ✅ Researched market rates from multiple sources
-            - ✅ Calculated total compensation package value
-            - ✅ Prepared specific examples of your value/impact
-            - ✅ Determined acceptable range and walk-away point
-            - ✅ Practiced negotiation conversations
-            - ✅ Ready to discuss non-salary benefits
+**📊 Negotiation Checklist:**
+- ✅ Researched market rates from multiple sources
+- ✅ Calculated total compensation package value
+- ✅ Prepared specific examples of your value/impact
+- ✅ Determined acceptable range and walk-away point
+- ✅ Practiced negotiation conversations
+- ✅ Ready to discuss non-salary benefits
 
-            **⚡ Key Reminders:**
-            - **Be Professional**: Maintain positive tone throughout
-            - **Focus on Value**: Emphasize what you bring to the role
-            - **Consider Total Package**: Look beyond just base salary
-            - **Know Your Worth**: But be realistic about market conditions
-            - **Have Alternatives**: Negotiate from position of choice, not desperation
+**⚡ Key Reminders:**
+- **Be Professional**: Maintain positive tone throughout
+- **Focus on Value**: Emphasize what you bring to the role
+- **Consider Total Package**: Look beyond just base salary
+- **Know Your Worth**: But be realistic about market conditions
+- **Have Alternatives**: Negotiate from position of choice, not desperation
 
-            **🔗 Related Tools:**
-            - `search jobs for [role]` - Research current market opportunities
-            - `get interview preparation guide` - Prepare to demonstrate value"""
+**🔗 Related Tools:**
+- `search jobs for [role]` - Research current market opportunities
+- `get interview preparation guide` - Prepare to demonstrate value"""
             
         except Exception as e:
             log.error(f"Error getting salary negotiation advice: {e}", exc_info=True)
@@ -4359,135 +3809,135 @@ Please try one of these alternatives, and I'll help you create an outstanding CV
             prompt = ChatPromptTemplate.from_template(
                 """You are a senior career strategist and executive coach. Create a comprehensive, actionable career development plan.
 
-                USER CONTEXT: {user_context}
-                CURRENT ROLE: {current_role}
-                TARGET ROLE: {target_role}
-                TIMELINE: {timeline}
+USER CONTEXT: {user_context}
+CURRENT ROLE: {current_role}
+TARGET ROLE: {target_role}
+TIMELINE: {timeline}
 
-                Create a detailed career development roadmap:
+Create a detailed career development roadmap:
 
-                ## 🎯 **Career Vision & Goals**
-                ### Target Role Analysis
-                - Detailed breakdown of target role requirements
-                - Skills, experience, and qualifications needed
-                - Typical career progression path to this role
-                - Market demand and growth outlook
+## 🎯 **Career Vision & Goals**
+### Target Role Analysis
+- Detailed breakdown of target role requirements
+- Skills, experience, and qualifications needed
+- Typical career progression path to this role
+- Market demand and growth outlook
 
-                ### Gap Analysis
-                - Current state vs. target state assessment
-                - Critical skills and experience gaps
-                - Knowledge areas requiring development
-                - Network and relationship gaps
+### Gap Analysis
+- Current state vs. target state assessment
+- Critical skills and experience gaps
+- Knowledge areas requiring development
+- Network and relationship gaps
 
-                ## 🗓️ **Timeline & Milestones**
-                ### Phase 1: Foundation Building (Months 1-{timeline_first_third})
-                - Immediate skill development priorities
-                - Quick wins and early achievements
-                - Network building initiatives
-                - Performance optimization in current role
+## 🗓️ **Timeline & Milestones**
+### Phase 1: Foundation Building (Months 1-{timeline_first_third})
+- Immediate skill development priorities
+- Quick wins and early achievements
+- Network building initiatives
+- Performance optimization in current role
 
-                ### Phase 2: Growth & Expansion (Months {timeline_middle})
-                - Advanced skill acquisition
-                - Leadership development activities
-                - Strategic project involvement
-                - External visibility building
+### Phase 2: Growth & Expansion (Months {timeline_middle})
+- Advanced skill acquisition
+- Leadership development activities
+- Strategic project involvement
+- External visibility building
 
-                ### Phase 3: Positioning & Transition (Final phase)
-                - Final preparation for target role
-                - Strategic job search activities
-                - Interview and positioning preparation
-                - Offer negotiation and transition planning
+### Phase 3: Positioning & Transition (Final phase)
+- Final preparation for target role
+- Strategic job search activities
+- Interview and positioning preparation
+- Offer negotiation and transition planning
 
-                ## 📚 **Learning & Development Strategy**
-                ### Technical Skills Development
-                - Specific courses, certifications, and training
-                - Online learning platforms and resources
-                - Hands-on projects and applications
-                - Skill assessment and validation methods
+## 📚 **Learning & Development Strategy**
+### Technical Skills Development
+- Specific courses, certifications, and training
+- Online learning platforms and resources
+- Hands-on projects and applications
+- Skill assessment and validation methods
 
-                ### Soft Skills Enhancement
-                - Leadership and management capabilities
-                - Communication and presentation skills
-                - Strategic thinking and business acumen
-                - Industry knowledge and market awareness
+### Soft Skills Enhancement
+- Leadership and management capabilities
+- Communication and presentation skills
+- Strategic thinking and business acumen
+- Industry knowledge and market awareness
 
-                ### Formal Education & Certifications
-                - Professional certifications to pursue
-                - Advanced degree considerations
-                - Industry-specific credentials
-                - Cost-benefit analysis of educational investments
+### Formal Education & Certifications
+- Professional certifications to pursue
+- Advanced degree considerations
+- Industry-specific credentials
+- Cost-benefit analysis of educational investments
 
-                ## 🤝 **Networking & Relationship Building**
-                ### Professional Network Expansion
-                - Industry conferences and events to attend
-                - Professional associations to join
-                - LinkedIn strategy and online presence
-                - Informational interview targets
+## 🤝 **Networking & Relationship Building**
+### Professional Network Expansion
+- Industry conferences and events to attend
+- Professional associations to join
+- LinkedIn strategy and online presence
+- Informational interview targets
 
-                ### Mentorship & Sponsorship
-                - Identifying potential mentors
-                - Building sponsor relationships
-                - Peer learning groups and communities
-                - Reverse mentoring opportunities
+### Mentorship & Sponsorship
+- Identifying potential mentors
+- Building sponsor relationships
+- Peer learning groups and communities
+- Reverse mentoring opportunities
 
-                ### Internal Relationship Building
-                - Stakeholder mapping in current organization
-                - Cross-functional collaboration opportunities
-                - Visibility projects and high-impact initiatives
-                - Leadership team exposure strategies
+### Internal Relationship Building
+- Stakeholder mapping in current organization
+- Cross-functional collaboration opportunities
+- Visibility projects and high-impact initiatives
+- Leadership team exposure strategies
 
-                ## 💼 **Experience & Exposure Plan**
-                ### Current Role Optimization
-                - Ways to enhance current role impact
-                - Additional responsibilities to seek
-                - Performance metrics to improve
-                - Success stories to develop
+## 💼 **Experience & Exposure Plan**
+### Current Role Optimization
+- Ways to enhance current role impact
+- Additional responsibilities to seek
+- Performance metrics to improve
+- Success stories to develop
 
-                ### Strategic Project Involvement
-                - High-visibility projects to pursue
-                - Cross-functional team leadership
-                - Innovation and change initiatives
-                - Customer or client-facing opportunities
+### Strategic Project Involvement
+- High-visibility projects to pursue
+- Cross-functional team leadership
+- Innovation and change initiatives
+- Customer or client-facing opportunities
 
-                ### External Experience Building
-                - Volunteer leadership roles
-                - Industry speaking opportunities
-                - Writing and thought leadership
-                - Board or committee service
+### External Experience Building
+- Volunteer leadership roles
+- Industry speaking opportunities
+- Writing and thought leadership
+- Board or committee service
 
-                ## 📊 **Progress Tracking & Measurement**
-                ### Key Performance Indicators
-                - Specific metrics to track progress
-                - Milestone achievement criteria
-                - Skills assessment benchmarks
-                - Network growth measurements
+## 📊 **Progress Tracking & Measurement**
+### Key Performance Indicators
+- Specific metrics to track progress
+- Milestone achievement criteria
+- Skills assessment benchmarks
+- Network growth measurements
 
-                ### Regular Review Process
-                - Monthly progress check-ins
-                - Quarterly goal adjustments
-                - Annual plan reviews and updates
-                - Feedback collection and integration
+### Regular Review Process
+- Monthly progress check-ins
+- Quarterly goal adjustments
+- Annual plan reviews and updates
+- Feedback collection and integration
 
-                ### Course Correction Strategies
-                - How to adapt plan based on market changes
-                - Pivoting strategies if goals change
-                - Accelerating progress when opportunities arise
-                - Managing setbacks and delays
+### Course Correction Strategies
+- How to adapt plan based on market changes
+- Pivoting strategies if goals change
+- Accelerating progress when opportunities arise
+- Managing setbacks and delays
 
-                ## 🚀 **Action Plan & Next Steps**
-                ### Immediate Actions (Next 30 days)
-                - Specific tasks to start immediately
-                - Resources to gather and review
-                - Conversations to initiate
-                - Systems to put in place
+## 🚀 **Action Plan & Next Steps**
+### Immediate Actions (Next 30 days)
+- Specific tasks to start immediately
+- Resources to gather and review
+- Conversations to initiate
+- Systems to put in place
 
-                ### Short-term Priorities (Next 90 days)
-                - Major initiatives to launch
-                - Skills development to begin
-                - Relationships to build
-                - Opportunities to pursue
+### Short-term Priorities (Next 90 days)
+- Major initiatives to launch
+- Skills development to begin
+- Relationships to build
+- Opportunities to pursue
 
-                Provide specific, time-bound, measurable actions that create a clear path to the target role."""
+Provide specific, time-bound, measurable actions that create a clear path to the target role."""
             )
             
             llm = ChatGoogleGenerativeAI(
@@ -4520,37 +3970,37 @@ Please try one of these alternatives, and I'll help you create an outstanding CV
             
             return f"""## 🚀 **Career Development Plan**
 
-            **Journey:** {current_role or 'Current Role'} → {target_role or 'Target Role'} | **Timeline:** {timeline}
+**Journey:** {current_role or 'Current Role'} → {target_role or 'Target Role'} | **Timeline:** {timeline}
 
-            {plan}
+{plan}
 
-            ---
+---
 
-            **📋 Implementation Checklist:**
-            - ✅ Schedule monthly career development review meetings
-            - ✅ Create learning and development budget
-            - ✅ Identify and reach out to potential mentors
-            - ✅ Set up skill assessment baseline measurements
-            - ✅ Begin networking activities and relationship building
-            - ✅ Start first priority learning initiative
+**📋 Implementation Checklist:**
+- ✅ Schedule monthly career development review meetings
+- ✅ Create learning and development budget
+- ✅ Identify and reach out to potential mentors
+- ✅ Set up skill assessment baseline measurements
+- ✅ Begin networking activities and relationship building
+- ✅ Start first priority learning initiative
 
-            **⚡ Success Factors:**
-            - **Consistency**: Regular, dedicated effort toward goals
-            - **Flexibility**: Adapt plan based on opportunities and market changes
-            - **Accountability**: Regular progress reviews and adjustments
-            - **Network**: Strong professional relationships for guidance and opportunities
-            - **Measurement**: Clear metrics to track progress and success
+**⚡ Success Factors:**
+- **Consistency**: Regular, dedicated effort toward goals
+- **Flexibility**: Adapt plan based on opportunities and market changes
+- **Accountability**: Regular progress reviews and adjustments
+- **Network**: Strong professional relationships for guidance and opportunities
+- **Measurement**: Clear metrics to track progress and success
 
-            **🔄 Review Schedule:**
-            - **Weekly**: Progress on immediate actions and priorities
-            - **Monthly**: Overall plan progress and milestone achievement
-            - **Quarterly**: Goals adjustment and strategy refinement
-            - **Annually**: Comprehensive plan review and major updates
+**🔄 Review Schedule:**
+- **Weekly**: Progress on immediate actions and priorities
+- **Monthly**: Overall plan progress and milestone achievement
+- **Quarterly**: Goals adjustment and strategy refinement
+- **Annually**: Comprehensive plan review and major updates
 
-            **🔗 Supporting Tools:**
-            - `analyze my skills gap` - Regular skills assessment
-            - `get interview preparation guide` - Practice for target role
-            - `enhance my resume section` - Update CV as you grow"""
+**🔗 Supporting Tools:**
+- `analyze my skills gap` - Regular skills assessment
+- `get interview preparation guide` - Practice for target role
+- `enhance my resume section` - Update CV as you grow"""
             
         except Exception as e:
             log.error(f"Error creating career development plan: {e}", exc_info=True)
@@ -4593,47 +4043,47 @@ Please try one of these alternatives, and I'll help you create an outstanding CV
             prompt = ChatPromptTemplate.from_template(
                 """You are an expert information extractor. Extract COMPREHENSIVE resume information from CV/resume documents.
 
-                DOCUMENT CONTENT:
-                {document_content}
+DOCUMENT CONTENT:
+{document_content}
 
-                EXTRACTION TASK:
-                Extract ALL information and return ONLY a JSON object with these exact keys:
-                - "full_name": Person's complete name
-                - "email": Email address
-                - "phone": Phone number (with country code)
-                - "location": Current location/address
-                - "linkedin": LinkedIn profile URL
-                - "portfolio": Personal website/portfolio URL
-                - "github": GitHub profile URL
-                - "summary": Professional summary/bio (2-3 sentences)
-                - "skills": Array of technical skills, programming languages, tools
-                - "experience": Array of work experience objects with:
-                - "jobTitle": Job title/position
-                - "company": Company name
-                - "dates": Employment dates (start - end)
-                - "description": Brief description of role and achievements
-                - "education": Array of education objects with:
-                - "degree": Degree title/name
-                - "institution": School/university name
-                - "dates": Graduation date or study period
-                - "field": Field of study (optional)
-                - "projects": Array of project objects with:
-                - "name": Project name
-                - "description": Brief description
-                - "technologies": Technologies used
-                - "certifications": Array of certification names with dates
+EXTRACTION TASK:
+Extract ALL information and return ONLY a JSON object with these exact keys:
+- "full_name": Person's complete name
+- "email": Email address
+- "phone": Phone number (with country code)
+- "location": Current location/address
+- "linkedin": LinkedIn profile URL
+- "portfolio": Personal website/portfolio URL
+- "github": GitHub profile URL
+- "summary": Professional summary/bio (2-3 sentences)
+- "skills": Array of technical skills, programming languages, tools
+- "experience": Array of work experience objects with:
+  - "jobTitle": Job title/position
+  - "company": Company name
+  - "dates": Employment dates (start - end)
+  - "description": Brief description of role and achievements
+- "education": Array of education objects with:
+  - "degree": Degree title/name
+  - "institution": School/university name
+  - "dates": Graduation date or study period
+  - "field": Field of study (optional)
+- "projects": Array of project objects with:
+  - "name": Project name
+  - "description": Brief description
+  - "technologies": Technologies used
+- "certifications": Array of certification names with dates
 
-                CRITICAL RULES:
-                1. Return ONLY valid JSON - no additional text, formatting, or markdown
-                2. Use null for any field not found in the documents
-                3. For arrays, use empty arrays [] if no items found
-                4. Extract ALL work experience, education, and projects found
-                5. For dates, use format like "2020-2023" or "2023" or "Present"
-                6. Include quantifiable achievements in job descriptions
-                7. Use the most recent/complete information if multiple versions exist
+CRITICAL RULES:
+1. Return ONLY valid JSON - no additional text, formatting, or markdown
+2. Use null for any field not found in the documents
+3. For arrays, use empty arrays [] if no items found
+4. Extract ALL work experience, education, and projects found
+5. For dates, use format like "2020-2023" or "2023" or "Present"
+6. Include quantifiable achievements in job descriptions
+7. Use the most recent/complete information if multiple versions exist
 
-                Extract EVERYTHING from the document content and return the complete JSON:"""
-                            )
+Extract EVERYTHING from the document content and return the complete JSON:"""
+            )
             
             llm = ChatGoogleGenerativeAI(
                 model="gemini-2.5-pro-preview-03-25",
@@ -4754,36 +4204,36 @@ Please try one of these alternatives, and I'll help you create an outstanding CV
             
             return f"""✅ **Profile Successfully Updated from Documents!**
 
-            **📋 Extracted and Updated Information:**
-            {chr(10).join(f"• {update}" for update in updates_made)}
+**📋 Extracted and Updated Information:**
+{chr(10).join(f"• {update}" for update in updates_made)}
 
-            **🎯 Comprehensive Data Extracted:**
-            • **Personal Info**: {extracted_info.get('full_name', 'Not found')} | {extracted_info.get('email', 'Not found')}
-            • **Contact**: {extracted_info.get('phone', 'Not found')} | {extracted_info.get('location', 'Not found')}
-            • **Links**: Portfolio: {extracted_info.get('portfolio', 'Not found')} | GitHub: {extracted_info.get('github', 'Not found')}
-            • **Work Experience**: {len(extracted_info.get('experience', []))} positions extracted
-            • **Education**: {len(extracted_info.get('education', []))} degrees/qualifications extracted  
-            • **Skills**: {len(extracted_info.get('skills', []))} technical skills extracted
-            • **Projects**: {len(extracted_info.get('projects', []))} projects extracted
-            • **Certifications**: {len(extracted_info.get('certifications', []))} certifications extracted
+**🎯 Comprehensive Data Extracted:**
+• **Personal Info**: {extracted_info.get('full_name', 'Not found')} | {extracted_info.get('email', 'Not found')}
+• **Contact**: {extracted_info.get('phone', 'Not found')} | {extracted_info.get('location', 'Not found')}
+• **Links**: Portfolio: {extracted_info.get('portfolio', 'Not found')} | GitHub: {extracted_info.get('github', 'Not found')}
+• **Work Experience**: {len(extracted_info.get('experience', []))} positions extracted
+• **Education**: {len(extracted_info.get('education', []))} degrees/qualifications extracted  
+• **Skills**: {len(extracted_info.get('skills', []))} technical skills extracted
+• **Projects**: {len(extracted_info.get('projects', []))} projects extracted
+• **Certifications**: {len(extracted_info.get('certifications', []))} certifications extracted
 
-            **🎉 Your profile is now fully populated with real data!** 
+**🎉 Your profile is now fully populated with real data!** 
 
-            **📥 PDF Forms Now Populated:**
-            - ✅ Personal information fields
-            - ✅ Work experience entries  
-            - ✅ Education history
-            - ✅ Skills and competencies
-            - ✅ Projects and achievements
-            - ✅ Certifications and awards
+**📥 PDF Forms Now Populated:**
+- ✅ Personal information fields
+- ✅ Work experience entries  
+- ✅ Education history
+- ✅ Skills and competencies
+- ✅ Projects and achievements
+- ✅ Certifications and awards
 
-            **📝 Next Steps:**
-            1. **Test PDF Dialog**: Click any download button - all fields should now be populated!
-            2. **Verify Data**: Check the work experience form you showed me - it should now have your real jobs
-            3. **Generate Content**: Create resumes/cover letters with your actual information
-            4. **Fine-tune**: Make any adjustments directly in the profile settings
+**📝 Next Steps:**
+1. **Test PDF Dialog**: Click any download button - all fields should now be populated!
+2. **Verify Data**: Check the work experience form you showed me - it should now have your real jobs
+3. **Generate Content**: Create resumes/cover letters with your actual information
+4. **Fine-tune**: Make any adjustments directly in the profile settings
 
-            **💡 Pro Tip**: Your PDF dialog forms should now show your actual work experience instead of "Software Engineer at Google Inc."!
+**💡 Pro Tip**: Your PDF dialog forms should now show your actual work experience instead of "Software Engineer at Google Inc."!
 
 <!-- extracted_info={json.dumps(extracted_info)} -->"""
             
