@@ -541,29 +541,50 @@ export function ChatMessage({
   // Check if content is structured JSON with downloadable metadata
   const getStructuredContent = (): {
     message: string;
-    downloadable?: boolean;
-    content_type?: string;
-    content_id?: string;
+    structured_data: any;
+    content_type: "cover_letter" | "resume";
     company_name?: string;
     job_title?: string;
   } | null => {
-    try {
-      // Try to parse as JSON first
-      if (plainTextContent.startsWith("{") && plainTextContent.endsWith("}")) {
-        const parsed = JSON.parse(plainTextContent);
-        if (parsed.message && typeof parsed.downloadable === "boolean") {
-          return parsed;
-        }
+    if (typeof content !== "string" || isUser) return null;
+
+    const plainTextContent = content.replace(/<[^>]*>/g, "");
+
+    const hasCvMarker = plainTextContent.includes("[DOWNLOADABLE_RESUME]");
+    const hasClMarker = plainTextContent.includes(
+      "[DOWNLOADABLE_COVER_LETTER]"
+    );
+
+    if (!hasCvMarker && !hasClMarker) return null;
+
+    const jsonStart = plainTextContent.indexOf("{");
+    const jsonEnd = plainTextContent.lastIndexOf("}");
+
+    if (jsonStart !== -1 && jsonEnd > jsonStart) {
+      const jsonString = plainTextContent.substring(jsonStart, jsonEnd + 1);
+      try {
+        const parsedData = JSON.parse(jsonString);
+        return {
+          message: plainTextContent.substring(0, jsonStart).trim(),
+          structured_data: parsedData,
+          content_type: hasClMarker ? "cover_letter" : "resume",
+          company_name: parsedData.company_name,
+          job_title: parsedData.job_title,
+        };
+      } catch (error) {
+        console.error("JSON parsing error in ChatMessage:", error);
+        return null; // <-- This is the key fix. If parsing fails, we stop.
       }
-    } catch (e) {
-      // Not JSON, continue with text parsing
     }
+
+    console.warn("Downloadable marker found, but no JSON object was present.");
     return null;
   };
 
   // Get display content - use structured content message if available
   const getDisplayMessage = () => {
     const structuredContent = getStructuredContent();
+
     if (structuredContent) {
       return structuredContent.message;
     }
@@ -636,24 +657,17 @@ export function ChatMessage({
   let contentId: string | undefined;
   let showPDFButton: boolean;
 
-  if (structuredContent && structuredContent.downloadable) {
-    // Use structured metadata
+  if (structuredContent) {
+    // Use structured metadata from the successfully parsed JSON
     contentDetection = {
-      type: structuredContent.content_type as "cover_letter" | "resume",
+      type: structuredContent.content_type,
       companyName: structuredContent.company_name,
       jobTitle: structuredContent.job_title,
     };
-    contentId = structuredContent.content_id;
-    showPDFButton = !isUser && structuredContent.downloadable;
-
-    console.log("🎯 STRUCTURED CONTENT DETECTED:", {
-      downloadable: structuredContent.downloadable,
-      content_type: structuredContent.content_type,
-      content_id: structuredContent.content_id,
-      showPDFButton,
-    });
+    contentId = extractContentId(plainTextContent); // Extract ID from text if needed for saved docs
+    showPDFButton = !isUser;
   } else {
-    // Fallback to text pattern detection
+    // Fallback to text pattern detection if no valid JSON is found
     contentDetection = detectContentType(plainTextContent);
     contentId = extractContentId(plainTextContent);
     showPDFButton = !isUser && contentDetection.type !== null;
@@ -1433,6 +1447,7 @@ export function ChatMessage({
       /📄 \*\*CV\/Resume uploaded successfully!\*\*/,
       /📎 Attached file:/i,
       /Attached file:/i,
+      /File Attached:/i,
     ];
 
     return attachmentPatterns.some((pattern) => pattern.test(msg));
@@ -1449,6 +1464,7 @@ export function ChatMessage({
       { regex: /📎 \*\*File Attached:\*\* (.+?)(?:\n|$)/, type: "file" },
       { regex: /📎 Attached file:\s*(.+?)(?:\n|$)/i, type: "file" },
       { regex: /Attached file:\s*(.+?)(?:\n|$)/i, type: "file" },
+      { regex: /File Attached:\s*(.+?)(?:\n|$)/i, type: "file" },
       {
         regex:
           /\*\*CV\/Resume uploaded successfully!\*\*[\s\S]*?\*\*File:\*\* (.+?)(?:\n|$)/,

@@ -45,6 +45,15 @@ interface Document {
   url?: string;
 }
 
+interface UserProfile {
+  first_name: string;
+  last_name: string;
+  profile_headline: string;
+  address: string;
+  linkedin: string;
+  phone: string;
+}
+
 interface PersonalInfoFormData {
   firstName: string;
   lastName: string;
@@ -52,6 +61,7 @@ interface PersonalInfoFormData {
   company: string;
   location: string;
   linkedin: string;
+  phone: string;
 }
 
 interface UserPreferences {
@@ -175,8 +185,8 @@ const useUserPreferences = () => {
         setLoading(true);
         const token = await getToken();
 
-        const response = await fetch("/api/user/preferences", {
-          method: "PATCH",
+        const response = await fetch("/api/me/preferences", {
+          method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
@@ -259,6 +269,9 @@ export function SettingsDialog({
   const [isLoading, setIsLoading] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState("personal");
   const [formErrors, setFormErrors] = React.useState<string[]>([]);
+  const [profileData, setProfileData] = React.useState<UserProfile | null>(
+    null
+  );
 
   // Custom hooks
   const {
@@ -272,6 +285,39 @@ export function SettingsDialog({
     updatePreferences,
     loading: preferencesLoading,
   } = useUserPreferences();
+
+  React.useEffect(() => {
+    if (open) {
+      const fetchProfileData = async () => {
+        setIsLoading(true);
+        try {
+          const token = await getToken();
+          const response = await fetch("/api/profile", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!response.ok) throw new Error("Could not fetch profile");
+          const data = await response.json();
+          setProfileData(data);
+        } catch (error) {
+          toast.error("Could not load your profile data.");
+          // Fallback to basic user data if profile fetch fails
+          if (user) {
+            setProfileData({
+              first_name: user.firstName || "",
+              last_name: user.lastName || "",
+              profile_headline: "",
+              address: "",
+              linkedin: "",
+              phone: "",
+            });
+          }
+        } finally {
+          setIsLoading(false);
+        }
+      };
+      fetchProfileData();
+    }
+  }, [open, getToken, user]);
 
   const handleClearChatHistory = async () => {
     const confirmed = window.confirm(
@@ -336,6 +382,7 @@ export function SettingsDialog({
         company: (formData.get("company") as string) || "",
         location: (formData.get("location") as string) || "",
         linkedin: (formData.get("linkedin") as string) || "",
+        phone: (formData.get("phone") as string) || "",
       };
 
       // Validate form
@@ -347,15 +394,25 @@ export function SettingsDialog({
 
       const token = await getToken();
 
-      const response = await fetch("/api/user/profile", {
-        method: "PATCH",
+      // Map frontend data to the backend model
+      const profileData = {
+        first_name: personalInfo.firstName,
+        last_name: personalInfo.lastName,
+        profile_headline: personalInfo.jobTitle,
+        address: personalInfo.location,
+        linkedin: personalInfo.linkedin,
+        phone: personalInfo.phone,
+        // The 'company' field is not supported by the backend API and is omitted.
+      };
+
+      const response = await fetch("/api/me", {
+        method: "PUT",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(personalInfo),
+        body: JSON.stringify(profileData),
       });
-
       // Handle missing endpoints gracefully
       if (
         response.status === 401 ||
@@ -590,6 +647,7 @@ export function SettingsDialog({
                       )}
 
                       <form
+                        key={profileData ? "loaded" : "loading"}
                         onSubmit={handleUpdateProfile}
                         className="space-y-4"
                       >
@@ -650,37 +708,23 @@ export function SettingsDialog({
                             id="email-help"
                             className="text-xs text-muted-foreground"
                           >
-                            Email cannot be changed here. Please use your
-                            account settings.
+                            Email cannot be changed here. click on the profile
+                            avatar to change your primary email address
                           </p>
                         </div>
 
                         <div className="space-y-2">
                           <Label
-                            htmlFor="jobTitle"
+                            htmlFor="phone"
                             className="text-sm font-medium"
                           >
-                            Current Job Title
+                            Phone Number
                           </Label>
                           <Input
-                            id="jobTitle"
-                            name="jobTitle"
-                            placeholder="e.g., Software Engineer"
-                            className="h-11 text-base mobile-input-text"
-                          />
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label
-                            htmlFor="company"
-                            className="text-sm font-medium"
-                          >
-                            Current Company
-                          </Label>
-                          <Input
-                            id="company"
-                            name="company"
-                            placeholder="e.g., TechCorp Inc."
+                            id="phone"
+                            name="phone"
+                            defaultValue={profileData?.phone || ""}
+                            placeholder="e.g., +1234567890"
                             className="h-11 text-base mobile-input-text"
                           />
                         </div>
@@ -695,6 +739,7 @@ export function SettingsDialog({
                           <Input
                             id="location"
                             name="location"
+                            defaultValue={profileData?.address || ""}
                             placeholder="e.g., San Francisco, CA"
                             className="h-11 text-base mobile-input-text"
                           />
@@ -711,6 +756,7 @@ export function SettingsDialog({
                             id="linkedin"
                             name="linkedin"
                             type="url"
+                            defaultValue={profileData?.linkedin || ""}
                             placeholder="https://linkedin.com/in/yourprofile"
                             className="h-11 text-base mobile-input-text"
                             aria-describedby="linkedin-help"

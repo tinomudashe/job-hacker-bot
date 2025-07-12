@@ -122,8 +122,13 @@ const AttachmentRenderer = ({
   isUser?: boolean;
 }) => {
   // Extract user message if present
-  const messageMatch = text.match(/\*\*Message:\*\* ([\s\S]+?)(?:\n|$)/);
-  const userMessage = messageMatch ? messageMatch[1].trim() : "";
+  const userMessage = text
+    .replace(/\*\*File Attached:\*\*.*(?:\n|$)/i, "")
+    .replace(/📎 \*\*File Attached:\*\*.*(?:\n|$)/i, "")
+    .replace(/📎 Attached file:.*(?:\n|$)/i, "")
+    .replace(/Attached file:.*(?:\n|$)/i, "")
+    .replace(/\*\*CV\/Resume uploaded successfully!\*\*[\s\S]*/i, "")
+    .trim();
 
   return (
     <div className="space-y-3">

@@ -10,7 +10,6 @@ import { useAuth } from "@clerk/nextjs";
 import {
   Briefcase,
   ChevronDown,
-  Download,
   Edit3,
   ExternalLink,
   FileText,
@@ -86,7 +85,8 @@ export function PDFGenerationDialog({
   const [editedContent, setEditedContent] = React.useState(initialContent);
   const [editedCompanyName, setEditedCompanyName] = React.useState(companyName);
   const [editedJobTitle, setEditedJobTitle] = React.useState(jobTitle);
-  const [isGenerating, setIsGenerating] = React.useState(false);
+  const [recipientName, setRecipientName] = React.useState("");
+  const [recipientTitle, setRecipientTitle] = React.useState("");
   const [isMobile, setIsMobile] = React.useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = React.useState(false);
   const [isLoadingUserData, setIsLoadingUserData] = React.useState(false);
@@ -99,6 +99,7 @@ export function PDFGenerationDialog({
     address: "",
     linkedin: "",
     website: "",
+    summary: "",
   });
 
   const [workExperience, setWorkExperience] = React.useState([
@@ -195,117 +196,189 @@ export function PDFGenerationDialog({
       setIsLoadingUserData(true);
       try {
         const token = await getToken();
-        if (!token) return;
+        if (!token) {
+          toast.error("Authentication session not found.");
+          return;
+        }
 
-        // Fetch user profile data
-        const [profileResponse, resumeResponse] = await Promise.all([
-          fetch("/api/profile", {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-          fetch("/api/resume", {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-        ]);
+        if (contentType === "cover_letter") {
+          const [coverLetterResponse, profileResponse] = await Promise.all([
+            fetch("/api/documents/cover-letters/latest", {
+              headers: { Authorization: `Bearer ${token}` },
+            }),
+            fetch("/api/profile", {
+              headers: { Authorization: `Bearer ${token}` },
+            }),
+          ]);
 
-        let profileData: any = null;
-        let resumeData: any = null;
-        let profileLoaded = false;
-        let resumeLoaded = false;
+          let parsedCoverLetterData: any = {};
+          if (coverLetterResponse.ok) {
+            const rawData = await coverLetterResponse.json();
+            if (rawData?.content && typeof rawData.content === "string") {
+              try {
+                parsedCoverLetterData = JSON.parse(rawData.content);
+              } catch (e) {
+                console.error("Failed to parse cover letter content:", e);
+                // Handle cases where content might not be JSON
+                parsedCoverLetterData = { body: rawData.content };
+              }
+            } else if (rawData?.content) {
+              // Handle cases where content is already an object
+              parsedCoverLetterData = rawData.content;
+            }
+          }
 
-        if (profileResponse.ok) {
-          profileData = await profileResponse.json();
-          profileLoaded = !!(
-            profileData.first_name ||
-            profileData.last_name ||
-            profileData.name ||
-            profileData.email ||
-            profileData.phone
-          );
+          let profileData: any = {};
+          if (profileResponse.ok) profileData = await profileResponse.json();
 
-          // Populate personal info with user's profile data
           setPersonalInfo({
             fullName:
-              `${profileData.first_name || ""} ${
-                profileData.last_name || ""
+              parsedCoverLetterData?.personal_info?.name ||
+              `${profileData?.first_name || ""} ${
+                profileData?.last_name || ""
               }`.trim() ||
-              profileData.name ||
+              profileData?.name ||
               "",
-            email: profileData.email || "",
-            phone: profileData.phone || "",
-            address: profileData.address || "",
-            linkedin: profileData.linkedin || "",
-            website: "", // No website field in user profile currently
+            email:
+              parsedCoverLetterData?.personal_info?.email ||
+              profileData?.email ||
+              "",
+            phone:
+              parsedCoverLetterData?.personal_info?.phone ||
+              profileData?.phone ||
+              "",
+            address:
+              parsedCoverLetterData?.personal_info?.location ||
+              profileData?.address ||
+              "",
+            linkedin:
+              parsedCoverLetterData?.personal_info?.linkedin ||
+              profileData?.linkedin ||
+              "",
+            website: parsedCoverLetterData?.personal_info?.website || "",
+            summary:
+              parsedCoverLetterData?.personal_info?.summary ||
+              profileData?.profile_headline ||
+              "",
           });
-        }
 
-        if (resumeResponse.ok) {
-          resumeData = await resumeResponse.json();
-          resumeLoaded = !!(
-            (resumeData.personalInfo &&
-              (resumeData.personalInfo.name ||
-                resumeData.personalInfo.email)) ||
-            (resumeData.experience && resumeData.experience.length > 0) ||
-            (resumeData.education && resumeData.education.length > 0) ||
-            (resumeData.skills && resumeData.skills.length > 0)
+          setEditedCompanyName(
+            parsedCoverLetterData?.company_name || companyName
           );
+          setEditedJobTitle(parsedCoverLetterData?.job_title || jobTitle);
+          setRecipientName(parsedCoverLetterData?.recipient_name || "");
+          setRecipientTitle(parsedCoverLetterData?.recipient_title || "");
+          setEditedContent(parsedCoverLetterData?.body || "");
+        } else if (contentType === "resume") {
+          const [profileResponse, resumeResponse] = await Promise.all([
+            fetch("/api/profile", {
+              headers: { Authorization: `Bearer ${token}` },
+            }),
+            fetch("/api/resume", {
+              headers: { Authorization: `Bearer ${token}` },
+            }),
+          ]);
 
-          // Update personal info with resume data if available
-          if (resumeData.personalInfo) {
-            setPersonalInfo((prev) => ({
-              fullName: resumeData.personalInfo.name || prev.fullName,
-              email: resumeData.personalInfo.email || prev.email,
-              phone: resumeData.personalInfo.phone || prev.phone,
-              address: resumeData.personalInfo.location || prev.address,
-              linkedin: resumeData.personalInfo.linkedin || prev.linkedin,
-              website: prev.website,
-            }));
-          }
+          let profileData: any = null;
+          let resumeData: any = null;
+          let profileLoaded = false;
+          let resumeLoaded = false;
 
-          // Populate work experience
-          if (resumeData.experience && resumeData.experience.length > 0) {
-            setWorkExperience(
-              resumeData.experience.map((exp: any) => ({
-                title: exp.jobTitle || "",
-                company: exp.company || "",
-                startYear: exp.dates
-                  ? exp.dates.split("-")[0]?.trim() || ""
-                  : "",
-                endYear: exp.dates ? exp.dates.split("-")[1]?.trim() || "" : "",
-                description: exp.description || "",
-              }))
+          if (profileResponse.ok) {
+            profileData = await profileResponse.json();
+            profileLoaded = !!(
+              profileData.first_name ||
+              profileData.last_name ||
+              profileData.name ||
+              profileData.email ||
+              profileData.phone
             );
+
+            // Populate personal info with user's profile data
+            setPersonalInfo({
+              fullName:
+                `${profileData.first_name || ""} ${
+                  profileData.last_name || ""
+                }`.trim() ||
+                profileData.name ||
+                "",
+              email: profileData.email || "",
+              phone: profileData.phone || "",
+              address: profileData.address || "",
+              linkedin: profileData.linkedin || "",
+              website: "", // No website field in user profile currently
+              summary: profileData.profile_headline || "",
+            });
           }
 
-          // Populate education
-          if (resumeData.education && resumeData.education.length > 0) {
-            setEducation(
-              resumeData.education.map((edu: any) => ({
-                degree: edu.degree || "",
-                school: edu.institution || "",
-                year: edu.dates || "",
-                description: edu.description || "",
-              }))
+          if (resumeResponse.ok) {
+            resumeData = await resumeResponse.json();
+            resumeLoaded = !!(
+              (resumeData.personalInfo &&
+                (resumeData.personalInfo.name ||
+                  resumeData.personalInfo.email)) ||
+              (resumeData.experience && resumeData.experience.length > 0) ||
+              (resumeData.education && resumeData.education.length > 0) ||
+              (resumeData.skills && resumeData.skills.length > 0)
             );
-          }
 
-          // Populate skills
-          if (resumeData.skills && resumeData.skills.length > 0) {
-            setSkillsArray(resumeData.skills);
-            setSkills(resumeData.skills.join(", "));
-          }
-        }
-
-        // Show appropriate toast message based on loaded data
-        if (profileLoaded || resumeLoaded) {
-          toast.success("Personal information loaded from your profile");
-        } else {
-          toast.info(
-            "No profile data found. Please fill in your information manually.",
-            {
-              description:
-                "You can create or update your profile to auto-populate this form in the future",
+            // Update personal info with resume data if available
+            if (resumeData.personalInfo) {
+              setPersonalInfo((prev) => ({
+                fullName: resumeData.personalInfo.name || prev.fullName,
+                email: resumeData.personalInfo.email || prev.email,
+                phone: resumeData.personalInfo.phone || prev.phone,
+                address: resumeData.personalInfo.location || prev.address,
+                linkedin: resumeData.personalInfo.linkedin || prev.linkedin,
+                website: prev.website,
+                summary: resumeData.personalInfo.summary || prev.summary,
+              }));
             }
-          );
+
+            // Populate work experience
+            if (resumeData.experience && resumeData.experience.length > 0) {
+              setWorkExperience(
+                resumeData.experience.map((exp: any) => ({
+                  title: exp.jobTitle || "",
+                  company: exp.company || "",
+                  startYear: exp.dates?.start || "",
+                  endYear: exp.dates?.end || "",
+                  description: exp.description || "",
+                }))
+              );
+            }
+
+            // Populate education
+            if (resumeData.education && resumeData.education.length > 0) {
+              setEducation(
+                resumeData.education.map((edu: any) => ({
+                  degree: edu.degree || "",
+                  school: edu.institution || "",
+                  year: edu.dates?.end || edu.dates?.start || "",
+                  description: edu.description || "",
+                }))
+              );
+            }
+
+            // Populate skills
+            if (resumeData.skills && resumeData.skills.length > 0) {
+              setSkillsArray(resumeData.skills);
+              setSkills(resumeData.skills.join(", "));
+            }
+          }
+
+          // Show appropriate toast message based on loaded data
+          if (profileLoaded || resumeLoaded) {
+            toast.success("Personal information loaded from your profile");
+          } else {
+            toast.info(
+              "No profile data found. Please fill in your information manually.",
+              {
+                description:
+                  "You can create or update your profile to auto-populate this form in the future",
+              }
+            );
+          }
         }
       } catch (error) {
         console.error("Error fetching user data:", error);
@@ -315,8 +388,10 @@ export function PDFGenerationDialog({
       }
     };
 
-    fetchUserData();
-  }, [open, getToken]);
+    if (open) {
+      fetchUserData();
+    }
+  }, [open, getToken, contentType]);
 
   // Handle mobile detection
   React.useEffect(() => {
@@ -412,6 +487,7 @@ export function PDFGenerationDialog({
           address: "",
           linkedin: "",
           website: "",
+          summary: "",
         });
         setWorkExperience([
           {
@@ -431,124 +507,27 @@ export function PDFGenerationDialog({
     }
   }, [open]);
 
-  const handleDownload = async () => {
-    if (isGenerating) return;
-
-    setIsGenerating(true);
-
-    try {
-      const token = await getToken();
-      if (!token) {
-        throw new Error("Please sign in to download PDFs");
-      }
-
-      const contentToUse = getCombinedContent() || initialContent;
-      if (!contentToUse || contentToUse.trim().length === 0) {
-        throw new Error("Please add some content before downloading");
-      }
-
-      const selectedStyleData =
-        PDF_STYLES.find((s) => s.key === selectedStyle) || PDF_STYLES[0];
-
-      const requestData: any = {
-        style: selectedStyle,
-        colors: selectedStyleData.colors,
-        company_name: editedCompanyName || "",
-        job_title: editedJobTitle || "",
-        content_type: contentType,
-      };
-
-      // Use content_id if available (saved content), otherwise use content_text (fallback)
-      if (contentId) {
-        requestData.content_id = contentId;
-        console.log("🎯 PDF Dialog using content_id:", contentId);
-      } else {
-        requestData.content_text = contentToUse.trim();
-        console.log("📝 PDF Dialog using content_text as fallback");
-      }
-
-      const response = await fetch("/api/pdf/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(requestData),
-      });
-
-      if (!response.ok) {
-        let errorMessage = "Failed to generate PDF";
-        try {
-          const responseContentType = response.headers.get("content-type");
-          if (
-            responseContentType &&
-            responseContentType.includes("application/json")
-          ) {
-            const errorData = await response.json();
-            errorMessage =
-              errorData.detail ||
-              errorData.message ||
-              errorData.error ||
-              errorMessage;
-          } else {
-            const errorText = await response.text();
-            errorMessage =
-              errorText || `HTTP ${response.status}: ${response.statusText}`;
-          }
-        } catch (parseError) {
-          errorMessage = `Server error (${response.status}): ${response.statusText}`;
-        }
-        throw new Error(errorMessage);
-      }
-
-      const responseContentType = response.headers.get("content-type");
-      if (
-        !responseContentType ||
-        !responseContentType.includes("application/pdf")
-      ) {
-        throw new Error("Server did not return a PDF file");
-      }
-
-      const blob = await response.blob();
-      if (blob.size === 0) {
-        throw new Error("Received empty PDF file");
-      }
-
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.style.display = "none";
-      a.href = url;
-
-      const fileName = `${
-        contentType === "cover_letter" ? "cover-letter" : "resume"
-      }-${selectedStyle}-${new Date().toISOString().split("T")[0]}.pdf`;
-      a.download = fileName;
-
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-
-      toast.success(`PDF downloaded successfully!`, {
-        description: `File: ${fileName}`,
-      });
-    } catch (error) {
-      console.error("Download error:", error);
-
-      let userMessage = "Failed to download PDF";
-      if (error instanceof Error) {
-        userMessage = error.message;
-      }
-
-      toast.error(userMessage);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
   const handlePreview = () => {
+    // For cover letters, we force the preview page to fetch the latest saved version.
+    if (contentType === "cover_letter") {
+      const previewUrl = `/preview?type=cover_letter&style=${selectedStyle}`;
+      const newWindow = window.open(
+        previewUrl,
+        "_blank",
+        "noopener,noreferrer"
+      );
+      if (newWindow) {
+        newWindow.focus();
+        toast.success("Preview opened in a new tab.");
+      } else {
+        toast.error("Please allow pop-ups to view the preview.");
+      }
+      return;
+    }
+
+    // For resumes, we continue to use sessionStorage for an instant preview of edits.
     try {
-      const contentToUse = getCombinedContent() || initialContent;
+      const contentToUse = getCombinedContent();
       if (!contentToUse || contentToUse.trim().length === 0) {
         throw new Error("Please add some content before previewing");
       }
@@ -813,32 +792,12 @@ export function PDFGenerationDialog({
           <div className="flex sm:hidden items-center justify-center gap-2 mt-3 pt-3 !border-t !border-gray-200 dark:!border-white/8">
             <Button
               onClick={handlePreview}
-              variant="outline"
-              size="sm"
               disabled={!isContentValid}
-              className="flex items-center gap-2 text-sm px-4 h-9 rounded-lg transition-all duration-300 hover:scale-105 !bg-muted !border !border-border hover:!bg-muted/80 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 font-medium flex-1"
-            >
-              <ExternalLink className="h-4 w-4" />
-              <span>Preview</span>
-            </Button>
-
-            <Button
-              onClick={handleDownload}
-              disabled={isGenerating || !isContentValid}
               size="sm"
               className="flex items-center gap-2 !bg-primary hover:!bg-primary/90 text-primary-foreground text-sm px-4 h-9 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 hover:scale-105 disabled:hover:scale-100 flex-1"
             >
-              {isGenerating ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" />
-                  <span>Wait...</span>
-                </>
-              ) : (
-                <>
-                  <Download className="h-4 w-4" />
-                  <span>PDF</span>
-                </>
-              )}
+              <ExternalLink className="h-4 w-4" />
+              <span>Preview and Download</span>
             </Button>
           </div>
 
@@ -874,32 +833,12 @@ export function PDFGenerationDialog({
               <div className="flex items-center gap-3">
                 <Button
                   onClick={handlePreview}
-                  variant="outline"
-                  size="sm"
                   disabled={!isContentValid}
-                  className="flex items-center gap-2 text-sm px-4 h-10 rounded-xl transition-all duration-300 hover:scale-105 !bg-muted !border !border-border hover:!bg-muted/80 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 font-medium"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  <span>Preview</span>
-                </Button>
-
-                <Button
-                  onClick={handleDownload}
-                  disabled={isGenerating || !isContentValid}
                   size="sm"
                   className="flex items-center gap-2 !bg-primary hover:!bg-primary/90 text-primary-foreground text-sm px-5 h-10 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 hover:scale-105 disabled:hover:scale-100"
                 >
-                  {isGenerating ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white" />
-                      <span>Generating...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Download className="h-4 w-4" />
-                      <span>Download PDF</span>
-                    </>
-                  )}
+                  <ExternalLink className="h-4 w-4" />
+                  <span>Preview and Download</span>
                 </Button>
 
                 <Button
@@ -1265,6 +1204,28 @@ export function PDFGenerationDialog({
                             placeholder="e.g., Software Engineer"
                             value={editedJobTitle}
                             onChange={(e) => setEditedJobTitle(e.target.value)}
+                            className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+                            Recipient Name (Optional)
+                          </Label>
+                          <Input
+                            placeholder="e.g., Jane Doe"
+                            value={recipientName}
+                            onChange={(e) => setRecipientName(e.target.value)}
+                            className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+                            Recipient Title (Optional)
+                          </Label>
+                          <Input
+                            placeholder="e.g., Hiring Manager"
+                            value={recipientTitle}
+                            onChange={(e) => setRecipientTitle(e.target.value)}
                             className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
                           />
                         </div>
