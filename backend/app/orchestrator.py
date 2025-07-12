@@ -9,6 +9,7 @@ from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 from sqlalchemy import update, func
+import re
 
 load_dotenv()
 
@@ -47,7 +48,7 @@ from pydantic import BaseModel, Field
 from app.models_db import User, ChatMessage, Resume, Document, GeneratedCoverLetter, Page
 from app.dependencies import get_current_active_user_ws
 from app.clerk import verify_token
-from app.resume import ResumeData, PersonalInfo, Experience, Education,fix_resume_data_structure
+from app.resume import ResumeData, PersonalInfo, Experience, Education, Dates, fix_resume_data_structure
 from app.job_search import JobSearchRequest, search_jobs
 from app.vector_store import get_user_vector_store
 from langchain.tools.retriever import create_retriever_tool
@@ -74,6 +75,23 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY")
 GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
+
+# --- Date Parsing Helper ---
+def parse_date_range(date_string: str) -> dict:
+    """Parses a date string into a start and end date dictionary."""
+    if not isinstance(date_string, str):
+        return {"start": None, "end": None}
+    
+    parts = re.split(r'\s+-\s+|\s+to\s+', date_string, maxsplit=1)
+    
+    if len(parts) == 2:
+        start_date = parts[0].strip()
+        end_date = parts[1].strip()
+    else:
+        start_date = date_string.strip()
+        end_date = "Present"
+        
+    return {"start": start_date, "end": end_date}
 
 # --- LangSmith Setup ---
 langsmith_client = Client()
@@ -610,6 +628,9 @@ async def orchestrator_websocket(
     db: AsyncSession = Depends(get_db)
 ):
     await websocket.accept()
+    
+    # Create a lock to serialize resume modifications and prevent race conditions
+    resume_modification_lock = asyncio.Lock()
     
     # Store user data safely to avoid lazy loading issues in tools
     user_id = user.id
@@ -1279,58 +1300,60 @@ async def orchestrator_websocket(
         Returns:
             Success message with added experience details
         """
-        async with async_session_maker() as session:
-            try:
-                db_resume, resume_data = await get_or_create_resume(session)
+        async with resume_modification_lock:
+            async with async_session_maker() as session:
+                try:
+                    db_resume, resume_data = await get_or_create_resume(session)
 
-                # Format dates
-                if is_current_job:
-                    end_date = "Present"
-                
-                date_range = f"{start_date} - {end_date}" if end_date else start_date
-                
-                # Build comprehensive description
-                full_description = description
-                
-                if achievements:
-                    full_description += f"\n\nKey Achievements:\n{achievements}"
-                
-                if technologies_used:
-                    full_description += f"\n\nTechnologies: {technologies_used}"
-                
-                if location:
-                    full_description += f"\n\nLocation: {location}"
+                    # Format dates
+                    if is_current_job:
+                        end_date = "Present"
                     
-                if employment_type:
-                    full_description += f"\nEmployment Type: {employment_type}"
+                    date_range_str = f"{start_date} - {end_date}" if end_date else start_date
+                    parsed_dates = parse_date_range(date_range_str)
+                    
+                    # Build comprehensive description
+                    full_description = description
+                    
+                    if achievements:
+                        full_description += f"\n\nKey Achievements:\n{achievements}"
+                    
+                    if technologies_used:
+                        full_description += f"\n\nTechnologies: {technologies_used}"
+                    
+                    if location:
+                        full_description += f"\n\nLocation: {location}"
+                        
+                    if employment_type:
+                        full_description += f"\nEmployment Type: {employment_type}"
 
-                new_experience = Experience(
-                    id=str(uuid.uuid4()),
-                    jobTitle=job_title,
-                    company=company,
-                    dates=date_range,
-                    description=full_description.strip(),
-                )
-                resume_data.experience.append(new_experience)
+                    new_experience = Experience(
+                        id=str(uuid.uuid4()),
+                        jobTitle=job_title,
+                        company=company,
+                        dates=Dates(**parsed_dates),
+                        description=full_description.strip(),
+                    )
+                    resume_data.experience.append(new_experience)
 
-                db_resume.data = resume_data.dict()
-                await db.commit()
+                    db_resume.data = resume_data.dict()
+                    await db.commit()
+                    
+                    return f"""✅ **Work Experience Added Successfully!**
+
+                            **Position:** {job_title}
+                            **Company:** {company}
+                            **Duration:** {date_range_str}
+                            {f"**Location:** {location}" if location else ""}
+                            {f"**Type:** {employment_type}" if employment_type else ""}
+
+                            Your resume now has {len(resume_data.experience)} work experience entries."""
                 
-                return f"""✅ **Work Experience Added Successfully!**
-
-                        **Position:** {job_title}
-                        **Company:** {company}
-                        **Duration:** {date_range}
-                        {f"**Location:** {location}" if location else ""}
-                        {f"**Type:** {employment_type}" if employment_type else ""}
-
-                        Your resume now has {len(resume_data.experience)} work experience entries."""
-            
-            except Exception as e:
-                if db.is_active:
-                    await db.rollback()
-                log.error(f"Error adding work experience: {e}")
-                return f"❌ Error adding work experience: {str(e)}"
+                except Exception as e:
+                    if db.is_active:
+                        await db.rollback()
+                    log.error(f"Error adding work experience: {e}")
+                    return f"❌ Error adding work experience: {str(e)}"
 
     @tool
     async def add_education(
@@ -1365,80 +1388,78 @@ async def orchestrator_websocket(
         Returns:
             Success message with added education details
         """
-        # Use an isolated session for this tool to prevent conflicts
-        async with async_session_maker() as session:
-            try:
-                # Re-fetch the user within the new session
-                user_result = await session.execute(select(User).where(User.id == user.id))
-                session_user = user_result.scalars().first()
-                if not session_user:
-                    return "❌ Error: Could not find user to add education to."
+        async with resume_modification_lock:
+            # Use an isolated session for this tool to prevent conflicts
+            async with async_session_maker() as session:
+                try:
+                    # FIX: Correctly use the get_or_create_resume helper.
+                    # This removes the buggy logic that was checking for '.data' on a User object.
+                    db_resume, resume_data = await get_or_create_resume(session)
 
-                db_resume, resume_data = await get_or_create_resume(session)
-
-                # Format dates
-                if is_current:
-                    if "expected" not in (end_year or "").lower():
-                        end_year = f"Expected {end_year}" if end_year else "Present"
-                
-                date_range = f"{start_year} - {end_year}" if end_year else start_year
-                
-                # Build degree title with field of study
-                full_degree = degree
-                if field_of_study:
-                    full_degree += f" in {field_of_study}"
-                
-                # Build comprehensive description
-                description_parts = []
-                
-                if location:
-                    description_parts.append(f"Location: {location}")
+                    # Format dates
+                    if is_current:
+                        if "expected" not in (end_year or "").lower():
+                            end_year = f"Expected {end_year}" if end_year else "Present"
                     
-                if gpa:
-                    description_parts.append(f"GPA: {gpa}")
+                    date_range_str = f"{start_year} - {end_year}" if end_year else start_year
+                    parsed_dates = parse_date_range(date_range_str)
                     
-                if honors:
-                    description_parts.append(f"Honors: {honors}")
+                    # Build degree title with field of study
+                    full_degree = degree
+                    if field_of_study:
+                        full_degree += f" in {field_of_study}"
                     
-                if relevant_coursework:
-                    description_parts.append(f"Relevant Coursework: {relevant_coursework}")
+                    # Build comprehensive description
+                    description_parts = []
                     
-                if thesis_project:
-                    description_parts.append(f"Thesis/Project: {thesis_project}")
-                
-                full_description = "\n".join(description_parts) if description_parts else ""
-
-                new_education = Education(
-                    id=str(uuid.uuid4()),
-                    degree=full_degree,
-                    institution=institution,
-                    dates=date_range,
-                    description=full_description
-                )
+                    if location:
+                        description_parts.append(f"Location: {location}")
                         
-                # Ensure education list exists
-                if not hasattr(resume_data, 'education') or resume_data.education is None:
-                    resume_data.education = []
+                    if gpa:
+                        description_parts.append(f"GPA: {gpa}")
                         
-                resume_data.education.append(new_education)
+                    if honors:
+                        description_parts.append(f"Honors: {honors}")
+                        
+                    if relevant_coursework:
+                        description_parts.append(f"Relevant Coursework: {relevant_coursework}")
+                        
+                    if thesis_project:
+                        description_parts.append(f"Thesis/Project: {thesis_project}")
+                    
+                    full_description = "\n".join(description_parts) if description_parts else ""
 
-                db_resume.data = resume_data.dict()
-                attributes.flag_modified(db_resume, "data") # <-- FIX: Mark data as modified
-                await session.commit() # <-- FIX: Commit the transaction
-                
-                return f"""✅ **Education Added Successfully!**
+                    new_education = Education(
+                        id=str(uuid.uuid4()),
+                        degree=full_degree,
+                        institution=institution,
+                        dates=Dates(**parsed_dates),
+                        description=full_description
+                    )
+                            
+                    # Ensure education list exists
+                    if not hasattr(resume_data, 'education') or resume_data.education is None:
+                        resume_data.education = []
+                            
+                    resume_data.education.append(new_education)
 
-                    **Degree:** {full_degree}
-                    **Institution:** {institution}
-                    **Duration:** {date_range}
+                    db_resume.data = resume_data.dict()
+                    attributes.flag_modified(db_resume, "data") # <-- FIX: Mark data as modified
+                    await session.commit() # <-- FIX: Commit the transaction
+                    
+                    return f"""✅ **Education Added Successfully!**
 
-                    Your resume now has {len(resume_data.education)} education entries."""
-                
-            except Exception as e:
-                    if session.is_active:
-                        await session.rollback()
-                    log.error(f"Error adding education: {e}", exc_info=True)
-                    return f"❌ Error adding education: {str(e)}"
+                        **Degree:** {full_degree}
+                        **Institution:** {institution}
+                        **Duration:** {date_range_str}
+
+                        Your resume now has {len(resume_data.education)} education entries."""
+                    
+                except Exception as e:
+                        if session.is_active:
+                            await session.rollback()
+                        log.error(f"Error adding education: {e}", exc_info=True)
+                        return f"❌ Error adding education: {str(e)}"
 
     @tool
     async def set_skills(skills: List[str]) -> str:
@@ -2865,12 +2886,12 @@ ENHANCED CONTENT:"""
         company_name: str = ""
     ) -> str:
         """⭐ PRIMARY CV REFINEMENT TOOL ⭐"""
-        async with async_session_maker() as session:
+        async with resume_modification_lock:
             try:
                 log.info(f"CV refinement requested for role: {target_role}")
                 
                 # 1. Get the user's current resume data.
-                db_resume, base_resume_data = await get_or_create_resume(session)
+                db_resume, base_resume_data = await get_or_create_resume()
                 
                 # 2. Create the generation chain to output structured JSON.
                 parser = PydanticOutputParser(pydantic_object=ResumeData)

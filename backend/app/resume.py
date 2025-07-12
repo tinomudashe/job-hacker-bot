@@ -67,6 +67,7 @@ class Education(BaseModel):
     institution: str = ""
     # FIX: Update the 'dates' field to use the new structured Dates model.
     dates: Optional[Dates] = None
+    description: Optional[str] = ""
 
 class ResumeData(BaseModel):
     personalInfo: PersonalInfo
