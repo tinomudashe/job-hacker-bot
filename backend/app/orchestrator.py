@@ -1943,10 +1943,20 @@ Your resume now has {len(resume_data.certifications)} certifications."""
                 
                 chain = prompt_template | llm | parser
 
-                user_info_str = f"Name: {user.name}, Email: {user.email}, LinkedIn: {user.linkedin}"
+                # EDIT: Instead of a simple string, create a structured dictionary
+                # that matches what the AI needs for the 'personal_info' sub-object.
+                user_info_dict = {
+                    "name": user.name,
+                    "email": user.email,
+                    "linkedin": user.linkedin,
+                    "phone": user.phone or "Not provided",
+                    "website": "" # Assuming no website field on the user model for now
+                }
+
                 job_details_str = f"Job Title: {scraped_details.title}, Company: {scraped_details.company}, Description: {scraped_details.description}, Requirements: {scraped_details.requirements}"
 
-                response_data = await chain.ainvoke({"user_info": user_info_str, "job_details": job_details_str})
+                # EDIT: Pass the structured dictionary in the 'user_info' variable.
+                response_data = await chain.ainvoke({"user_info": json.dumps(user_info_dict), "job_details": job_details_str})
                 
                 # The model might return a dict or a Pydantic model, ensure it's a dict
                 if isinstance(response_data, BaseModel):

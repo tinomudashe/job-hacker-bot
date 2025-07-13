@@ -8,13 +8,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/lib/toast";
 import { useAuth } from "@clerk/nextjs";
 import {
+  Award,
   Briefcase,
   ChevronDown,
   Edit3,
   ExternalLink,
   FileText,
+  Globe,
   GraduationCap,
+  Lightbulb,
   Plus,
+  Save,
   Sparkles,
   Trash2,
   User,
@@ -90,6 +94,7 @@ export function PDFGenerationDialog({
   const [isMobile, setIsMobile] = React.useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = React.useState(false);
   const [isLoadingUserData, setIsLoadingUserData] = React.useState(false);
+  const [isSaving, setIsSaving] = React.useState(false);
 
   // Additional form fields for structured input
   const [personalInfo, setPersonalInfo] = React.useState({
@@ -103,11 +108,18 @@ export function PDFGenerationDialog({
   });
 
   const [workExperience, setWorkExperience] = React.useState([
-    { title: "", company: "", startYear: "", endYear: "", description: "" },
+    {
+      id: "",
+      title: "",
+      company: "",
+      startYear: "",
+      endYear: "",
+      description: "",
+    },
   ]);
 
   const [education, setEducation] = React.useState([
-    { degree: "", school: "", year: "", description: "" },
+    { id: "", degree: "", school: "", year: "", description: "" },
   ]);
 
   const [skills, setSkills] = React.useState("");
@@ -115,12 +127,25 @@ export function PDFGenerationDialog({
   const [newSkill, setNewSkill] = React.useState("");
   const [additionalSections, setAdditionalSections] = React.useState("");
 
+  const [projects, setProjects] = React.useState([
+    { name: "", description: "", technologies: "", url: "" },
+  ]);
+  const [certifications, setCertifications] = React.useState([
+    { name: "", issuing_organization: "", date_issued: "" },
+  ]);
+  const [languages, setLanguages] = React.useState([
+    { name: "", proficiency: "" },
+  ]);
+
   // Collapsible sections state
   const [expandedSections, setExpandedSections] = React.useState({
     personalInfo: true,
     workExperience: false,
     education: false,
     skills: false,
+    projects: false,
+    certifications: false,
+    languages: false,
     additionalSections: false,
     content: contentType === "cover_letter",
   });
@@ -133,6 +158,9 @@ export function PDFGenerationDialog({
         workExperience: false,
         education: false,
         skills: false,
+        projects: false,
+        certifications: false,
+        languages: false,
         additionalSections: false,
         content: false,
       };
@@ -205,6 +233,7 @@ export function PDFGenerationDialog({
           const [coverLetterResponse, profileResponse] = await Promise.all([
             fetch("/api/documents/cover-letters/latest", {
               headers: { Authorization: `Bearer ${token}` },
+              cache: "no-store",
             }),
             fetch("/api/profile", {
               headers: { Authorization: `Bearer ${token}` },
@@ -233,7 +262,7 @@ export function PDFGenerationDialog({
 
           setPersonalInfo({
             fullName:
-              parsedCoverLetterData?.personal_info?.name ||
+              parsedCoverLetterData?.personal_info?.fullName ||
               `${profileData?.first_name || ""} ${
                 profileData?.last_name || ""
               }`.trim() ||
@@ -248,7 +277,7 @@ export function PDFGenerationDialog({
               profileData?.phone ||
               "",
             address:
-              parsedCoverLetterData?.personal_info?.location ||
+              parsedCoverLetterData?.personal_info?.address ||
               profileData?.address ||
               "",
             linkedin:
@@ -339,6 +368,7 @@ export function PDFGenerationDialog({
             if (resumeData.experience && resumeData.experience.length > 0) {
               setWorkExperience(
                 resumeData.experience.map((exp: any) => ({
+                  id: exp.id || crypto.randomUUID(),
                   title: exp.jobTitle || "",
                   company: exp.company || "",
                   startYear: exp.dates?.start || "",
@@ -352,6 +382,7 @@ export function PDFGenerationDialog({
             if (resumeData.education && resumeData.education.length > 0) {
               setEducation(
                 resumeData.education.map((edu: any) => ({
+                  id: edu.id || crypto.randomUUID(),
                   degree: edu.degree || "",
                   school: edu.institution || "",
                   year: edu.dates?.end || edu.dates?.start || "",
@@ -364,6 +395,24 @@ export function PDFGenerationDialog({
             if (resumeData.skills && resumeData.skills.length > 0) {
               setSkillsArray(resumeData.skills);
               setSkills(resumeData.skills.join(", "));
+            }
+
+            if (resumeData.projects && resumeData.projects.length > 0) {
+              setProjects(
+                resumeData.projects.map((p: any) => ({
+                  ...p,
+                  technologies: (p.technologies || []).join(", "),
+                }))
+              );
+            }
+            if (
+              resumeData.certifications &&
+              resumeData.certifications.length > 0
+            ) {
+              setCertifications(resumeData.certifications);
+            }
+            if (resumeData.languages && resumeData.languages.length > 0) {
+              setLanguages(resumeData.languages);
             }
           }
 
@@ -491,6 +540,7 @@ export function PDFGenerationDialog({
         });
         setWorkExperience([
           {
+            id: "",
             title: "",
             company: "",
             startYear: "",
@@ -498,92 +548,36 @@ export function PDFGenerationDialog({
             description: "",
           },
         ]);
-        setEducation([{ degree: "", school: "", year: "", description: "" }]);
+        setEducation([
+          { id: "", degree: "", school: "", year: "", description: "" },
+        ]);
         setSkillsArray([]);
         setSkills("");
         setAdditionalSections("");
+        setProjects([{ name: "", description: "", technologies: "", url: "" }]);
+        setCertifications([
+          { name: "", issuing_organization: "", date_issued: "" },
+        ]);
+        setLanguages([{ name: "", proficiency: "" }]);
         setIsLoadingUserData(false);
       }
     }
   }, [open]);
 
+  // EDIT: Simplified handlePreview to remove sessionStorage dependency for resumes.
+  // The preview page is now always responsible for fetching its own data from the database.
   const handlePreview = () => {
-    // For cover letters, we force the preview page to fetch the latest saved version.
-    if (contentType === "cover_letter") {
-      const previewUrl = `/preview?type=cover_letter&style=${selectedStyle}`;
-      const newWindow = window.open(
-        previewUrl,
-        "_blank",
-        "noopener,noreferrer"
-      );
-      if (newWindow) {
-        newWindow.focus();
-        toast.success("Preview opened in a new tab.");
-      } else {
-        toast.error("Please allow pop-ups to view the preview.");
-      }
-      return;
-    }
+    const previewUrl = `/preview?type=${contentType}&style=${selectedStyle}${
+      contentId ? `&content_id=${contentId}` : ""
+    }`;
 
-    // For resumes, we continue to use sessionStorage for an instant preview of edits.
-    try {
-      const contentToUse = getCombinedContent();
-      if (!contentToUse || contentToUse.trim().length === 0) {
-        throw new Error("Please add some content before previewing");
-      }
+    const newWindow = window.open(previewUrl, "_blank", "noopener,noreferrer");
 
-      const selectedStyleData =
-        PDF_STYLES.find((s) => s.key === selectedStyle) || PDF_STYLES[0];
-
-      // Create preview data
-      const previewData = {
-        content: contentToUse.trim(),
-        style: selectedStyle,
-        colors: selectedStyleData.colors,
-        company_name: editedCompanyName || "",
-        job_title: editedJobTitle || "",
-        content_type: contentType,
-        personal_info: personalInfo,
-        work_experience: workExperience,
-        education: education,
-        skills: skills,
-        additional_sections: additionalSections,
-      };
-
-      // Store preview data in sessionStorage for the preview page
-      sessionStorage.setItem("pdf_preview_data", JSON.stringify(previewData));
-
-      // Open preview in new tab with content_id if available for cover letters
-      let previewUrl = `/preview?type=${contentType}&style=${selectedStyle}`;
-      if (contentType === "cover_letter" && contentId) {
-        previewUrl += `&content_id=${contentId}`;
-        console.log(
-          "🎯 Opening cover letter preview with content_id:",
-          contentId
-        );
-      }
-
-      const newWindow = window.open(
-        previewUrl,
-        "_blank",
-        "noopener,noreferrer"
-      );
-
-      if (newWindow) {
-        newWindow.focus();
-        toast.success("Preview opened in new tab");
-      } else {
-        toast.error("Please allow popups to view the preview");
-      }
-    } catch (error) {
-      console.error("Preview error:", error);
-
-      let userMessage = "Failed to open preview";
-      if (error instanceof Error) {
-        userMessage = error.message;
-      }
-
-      toast.error(userMessage);
+    if (newWindow) {
+      newWindow.focus();
+      toast.success("Preview opened in a new tab.");
+    } else {
+      toast.error("Please allow pop-ups to view the preview.");
     }
   };
 
@@ -592,7 +586,10 @@ export function PDFGenerationDialog({
 
   // Check if content is valid - either free-form text or structured data
   const isContentValid = React.useMemo(() => {
-    if (editedContent && editedContent.trim().length > 0) return true;
+    // For cover letters, we only need the body text to be valid.
+    if (contentType === "cover_letter") {
+      return editedContent && editedContent.trim().length > 0;
+    }
 
     if (contentType === "resume") {
       // For resumes, check if at least personal info or work experience has content
@@ -608,14 +605,21 @@ export function PDFGenerationDialog({
           edu.degree.trim() || edu.school.trim() || edu.description.trim()
       );
       const hasSkills = skills.trim().length > 0 || skillsArray.length > 0;
-      const hasAdditionalSections = additionalSections.trim().length > 0;
+
+      const hasProjects = projects.some(
+        (p) => p.name.trim() || p.description.trim()
+      );
+      const hasCerts = certifications.some((c) => c.name.trim());
+      const hasLangs = languages.some((l) => l.name.trim());
 
       return (
         hasPersonalInfo ||
         hasWorkExperience ||
         hasEducation ||
         hasSkills ||
-        hasAdditionalSections
+        hasProjects ||
+        hasCerts ||
+        hasLangs
       );
     }
 
@@ -627,98 +631,151 @@ export function PDFGenerationDialog({
     workExperience,
     education,
     skills,
-    additionalSections,
+    projects,
+    certifications,
+    languages,
   ]);
 
-  // Combine all content for PDF generation
-  const getCombinedContent = () => {
-    if (contentType === "cover_letter") {
-      return editedContent;
-    }
+  const handleSaveCoverLetter = async () => {
+    if (isSaving || !isContentValid) return;
 
-    // For resumes, combine structured data with free-form content
-    let combined = "";
+    setIsSaving(true);
+    toast.loading("Saving your changes...", { id: "save-toast" });
 
-    // Personal Information
-    if (Object.values(personalInfo).some((val) => val.trim().length > 0)) {
-      combined += "**Personal Information**\n\n";
-      if (personalInfo.fullName)
-        combined += `**Name:** ${personalInfo.fullName}\n`;
-      if (personalInfo.email) combined += `**Email:** ${personalInfo.email}\n`;
-      if (personalInfo.phone) combined += `**Phone:** ${personalInfo.phone}\n`;
-      if (personalInfo.address)
-        combined += `**Address:** ${personalInfo.address}\n`;
-      if (personalInfo.linkedin)
-        combined += `**LinkedIn:** ${personalInfo.linkedin}\n`;
-      if (personalInfo.website)
-        combined += `**Website:** ${personalInfo.website}\n`;
-      combined += "\n---\n\n";
-    }
-
-    // Work Experience
-    const validJobs = workExperience.filter(
-      (job) => job.title.trim() || job.company.trim() || job.description.trim()
-    );
-    if (validJobs.length > 0) {
-      combined += "**Work Experience**\n\n";
-      validJobs.forEach((job) => {
-        if (job.title || job.company) {
-          combined += `**${job.title}** ${
-            job.company ? `at ${job.company}` : ""
-          }\n`;
-        }
-        if (job.startYear || job.endYear) {
-          combined += `*${job.startYear}${
-            job.endYear ? ` - ${job.endYear}` : " - Present"
-          }*\n`;
-        }
-        if (job.description) combined += `${job.description}\n`;
-        combined += "\n";
-      });
-      combined += "---\n\n";
-    }
-
-    // Education
-    const validEducation = education.filter(
-      (edu) => edu.degree.trim() || edu.school.trim() || edu.description.trim()
-    );
-    if (validEducation.length > 0) {
-      combined += "**Education**\n\n";
-      validEducation.forEach((edu) => {
-        if (edu.degree || edu.school) {
-          combined += `**${edu.degree}** ${
-            edu.school ? `from ${edu.school}` : ""
-          }\n`;
-        }
-        if (edu.year) combined += `*${edu.year}*\n`;
-        if (edu.description) combined += `${edu.description}\n`;
-        combined += "\n";
-      });
-      combined += "---\n\n";
-    }
-
-    // Skills
-    if (skills.trim() || skillsArray.length > 0) {
-      combined += "**Skills**\n\n";
-      if (skillsArray.length > 0) {
-        combined += `${skillsArray.join(", ")}\n\n---\n\n`;
-      } else {
-        combined += `${skills}\n\n---\n\n`;
+    try {
+      const token = await getToken();
+      if (!token) {
+        toast.error("Authentication session not found.", { id: "save-toast" });
+        setIsSaving(false);
+        return;
       }
-    }
 
-    // Additional Sections
-    if (additionalSections.trim()) {
-      combined += "**Additional Information**\n\n";
-      combined += `${additionalSections}\n\n---\n\n`;
-    }
+      const coverLetterPayload = {
+        company_name: editedCompanyName,
+        job_title: editedJobTitle,
+        recipient_name: recipientName,
+        recipient_title: recipientTitle,
+        body: editedContent,
+        personal_info: {
+          fullName: personalInfo.fullName,
+          email: personalInfo.email,
+          phone: personalInfo.phone,
+          linkedin: personalInfo.linkedin,
+          website: personalInfo.website,
+        },
+      };
 
-    // Free-form content
-    if (editedContent.trim()) {
-      combined += editedContent;
-    }
+      const requestBody = {
+        content: JSON.stringify(coverLetterPayload),
+      };
 
-    return combined.trim();
+      const response = await fetch("/api/documents/cover-letters/latest", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(
+          errorData?.detail || "Failed to save the cover letter."
+        );
+      }
+
+      toast.success("Cover letter saved successfully!", { id: "save-toast" });
+    } catch (error) {
+      console.error("Error saving cover letter:", error);
+      const message =
+        error instanceof Error ? error.message : "An unknown error occurred.";
+      toast.error(message, { id: "save-toast" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // EDIT: Added a new save handler specifically for resumes.
+  const handleSaveResume = async () => {
+    if (isSaving || !isContentValid) return;
+
+    setIsSaving(true);
+    toast.loading("Saving your resume...", { id: "save-resume-toast" });
+
+    try {
+      const token = await getToken();
+      if (!token) {
+        toast.error("Authentication session not found.", {
+          id: "save-resume-toast",
+        });
+        setIsSaving(false);
+        return;
+      }
+
+      const resumePayload = {
+        personalInfo: {
+          name: personalInfo.fullName,
+          email: personalInfo.email,
+          phone: personalInfo.phone,
+          linkedin: personalInfo.linkedin,
+          location: personalInfo.address,
+          summary: personalInfo.summary,
+        },
+        experience: workExperience
+          .filter((exp) => exp.title || exp.company)
+          .map((exp) => ({
+            id: exp.id || crypto.randomUUID(),
+            jobTitle: exp.title,
+            company: exp.company,
+            dates: { start: exp.startYear, end: exp.endYear },
+            description: exp.description,
+          })),
+        education: education
+          .filter((edu) => edu.degree || edu.school)
+          .map((edu) => ({
+            id: edu.id || crypto.randomUUID(),
+            degree: edu.degree,
+            institution: edu.school,
+            dates: { start: null, end: edu.year },
+            description: edu.description,
+          })),
+        skills: skillsArray.filter((s) => s.trim()),
+        projects: projects
+          .filter((p) => p.name)
+          .map((p) => ({
+            ...p,
+            technologies: p.technologies
+              ? p.technologies.split(",").map((t) => t.trim())
+              : [],
+          })),
+        certifications: certifications.filter((c) => c.name),
+        languages: languages.filter((l) => l.name),
+      };
+
+      const response = await fetch("/api/resume/full", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(resumePayload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.detail || "Failed to save the resume.");
+      }
+
+      toast.success("Resume saved successfully!", { id: "save-resume-toast" });
+    } catch (error) {
+      console.error("Error saving resume:", error);
+      const message =
+        error instanceof Error ? error.message : "An unknown error occurred.";
+      toast.error(message, { id: "save-resume-toast" });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Simple markdown to HTML conversion for preview
@@ -752,6 +809,67 @@ export function PDFGenerationDialog({
     }
 
     return formatted;
+  };
+
+  // Helper functions to manage new structured sections
+  const handleProjectChange = (
+    index: number,
+    field: keyof (typeof projects)[0],
+    value: string
+  ) => {
+    const updated = [...projects];
+    updated[index][field] = value;
+    setProjects(updated);
+  };
+
+  const addProject = () => {
+    setProjects([
+      ...projects,
+      { name: "", description: "", technologies: "", url: "" },
+    ]);
+  };
+
+  const removeProject = (index: number) => {
+    setProjects(projects.filter((_, i) => i !== index));
+  };
+
+  const handleCertificationChange = (
+    index: number,
+    field: keyof (typeof certifications)[0],
+    value: string
+  ) => {
+    const updated = [...certifications];
+    updated[index][field] = value;
+    setCertifications(updated);
+  };
+
+  const addCertification = () => {
+    setCertifications([
+      ...certifications,
+      { name: "", issuing_organization: "", date_issued: "" },
+    ]);
+  };
+
+  const removeCertification = (index: number) => {
+    setCertifications(certifications.filter((_, i) => i !== index));
+  };
+
+  const handleLanguageChange = (
+    index: number,
+    field: keyof (typeof languages)[0],
+    value: string
+  ) => {
+    const updated = [...languages];
+    updated[index][field] = value;
+    setLanguages(updated);
+  };
+
+  const addLanguage = () => {
+    setLanguages([...languages, { name: "", proficiency: "" }]);
+  };
+
+  const removeLanguage = (index: number) => {
+    setLanguages(languages.filter((_, i) => i !== index));
   };
 
   return (
@@ -790,14 +908,33 @@ export function PDFGenerationDialog({
 
           {/* Mobile Actions Row */}
           <div className="flex sm:hidden items-center justify-center gap-2 mt-3 pt-3 !border-t !border-gray-200 dark:!border-white/8">
+            {/* EDIT: Add Save button that works for both content types */}
+            <Button
+              onClick={
+                contentType === "resume"
+                  ? handleSaveResume
+                  : handleSaveCoverLetter
+              }
+              disabled={isSaving || !isContentValid}
+              size="sm"
+              variant="outline"
+              className="flex items-center gap-2 text-sm px-4 h-9 rounded-lg disabled:opacity-50 font-semibold transition-all duration-300 flex-1"
+            >
+              {isSaving ? (
+                <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
+              <span>{isSaving ? "Saving..." : "Save"}</span>
+            </Button>
             <Button
               onClick={handlePreview}
-              disabled={!isContentValid}
+              disabled={isSaving || !isContentValid}
               size="sm"
               className="flex items-center gap-2 !bg-primary hover:!bg-primary/90 text-primary-foreground text-sm px-4 h-9 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 hover:scale-105 disabled:hover:scale-100 flex-1"
             >
               <ExternalLink className="h-4 w-4" />
-              <span>Preview and Download</span>
+              <span>Preview & Download</span>
             </Button>
           </div>
 
@@ -831,14 +968,33 @@ export function PDFGenerationDialog({
             {/* Right: Actions */}
             <div className="flex flex-col items-end gap-2">
               <div className="flex items-center gap-3">
+                {/* EDIT: Add Save button that works for both content types */}
+                <Button
+                  onClick={
+                    contentType === "resume"
+                      ? handleSaveResume
+                      : handleSaveCoverLetter
+                  }
+                  disabled={isSaving || !isContentValid}
+                  size="sm"
+                  variant="outline"
+                  className="flex items-center gap-2 text-sm px-5 h-10 rounded-xl disabled:opacity-50 font-semibold transition-all duration-300 hover:scale-105"
+                >
+                  {isSaving ? (
+                    <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4" />
+                  )}
+                  <span>{isSaving ? "Saving..." : "Save"}</span>
+                </Button>
                 <Button
                   onClick={handlePreview}
-                  disabled={!isContentValid}
+                  disabled={isSaving || !isContentValid}
                   size="sm"
                   className="flex items-center gap-2 !bg-primary hover:!bg-primary/90 text-primary-foreground text-sm px-5 h-10 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 hover:scale-105 disabled:hover:scale-100"
                 >
                   <ExternalLink className="h-4 w-4" />
-                  <span>Preview and Download</span>
+                  <span>Preview & Download</span>
                 </Button>
 
                 <Button
@@ -908,6 +1064,30 @@ export function PDFGenerationDialog({
                     <Sparkles className="h-4 w-4 text-orange-600" />
                     <span className="font-medium text-gray-900 dark:text-gray-100">
                       Skills
+                    </span>
+                  </>
+                )}
+                {expandedSections.projects && (
+                  <>
+                    <Lightbulb className="h-4 w-4 text-yellow-600" />
+                    <span className="font-medium text-gray-900 dark:text-gray-100">
+                      Projects
+                    </span>
+                  </>
+                )}
+                {expandedSections.certifications && (
+                  <>
+                    <Award className="h-4 w-4 text-blue-600" />
+                    <span className="font-medium text-gray-900 dark:text-gray-100">
+                      Certifications
+                    </span>
+                  </>
+                )}
+                {expandedSections.languages && (
+                  <>
+                    <Globe className="h-4 w-4 text-pink-600" />
+                    <span className="font-medium text-gray-900 dark:text-gray-100">
+                      Languages
                     </span>
                   </>
                 )}
@@ -1029,37 +1209,67 @@ export function PDFGenerationDialog({
 
                     <button
                       onClick={() => {
-                        toggleSection("additionalSections");
+                        toggleSection("projects");
                         setIsMobileNavOpen(false);
                       }}
                       className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 hover:scale-[1.02] ${
-                        expandedSections.additionalSections
-                          ? "bg-muted text-foreground border border-border shadow-md"
+                        expandedSections.projects
+                          ? "bg-yellow-50 text-yellow-700 border border-yellow-200 shadow-md dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-700/50"
                           : "text-muted-foreground hover:bg-muted hover:text-foreground hover:shadow-md"
                       }`}
                     >
-                      <FileText className="h-4 w-4 flex-shrink-0" />
-                      Additional Sections
+                      <Lightbulb className="h-4 w-4 flex-shrink-0" />
+                      Projects
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        toggleSection("certifications");
+                        setIsMobileNavOpen(false);
+                      }}
+                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 hover:scale-[1.02] ${
+                        expandedSections.certifications
+                          ? "bg-blue-50 text-blue-700 border border-blue-200 shadow-md dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700/50"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground hover:shadow-md"
+                      }`}
+                    >
+                      <Award className="h-4 w-4 flex-shrink-0" />
+                      Certifications
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        toggleSection("languages");
+                        setIsMobileNavOpen(false);
+                      }}
+                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 hover:scale-[1.02] ${
+                        expandedSections.languages
+                          ? "bg-pink-50 text-pink-700 border border-pink-200 shadow-md dark:bg-pink-900/30 dark:text-pink-300 dark:border-pink-700/50"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground hover:shadow-md"
+                      }`}
+                    >
+                      <Globe className="h-4 w-4 flex-shrink-0" />
+                      Languages
                     </button>
                   </>
                 )}
 
-                <button
-                  onClick={() => {
-                    toggleSection("content");
-                    setIsMobileNavOpen(false);
-                  }}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 hover:scale-[1.02] ${
-                    expandedSections.content
-                      ? "bg-teal-50 text-teal-700 border border-teal-200 shadow-md dark:bg-teal-900/30 dark:text-teal-300 dark:border-teal-700/50"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground hover:shadow-md"
-                  }`}
-                >
-                  <Edit3 className="h-4 w-4 flex-shrink-0" />
-                  {contentType === "cover_letter"
-                    ? "Cover Letter Content"
-                    : "Free-form Content"}
-                </button>
+                {contentType === "cover_letter" && (
+                  <button
+                    onClick={() => {
+                      toggleSection("content");
+                      setIsMobileNavOpen(false);
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 hover:scale-[1.02] ${
+                      expandedSections.content
+                        ? "bg-teal-50 text-teal-700 border border-teal-200 shadow-md dark:bg-teal-900/30 dark:text-teal-300 dark:border-teal-700/50"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground hover:shadow-md"
+                    }`}
+                  >
+                    <Edit3 className="h-4 w-4 flex-shrink-0" />
+                    Cover Letter Content
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -1134,30 +1344,54 @@ export function PDFGenerationDialog({
                   </button>
 
                   <button
-                    onClick={() => toggleSection("additionalSections")}
+                    onClick={() => toggleSection("projects")}
                     className={`flex items-center gap-2 px-5 py-3 border-b-3 font-semibold text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-xl hover:scale-105 ${
-                      expandedSections.additionalSections
-                        ? "border-foreground text-foreground bg-muted shadow-lg"
-                        : "border-transparent text-muted-foreground hover:text-foreground hover:border-foreground hover:bg-muted hover:shadow-lg"
+                      expandedSections.projects
+                        ? "border-yellow-500 text-yellow-700 bg-yellow-50 shadow-lg dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-400"
+                        : "border-transparent text-muted-foreground hover:text-yellow-700 hover:border-yellow-500 hover:bg-yellow-50 hover:shadow-lg dark:hover:text-yellow-300 dark:hover:bg-yellow-900/30 dark:hover:border-yellow-400"
                     }`}
                   >
-                    <FileText className="h-4 w-4 flex-shrink-0" />
-                    <span>More</span>
+                    <Lightbulb className="h-4 w-4 flex-shrink-0" />
+                    <span>Projects</span>
+                  </button>
+                  <button
+                    onClick={() => toggleSection("certifications")}
+                    className={`flex items-center gap-2 px-5 py-3 border-b-3 font-semibold text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-xl hover:scale-105 ${
+                      expandedSections.certifications
+                        ? "border-blue-500 text-blue-700 bg-blue-50 shadow-lg dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-400"
+                        : "border-transparent text-muted-foreground hover:text-blue-700 hover:border-blue-500 hover:bg-blue-50 hover:shadow-lg dark:hover:text-blue-300 dark:hover:bg-blue-900/30 dark:hover:border-blue-400"
+                    }`}
+                  >
+                    <Award className="h-4 w-4 flex-shrink-0" />
+                    <span>Certifications</span>
+                  </button>
+                  <button
+                    onClick={() => toggleSection("languages")}
+                    className={`flex items-center gap-2 px-5 py-3 border-b-3 font-semibold text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-xl hover:scale-105 ${
+                      expandedSections.languages
+                        ? "border-pink-500 text-pink-700 bg-pink-50 shadow-lg dark:bg-pink-900/30 dark:text-pink-300 dark:border-pink-400"
+                        : "border-transparent text-muted-foreground hover:text-pink-700 hover:border-pink-500 hover:bg-pink-50 hover:shadow-lg dark:hover:text-pink-300 dark:hover:bg-pink-900/30 dark:hover:border-pink-400"
+                    }`}
+                  >
+                    <Globe className="h-4 w-4 flex-shrink-0" />
+                    <span>Languages</span>
                   </button>
                 </>
               )}
 
-              <button
-                onClick={() => toggleSection("content")}
-                className={`flex items-center gap-2 px-5 py-3 border-b-3 font-semibold text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-xl hover:scale-105 ${
-                  expandedSections.content
-                    ? "border-teal-500 text-teal-700 bg-teal-50 shadow-lg dark:bg-teal-900/30 dark:text-teal-300 dark:border-teal-400"
-                    : "border-transparent text-muted-foreground hover:text-teal-700 hover:border-teal-500 hover:bg-teal-50 hover:shadow-lg dark:hover:text-teal-300 dark:hover:bg-teal-900/30 dark:hover:border-teal-400"
-                }`}
-              >
-                <Edit3 className="h-4 w-4 flex-shrink-0" />
-                <span>Content</span>
-              </button>
+              {contentType === "cover_letter" && (
+                <button
+                  onClick={() => toggleSection("content")}
+                  className={`flex items-center gap-2 px-5 py-3 border-b-3 font-semibold text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-xl hover:scale-105 ${
+                    expandedSections.content
+                      ? "border-teal-500 text-teal-700 bg-teal-50 shadow-lg dark:bg-teal-900/30 dark:text-teal-300 dark:border-teal-400"
+                      : "border-transparent text-muted-foreground hover:text-teal-700 hover:border-teal-500 hover:bg-teal-50 hover:shadow-lg dark:hover:text-teal-300 dark:hover:bg-teal-900/30 dark:hover:border-teal-400"
+                  }`}
+                >
+                  <Edit3 className="h-4 w-4 flex-shrink-0" />
+                  <span>Content</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1349,6 +1583,23 @@ export function PDFGenerationDialog({
                         </div>
                       </div>
                     </div>
+                    <div className="mt-4 sm:mt-6">
+                      <Label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 sm:mb-2 block">
+                        Professional Summary
+                      </Label>
+                      <Textarea
+                        placeholder="Write a brief summary of your career objectives and key qualifications..."
+                        value={personalInfo.summary}
+                        onChange={(e) =>
+                          setPersonalInfo({
+                            ...personalInfo,
+                            summary: e.target.value,
+                          })
+                        }
+                        rows={4}
+                        className="w-full text-sm sm:text-base px-3 sm:px-4"
+                      />
+                    </div>
                   </div>
                 )}
 
@@ -1363,7 +1614,7 @@ export function PDFGenerationDialog({
                       <div className="space-y-4 sm:space-y-6">
                         {workExperience.map((job, index) => (
                           <div
-                            key={index}
+                            key={job.id || index}
                             className="relative !border !border-gray-200 dark:!border-white/20 rounded-xl p-4 sm:p-6 !bg-gray-50 dark:!bg-background/70 backdrop-blur-md shadow-lg hover:shadow-xl transition-all duration-200 group"
                           >
                             {/* Header with improved styling */}
@@ -1501,6 +1752,7 @@ export function PDFGenerationDialog({
                             setWorkExperience([
                               ...workExperience,
                               {
+                                id: crypto.randomUUID(),
                                 title: "",
                                 company: "",
                                 startYear: "",
@@ -1532,7 +1784,7 @@ export function PDFGenerationDialog({
                     <div className="space-y-6">
                       {education.map((edu, index) => (
                         <div
-                          key={index}
+                          key={edu.id || index}
                           className="!border !border-gray-200 dark:!border-white/20 rounded-xl p-4 sm:p-6 !bg-gray-50 dark:!bg-background/70 backdrop-blur-md shadow-lg hover:shadow-xl transition-all duration-200 group"
                         >
                           <div className="flex items-center justify-between mb-4">
@@ -1635,6 +1887,7 @@ export function PDFGenerationDialog({
                           setEducation([
                             ...education,
                             {
+                              id: crypto.randomUUID(),
                               degree: "",
                               school: "",
                               year: "",
@@ -1760,62 +2013,295 @@ export function PDFGenerationDialog({
                   </div>
                 )}
 
-                {/* Additional Sections */}
+                {contentType === "resume" && expandedSections.projects && (
+                  <div className="!bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 rounded-xl p-4 sm:p-6 shadow-lg !border !border-gray-200 dark:!border-white/8">
+                    <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
+                      <Lightbulb className="h-4 w-4 sm:h-5 sm:w-5 text-yellow-600 flex-shrink-0" />
+                      <span className="truncate">Projects</span>
+                    </h2>
+                    <div className="space-y-6">
+                      {projects.map((project, index) => (
+                        <div
+                          key={index}
+                          className="relative !border !border-gray-200 dark:!border-white/20 rounded-xl p-4 sm:p-6 !bg-gray-50 dark:!bg-background/70 backdrop-blur-md shadow-lg group"
+                        >
+                          <div className="flex justify-end mb-2">
+                            {projects.length > 1 && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => removeProject(index)}
+                                className="text-red-500 hover:text-red-700 h-8 w-8 p-0 opacity-50 group-hover:opacity-100"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="sm:col-span-2">
+                              <Label className="text-sm font-medium text-gray-700 dark:text-white mb-2 block">
+                                Project Name
+                              </Label>
+                              <Input
+                                placeholder="e.g., Personal Portfolio"
+                                value={project.name}
+                                onChange={(e) =>
+                                  handleProjectChange(
+                                    index,
+                                    "name",
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-sm font-medium text-gray-700 dark:text-white mb-2 block">
+                                Project URL
+                              </Label>
+                              <Input
+                                placeholder="e.g., https://my-portfolio.com"
+                                value={project.url}
+                                onChange={(e) =>
+                                  handleProjectChange(
+                                    index,
+                                    "url",
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-sm font-medium text-gray-700 dark:text-white mb-2 block">
+                                Technologies Used
+                              </Label>
+                              <Input
+                                placeholder="e.g., React, Next.js, Vercel"
+                                value={project.technologies}
+                                onChange={(e) =>
+                                  handleProjectChange(
+                                    index,
+                                    "technologies",
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <Label className="text-sm font-medium text-gray-700 dark:text-white mb-2 block">
+                                Description
+                              </Label>
+                              <Textarea
+                                placeholder="Describe your project..."
+                                value={project.description}
+                                onChange={(e) =>
+                                  handleProjectChange(
+                                    index,
+                                    "description",
+                                    e.target.value
+                                  )
+                                }
+                                rows={3}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      <Button
+                        onClick={addProject}
+                        variant="outline"
+                        className="w-full border-dashed border-2 h-12 text-gray-600 hover:text-foreground hover:border-gray-400"
+                      >
+                        <Plus className="h-4 w-4 mr-2" /> Add Project
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
                 {contentType === "resume" &&
-                  expandedSections.additionalSections && (
+                  expandedSections.certifications && (
                     <div className="!bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 rounded-xl p-4 sm:p-6 shadow-lg !border !border-gray-200 dark:!border-white/8">
-                      <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-3">
-                        <FileText className="h-5 w-5 text-indigo-600" />
-                        Additional Sections
+                      <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
+                        <Award className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 flex-shrink-0" />
+                        <span className="truncate">Certifications</span>
                       </h2>
-                      <Label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
-                        Additional Information
-                      </Label>
-                      <Textarea
-                        placeholder="**Projects**&#10;• Personal Portfolio Website - Built with React and deployed on Vercel&#10;• E-commerce API - RESTful API built with Node.js and MongoDB&#10;&#10;**Certifications**&#10;• AWS Certified Solutions Architect&#10;• Google Cloud Professional Developer&#10;&#10;**Awards**&#10;• Employee of the Month - March 2023&#10;• Dean's List - Fall 2019, Spring 2020"
-                        value={additionalSections}
-                        onChange={(e) => setAdditionalSections(e.target.value)}
-                        rows={8}
-                        data-scrollable="true"
-                        className="resize-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition-all duration-200 cursor-text"
-                        style={{
-                          fontSize: isMobile ? "16px" : undefined,
-                          lineHeight: "1.5",
-                          overflowY: "auto",
-                          scrollbarWidth: "thin",
-                        }}
-                      />
+                      <div className="space-y-6">
+                        {certifications.map((cert, index) => (
+                          <div
+                            key={index}
+                            className="relative !border !border-gray-200 dark:!border-white/20 rounded-xl p-4 sm:p-6 !bg-gray-50 dark:!bg-background/70 backdrop-blur-md shadow-lg group"
+                          >
+                            <div className="flex justify-end mb-2">
+                              {certifications.length > 1 && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => removeCertification(index)}
+                                  className="text-red-500 hover:text-red-700 h-8 w-8 p-0 opacity-50 group-hover:opacity-100"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div>
+                                <Label className="text-sm font-medium text-gray-700 dark:text-white mb-2 block">
+                                  Certificate Name
+                                </Label>
+                                <Input
+                                  placeholder="e.g., AWS Certified Developer"
+                                  value={cert.name}
+                                  onChange={(e) =>
+                                    handleCertificationChange(
+                                      index,
+                                      "name",
+                                      e.target.value
+                                    )
+                                  }
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-sm font-medium text-gray-700 dark:text-white mb-2 block">
+                                  Issuing Organization
+                                </Label>
+                                <Input
+                                  placeholder="e.g., Amazon Web Services"
+                                  value={cert.issuing_organization}
+                                  onChange={(e) =>
+                                    handleCertificationChange(
+                                      index,
+                                      "issuing_organization",
+                                      e.target.value
+                                    )
+                                  }
+                                />
+                              </div>
+                              <div className="sm:col-span-2">
+                                <Label className="text-sm font-medium text-gray-700 dark:text-white mb-2 block">
+                                  Date Issued
+                                </Label>
+                                <Input
+                                  placeholder="e.g., June 2023"
+                                  value={cert.date_issued}
+                                  onChange={(e) =>
+                                    handleCertificationChange(
+                                      index,
+                                      "date_issued",
+                                      e.target.value
+                                    )
+                                  }
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        <Button
+                          onClick={addCertification}
+                          variant="outline"
+                          className="w-full border-dashed border-2 h-12 text-gray-600 hover:text-foreground hover:border-gray-400"
+                        >
+                          <Plus className="h-4 w-4 mr-2" /> Add Certification
+                        </Button>
+                      </div>
                     </div>
                   )}
 
-                {/* Content Editor Section */}
-                {expandedSections.content && (
+                {contentType === "resume" && expandedSections.languages && (
+                  <div className="!bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 rounded-xl p-4 sm:p-6 shadow-lg !border !border-gray-200 dark:!border-white/8">
+                    <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
+                      <Globe className="h-4 w-4 sm:h-5 sm:w-5 text-pink-600 flex-shrink-0" />
+                      <span className="truncate">Languages</span>
+                    </h2>
+                    <div className="space-y-6">
+                      {languages.map((lang, index) => (
+                        <div
+                          key={index}
+                          className="relative !border !border-gray-200 dark:!border-white/20 rounded-xl p-4 sm:p-6 !bg-gray-50 dark:!bg-background/70 backdrop-blur-md shadow-lg group"
+                        >
+                          <div className="flex justify-end mb-2">
+                            {languages.length > 1 && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => removeLanguage(index)}
+                                className="text-red-500 hover:text-red-700 h-8 w-8 p-0 opacity-50 group-hover:opacity-100"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                              <Label className="text-sm font-medium text-gray-700 dark:text-white mb-2 block">
+                                Language
+                              </Label>
+                              <Input
+                                placeholder="e.g., English"
+                                value={lang.name}
+                                onChange={(e) =>
+                                  handleLanguageChange(
+                                    index,
+                                    "name",
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-sm font-medium text-gray-700 dark:text-white mb-2 block">
+                                Proficiency
+                              </Label>
+                              <Input
+                                placeholder="e.g., Native, Fluent, Conversational"
+                                value={lang.proficiency}
+                                onChange={(e) =>
+                                  handleLanguageChange(
+                                    index,
+                                    "proficiency",
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      <Button
+                        onClick={addLanguage}
+                        variant="outline"
+                        className="w-full border-dashed border-2 h-12 text-gray-600 hover:text-foreground hover:border-gray-400"
+                      >
+                        <Plus className="h-4 w-4 mr-2" /> Add Language
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {contentType === "resume" &&
+                  expandedSections.additionalSections && (
+                    <div className="hidden">
+                      {/* This section is now replaced by structured fields */}
+                    </div>
+                  )}
+
+                {expandedSections.content && contentType === "cover_letter" && (
                   <div className="!bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 rounded-xl p-4 sm:p-6 shadow-lg !border !border-gray-200 dark:!border-white/8">
                     <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
                       <Edit3 className="h-4 w-4 sm:h-5 sm:w-5 text-teal-600 flex-shrink-0" />
-                      <span className="truncate">
-                        {contentType === "cover_letter"
-                          ? "Cover Letter Content"
-                          : "Free-form Content"}
-                      </span>
+                      <span className="truncate">Cover Letter Content</span>
                     </h2>
                     <Label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
-                      {contentType === "cover_letter"
-                        ? "Cover Letter Text"
-                        : "Additional Content"}
+                      Cover Letter Text
                     </Label>
                     <Textarea
                       value={editedContent}
                       onChange={(e) => setEditedContent(e.target.value)}
-                      placeholder={
-                        contentType === "cover_letter"
-                          ? `Dear Hiring Manager,
+                      placeholder={`Dear Hiring Manager,
 
 I am writing to express my strong interest in the ${
-                              editedJobTitle || "[Job Title]"
-                            } position at ${
-                              editedCompanyName || "[Company Name]"
-                            }. With my background in [Your Field] and [X] years of experience, I am confident that I would be a valuable addition to your team.
+                        editedJobTitle || "[Job Title]"
+                      } position at ${
+                        editedCompanyName || "[Company Name]"
+                      }. With my background in [Your Field] and [X] years of experience, I am confident that I would be a valuable addition to your team.
 
 In my previous role at [Previous Company], I successfully [Key Achievement]. This experience has equipped me with [Relevant Skills] that directly align with the requirements of this position.
 
@@ -1824,18 +2310,8 @@ I am particularly drawn to [Company Name] because [Reason for Interest in Compan
 Thank you for considering my application. I look forward to discussing how my skills and experience can contribute to your team's success.
 
 Sincerely,
-[Your Name]`
-                          : `Use this section to add any additional content or to override the structured format above with custom text.
-
-**Formatting Tips:**
-• Use **bold** and *italic* text for emphasis
-• Create bullet points with • at the start of lines
-• Add section dividers with ---
-• Write in a professional, clear tone
-
-This content will be added to your resume after the structured sections above.`
-                      }
-                      rows={contentType === "cover_letter" ? 16 : 12}
+[Your Name]`}
+                      rows={16}
                       data-scrollable="true"
                       className="resize-none text-sm sm:text-base px-3 sm:px-4 py-2.5 sm:py-3 leading-relaxed min-h-[300px] sm:min-h-[400px] focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition-all duration-200 cursor-text scrollbar-thin !bg-white dark:!bg-background/80"
                       style={{
