@@ -22,7 +22,6 @@ except ImportError:
 from app.db import get_db
 from app.models_db import User
 from app.dependencies import get_current_active_user
-from app.usage import UsageManager
 
 
 logger = logging.getLogger(__name__)
@@ -49,8 +48,67 @@ class FeedbackRequest(BaseModel):
 class FeedbackResponse(BaseModel):
     feedback: str
     is_correct: bool
+    tone_score: int = Field(..., ge=1, le=10, description="Tone quality score from 1-10")
+    correctness_score: int = Field(..., ge=1, le=10, description="Content correctness score from 1-10")
+    confidence_score: int = Field(..., ge=1, le=10, description="Confidence level score from 1-10")
+    overall_score: int = Field(..., ge=1, le=10, description="Overall performance score from 1-10")
+    improvement_tips: str = Field(..., description="Specific tips for improvement")
 
 # --- Helper Functions ---
+
+def extract_cv_details(content: str) -> str:
+    """Extract detailed CV information from interview preparation content."""
+    cv_details = ""
+    
+    # Extract user context section
+    if "USER CONTEXT:" in content:
+        lines = content.split('\n')
+        in_user_context = False
+        for line in lines:
+            if "USER CONTEXT:" in line:
+                in_user_context = True
+                cv_details += line + "\n"
+            elif in_user_context and line.startswith(("TARGET ROLE:", "COMPANY:", "INTERVIEW TYPE:")):
+                break
+            elif in_user_context:
+                cv_details += line + "\n"
+    
+    # Look for specific background info patterns in the guide
+    patterns_to_extract = [
+        "Background:", "Recent Role:", "Key Skills:", "Experience:",
+        "Current Role:", "worked at", "experience with", "Full-Stack",
+        "freelance", "Upwork", "conversion", "React", "Next.js",
+        "Spring Boot", "technologies", "projects", "achievements"
+    ]
+    
+    lines = content.split('\n')
+    for line in lines:
+        line_lower = line.lower()
+        if any(pattern.lower() in line_lower for pattern in patterns_to_extract):
+            cv_details += line + "\n"
+            
+        # Extract company and technology mentions
+        if any(word in line_lower for word in ["worked", "developed", "built", "created", "implemented"]):
+            cv_details += line + "\n"
+    
+    # Look for flashcard data that might contain CV-specific questions
+    if "<!--FLASHCARD_DATA:" in content:
+        import re
+        flashcard_match = re.search(r'<!--FLASHCARD_DATA:(.*?)-->', content, re.DOTALL)
+        if flashcard_match:
+            try:
+                import json
+                flashcard_data = json.loads(flashcard_match.group(1))
+                for item in flashcard_data:
+                    if isinstance(item, dict) and 'question' in item:
+                        question = item['question']
+                        # Extract company/technology names from existing questions
+                        if any(keyword in question.lower() for keyword in ["worked", "company", "project", "experience"]):
+                            cv_details += f"Previous question context: {question}\n"
+            except:
+                pass
+    
+    return cv_details.strip()
 
 async def transcribe_audio(audio_file: UploadFile) -> str:
     """Transcribes an audio file using Google Cloud Speech-to-Text."""
@@ -125,7 +183,21 @@ def create_flashcard_generation_agent():
          "You are an expert educator and content creator. Your task is to generate a set of high-quality flashcards based on the provided context. "
          "The questions should be clear and concise, and the answers should be accurate and informative. The output must be a JSON object that strictly follows the provided format instructions."),
         ("human", 
-         "Please generate {count} flashcards on the topic of '{topic}'. The context for these flashcards is:\n\n"
+         "Generate {count} flashcards for '{topic}'. \n\n"
+         "IMPORTANT INSTRUCTIONS:\n"
+         "- If the topic mentions 'interview questions', generate ACTUAL interview questions that would be asked in a real job interview\n"
+         "- Focus on realistic questions an interviewer would ask, not questions about the preparation material itself\n"
+         "- Use the context to understand the job role, company, and candidate background to create relevant questions\n"
+         "- Include a mix of: behavioral, technical, situational, and CV-SPECIFIC questions\n"
+         "- CV-SPECIFIC questions MUST reference ACTUAL details from the candidate's background found in the context\n"
+         "- NEVER use placeholders like [Company], [Project], [Technology] - always use the REAL names from the context\n"
+         "- Extract specific company names, technologies, projects, achievements, and career details from the provided context\n"
+         "- Make questions sound like a real interviewer who studied their resume with specific details\n"
+         "- Examples of good CV-specific questions:\n"
+         "  * 'I see you achieved a 5.6% conversion lift in one of your projects. Can you walk me through that?'\n"
+         "  * 'You mentioned working with React and Next.js. How did you handle state management in those projects?'\n"
+         "  * 'I notice you've been doing freelance work through Upwork. How do you manage client relationships?'\n"
+         "- Include at least 3-4 questions that directly reference their CV details with REAL specifics\n\n"
          "--- CONTEXT ---\n"
          "{context}\n"
          "--- END CONTEXT ---\n\n"
@@ -145,16 +217,23 @@ def create_feedback_agent():
     
     prompt = ChatPromptTemplate.from_messages([
         ("system", 
-         "You are a helpful and encouraging tutor. Your goal is to evaluate a user's answer to a flashcard question. "
-         "Determine if the answer is correct, provide constructive feedback, and give a high-quality example answer. "
-         "Be supportive in your feedback, even if the answer is wrong. The output must be a JSON object that strictly follows the provided format instructions."),
+         "You are an expert interview coach and communication specialist. Your task is to evaluate a user's answer to an interview question across multiple dimensions. "
+         "Provide detailed, constructive feedback that helps them improve their interview performance. "
+         "Rate each aspect on a scale of 1-10 and provide specific, actionable improvement tips. "
+         "Be encouraging but honest in your assessment. The output must be a JSON object that strictly follows the provided format instructions."),
         ("human", 
-         "Flashcard Question: '{question}'\n\n"
-         "User's Answer: '{answer}'\n\n"
+         "Interview Question: '{question}'\n\n"
+         "Candidate's Answer: '{answer}'\n\n"
+         "Please evaluate this answer across the following dimensions:\n"
+         "1. TONE SCORE (1-10): Assess confidence, enthusiasm, professionalism, and speaking clarity\n"
+         "2. CORRECTNESS SCORE (1-10): Evaluate factual accuracy, relevance, and completeness of content\n"
+         "3. CONFIDENCE SCORE (1-10): Rate how confident and self-assured the candidate sounds\n"
+         "4. OVERALL SCORE (1-10): Holistic assessment of interview readiness\n\n"
+         "Provide detailed feedback explaining your scores and specific tips for improvement.\n\n"
          "{format_instructions}")
     ])
     
-    llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.2)
+    llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.3)
     
     chain = prompt | llm | parser
     
@@ -165,8 +244,7 @@ def create_feedback_agent():
 @router.post("/flashcards/generate", response_model=FlashcardSet)
 async def generate_flashcards(
     request: FlashcardRequest,
-    db_user: User = Depends(get_current_active_user),
-    _ = Depends(UsageManager(feature="interview_tools"))
+    db_user: User = Depends(get_current_active_user)
 ):
     """
     Generates flashcards from a URL, job description, or programming language.
@@ -179,7 +257,38 @@ async def generate_flashcards(
         
         if request.source_type == "job_description":
             context = request.content
-            topic = "the provided Job Description"
+            # Check if this is an interview preparation guide vs actual job description
+            if "[INTERVIEW_FLASHCARDS_AVAILABLE]" in request.content or "Interview Preparation Guide" in request.content:
+                topic = "interview questions based on this job role and preparation content"
+                
+                # Extract job details and CV information for better context
+                job_context = ""
+                cv_context = ""
+                
+                if "**Role:**" in context:
+                    # Extract role and company info from the guide header
+                    lines = context.split('\n')
+                    for line in lines:
+                        if "**Role:**" in line:
+                            job_context = line.strip()
+                            break
+                
+                # Extract comprehensive CV/background information
+                cv_context = extract_cv_details(context)
+                logger.info(f"Extracted CV context length: {len(cv_context)} characters")
+                if cv_context:
+                    logger.info(f"CV context preview: {cv_context[:200]}...")
+                
+                if job_context:
+                    role_info = job_context.replace('**Role:**', '').strip()
+                    if cv_context:
+                        topic = f"interview questions for {role_info} incorporating the candidate's CV background"
+                        # Enhance context with extracted CV details at the top
+                        context = f"CANDIDATE CV DETAILS:\n{cv_context}\n\n--- ORIGINAL CONTEXT ---\n{context}"
+                    else:
+                        topic = f"interview questions for {role_info}"
+            else:
+                topic = "the provided Job Description"
         elif request.source_type == "url":
             context = await scrape_url_content(request.content)
             topic = f"the content from {request.content}"
@@ -210,7 +319,6 @@ async def generate_flashcards(
 @router.post("/flashcards/feedback", response_model=FeedbackResponse)
 async def get_feedback_on_answer(
     db_user: User = Depends(get_current_active_user),
-    _ = Depends(UsageManager(feature="interview_tools")),
     question: str = Form(...),
     text_answer: Optional[str] = Form(None),
     audio_answer: Optional[UploadFile] = File(None)

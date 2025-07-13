@@ -486,17 +486,16 @@ def create_cover_letter_pdf(content: str, company_name: str, job_title: str, use
     story.append(Paragraph(datetime.now().strftime('%B %d, %Y'), date_style))
     story.append(Spacer(1, 0.3*inch))
     
-    # Content paragraphs
-    paragraphs = [p.strip() for p in content.split('\n\n') if p.strip()]
-    
+    # Pre-process content to handle line breaks correctly, similar to the web preview
+    content_with_breaks = content.replace('\n', '<br/>\n')
+
     # Add greeting if not present
     if not content.strip().startswith('Dear '):
         greeting = f"Dear {company_name} Hiring Team," if company_name else "Dear Hiring Manager,"
         story.append(Paragraph(greeting, body_style))
     
-    for paragraph in paragraphs:
-        if paragraph and not paragraph.startswith('Dear ') and not paragraph.startswith('Sincerely'):
-            story.append(Paragraph(paragraph, body_style))
+    # Add the main body of the cover letter
+    story.append(Paragraph(content_with_breaks, body_style))
     
     # Add closing if not present
     if not content.strip().endswith('Sincerely,'):

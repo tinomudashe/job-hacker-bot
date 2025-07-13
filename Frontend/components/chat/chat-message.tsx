@@ -4,7 +4,7 @@ import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@clerk/nextjs";
 import {
-  Bot,
+  Brain,
   Check,
   Clipboard,
   Download,
@@ -12,9 +12,11 @@ import {
   FileText,
   Image,
   Loader2,
+  Palette,
   Pause,
   Pencil,
   RefreshCw,
+  ScrollText,
   Sparkles,
   Trash2,
   User,
@@ -25,6 +27,8 @@ import {
 import React, { useEffect, useRef, useState } from "react";
 import { Button } from "../ui/button";
 import { ConfirmationDialog } from "../ui/confirmation-dialog";
+import { Logo } from "../ui/logo";
+import { FlashcardDialog } from "./flashcard-dialog";
 import { MessageContent } from "./message-content";
 import { PDFGenerationDialog } from "./pdf-generation-dialog";
 
@@ -62,19 +66,19 @@ const PDF_STYLES = [
     key: "modern",
     name: "Modern",
     description: "Clean design with blue accents",
-    icon: "🎨",
+    icon: <Palette className="h-4 w-4" />,
   },
   {
     key: "classic",
     name: "Classic",
     description: "Traditional serif format",
-    icon: "📜",
+    icon: <ScrollText className="h-4 w-4" />,
   },
   {
     key: "minimal",
     name: "Minimal",
     description: "Simple, clean layout",
-    icon: "✨",
+    icon: <Sparkles className="h-4 w-4" />,
   },
 ];
 
@@ -93,7 +97,15 @@ const detectContentType = (
     contentPreview: content.substring(0, 100),
   });
 
-  // Check for explicit downloadable markers FIRST - before any filtering
+  // Check for interview content FIRST - before any other detection
+  if (content.includes("[INTERVIEW_FLASHCARDS_AVAILABLE]")) {
+    console.log(
+      "🧠 FOUND INTERVIEW FLASHCARDS MARKER - skipping other content detection!"
+    );
+    return { type: null }; // Don't classify as downloadable content
+  }
+
+  // Check for explicit downloadable markers SECOND - before any filtering
   if (content.includes("[DOWNLOADABLE_COVER_LETTER]")) {
     console.log(
       "🎯 FOUND [DOWNLOADABLE_COVER_LETTER] marker - returning cover letter type!"
@@ -122,7 +134,7 @@ const detectContentType = (
     return { type: "resume" as const };
   }
 
-  // Skip if it's clearly a question or request
+  // Skip if it's clearly a question, request, or interview content
   const questionPatterns = [
     /can you/i,
     /could you/i,
@@ -142,6 +154,23 @@ const detectContentType = (
     /\?/,
   ];
 
+  // Skip if it's interview preparation content (to avoid false positives)
+  const interviewExclusionPatterns = [
+    /interview.*preparation/i,
+    /interview.*guide/i,
+    /interview.*questions/i,
+    /interview.*tips/i,
+    /behavioral.*questions/i,
+    /star.*method/i,
+    /interview.*performance/i,
+    /preparation.*checklist/i,
+    /interview.*coaching/i,
+    /questions.*to.*ask/i,
+    /company.*research/i,
+    /interview.*strategy/i,
+    /\[INTERVIEW_FLASHCARDS_AVAILABLE\]/i,
+  ];
+
   // Skip if it contains question patterns (Safari compatible)
   let hasQuestionPattern = false;
   for (let i = 0; i < questionPatterns.length; i++) {
@@ -157,6 +186,26 @@ const detectContentType = (
   }
 
   console.log("✅ Passed question pattern check");
+
+  // Check for interview exclusion patterns (Safari compatible)
+  let hasInterviewPattern = false;
+  for (let i = 0; i < interviewExclusionPatterns.length; i++) {
+    if (interviewExclusionPatterns[i].test(content)) {
+      hasInterviewPattern = true;
+      console.log(
+        "🧠 Interview pattern detected:",
+        interviewExclusionPatterns[i].source
+      );
+      break;
+    }
+  }
+
+  if (hasInterviewPattern) {
+    console.log("❌ Content skipped - contains interview content pattern");
+    return { type: null };
+  }
+
+  console.log("✅ Passed interview exclusion check");
 
   // Agent-generated content indicators
   const agentIndicators = [
@@ -466,6 +515,7 @@ export function ChatMessage({
   const [isPDFDialogOpen, setIsPDFDialogOpen] = useState(false);
   const [isDownloadingPDF, setIsDownloadingPDF] = useState(false);
   const [downloadingStyle, setDownloadingStyle] = useState<string | null>(null);
+  const [isFlashcardDialogOpen, setIsFlashcardDialogOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [originalWidth, setOriginalWidth] = useState<number | null>(null);
   const [isHovered, setIsHovered] = useState(false);
@@ -491,29 +541,50 @@ export function ChatMessage({
   // Check if content is structured JSON with downloadable metadata
   const getStructuredContent = (): {
     message: string;
-    downloadable?: boolean;
-    content_type?: string;
-    content_id?: string;
+    structured_data: any;
+    content_type: "cover_letter" | "resume";
     company_name?: string;
     job_title?: string;
   } | null => {
-    try {
-      // Try to parse as JSON first
-      if (plainTextContent.startsWith("{") && plainTextContent.endsWith("}")) {
-        const parsed = JSON.parse(plainTextContent);
-        if (parsed.message && typeof parsed.downloadable === "boolean") {
-          return parsed;
-        }
+    if (typeof content !== "string" || isUser) return null;
+
+    const plainTextContent = content.replace(/<[^>]*>/g, "");
+
+    const hasCvMarker = plainTextContent.includes("[DOWNLOADABLE_RESUME]");
+    const hasClMarker = plainTextContent.includes(
+      "[DOWNLOADABLE_COVER_LETTER]"
+    );
+
+    if (!hasCvMarker && !hasClMarker) return null;
+
+    const jsonStart = plainTextContent.indexOf("{");
+    const jsonEnd = plainTextContent.lastIndexOf("}");
+
+    if (jsonStart !== -1 && jsonEnd > jsonStart) {
+      const jsonString = plainTextContent.substring(jsonStart, jsonEnd + 1);
+      try {
+        const parsedData = JSON.parse(jsonString);
+        return {
+          message: plainTextContent.substring(0, jsonStart).trim(),
+          structured_data: parsedData,
+          content_type: hasClMarker ? "cover_letter" : "resume",
+          company_name: parsedData.company_name,
+          job_title: parsedData.job_title,
+        };
+      } catch (error) {
+        console.error("JSON parsing error in ChatMessage:", error);
+        return null; // <-- This is the key fix. If parsing fails, we stop.
       }
-    } catch (e) {
-      // Not JSON, continue with text parsing
     }
+
+    console.warn("Downloadable marker found, but no JSON object was present.");
     return null;
   };
 
   // Get display content - use structured content message if available
   const getDisplayMessage = () => {
     const structuredContent = getStructuredContent();
+
     if (structuredContent) {
       return structuredContent.message;
     }
@@ -586,24 +657,17 @@ export function ChatMessage({
   let contentId: string | undefined;
   let showPDFButton: boolean;
 
-  if (structuredContent && structuredContent.downloadable) {
-    // Use structured metadata
+  if (structuredContent) {
+    // Use structured metadata from the successfully parsed JSON
     contentDetection = {
-      type: structuredContent.content_type as "cover_letter" | "resume",
+      type: structuredContent.content_type,
       companyName: structuredContent.company_name,
       jobTitle: structuredContent.job_title,
     };
-    contentId = structuredContent.content_id;
-    showPDFButton = !isUser && structuredContent.downloadable;
-
-    console.log("🎯 STRUCTURED CONTENT DETECTED:", {
-      downloadable: structuredContent.downloadable,
-      content_type: structuredContent.content_type,
-      content_id: structuredContent.content_id,
-      showPDFButton,
-    });
+    contentId = extractContentId(plainTextContent); // Extract ID from text if needed for saved docs
+    showPDFButton = !isUser;
   } else {
-    // Fallback to text pattern detection
+    // Fallback to text pattern detection if no valid JSON is found
     contentDetection = detectContentType(plainTextContent);
     contentId = extractContentId(plainTextContent);
     showPDFButton = !isUser && contentDetection.type !== null;
@@ -636,6 +700,193 @@ export function ChatMessage({
     hasContentId: !!contentId,
     structuredContentExists: !!structuredContent,
   });
+
+  // Detect interview preparation content for flashcards
+  const detectInterviewContent = () => {
+    // Look for the specific marker that the agent includes
+    const hasMarker = plainTextContent.includes(
+      "[INTERVIEW_FLASHCARDS_AVAILABLE]"
+    );
+    console.log("🧠 Interview content detection:", {
+      hasMarker,
+      isUser,
+      messageLength: plainTextContent.length,
+      markerPosition: plainTextContent.indexOf(
+        "[INTERVIEW_FLASHCARDS_AVAILABLE]"
+      ),
+      messagePreview: plainTextContent.substring(0, 200) + "...",
+    });
+    return hasMarker;
+  };
+
+  const hasInterviewContent = !isUser && detectInterviewContent();
+
+  console.log("🧠 Final interview content check:", {
+    hasInterviewContent,
+    isUser,
+    shouldShowBrainIcon: hasInterviewContent,
+  });
+
+  // Extract job details for flashcards from the structured content at the end
+  const extractJobDetailsForFlashcards = (): {
+    jobTitle?: string;
+    companyName?: string;
+    interviewContent?: string;
+    flashcardData?: Array<{ question: string; answer: string }>;
+  } => {
+    console.log("🧠 Extracting job details for flashcards", {
+      hasContentDetection: !!(
+        contentDetection.jobTitle || contentDetection.companyName
+      ),
+      contentDetectionJobTitle: contentDetection.jobTitle,
+      contentDetectionCompanyName: contentDetection.companyName,
+      messagePreview: plainTextContent.substring(0, 300) + "...",
+    });
+
+    if (contentDetection.jobTitle || contentDetection.companyName) {
+      return {
+        jobTitle: contentDetection.jobTitle,
+        companyName: contentDetection.companyName,
+        interviewContent: plainTextContent,
+      };
+    }
+
+    // Extract from the structured context at the end of the message
+    // More robust patterns to handle different formats
+    const jobContextPatterns = [
+      /\*\*Job Context:\*\* (.+?) at (.+?)(?:\n|$)/i,
+      /Job Context:\s*(.+?) at (.+?)(?:\n|$)/i,
+      /role:\s*(.+?)\s*\|\s*company:\s*(.+?)(?:\n|$)/i,
+      /position.*?at\s+(.+?)(?:\n|$)/i,
+    ];
+
+    const interviewTypePatterns = [
+      /\*\*Interview Type:\*\* (.+?)(?:\n|$)/i,
+      /Interview Type:\s*(.+?)(?:\n|$)/i,
+      /Type:\s*(.+?)(?:\n|$)/i,
+    ];
+
+    const preparationContentPatterns = [
+      /\*\*Preparation Content:\*\* ([\s\S]+?)(?:\.\.\.|$)/i,
+      /Preparation Content:\s*([\s\S]+?)(?:\.\.\.|$)/i,
+      /interview preparation guide[\s\S]*?:\s*([\s\S]+?)(?:\.\.\.|$)/i,
+    ];
+
+    let jobTitle = "Interview Position";
+    let companyName = "";
+    let interviewContent = plainTextContent;
+
+    // Try all job context patterns
+    for (const pattern of jobContextPatterns) {
+      const match = plainTextContent.match(pattern);
+      if (match) {
+        if (match.length >= 3) {
+          jobTitle = match[1]?.trim() || jobTitle;
+          companyName = match[2]?.trim() || companyName;
+        } else if (match.length >= 2) {
+          // Handle cases where company is in match[1]
+          companyName = match[1]?.trim() || companyName;
+        }
+        console.log("✅ Matched job context pattern:", {
+          pattern: pattern.source,
+          jobTitle,
+          companyName,
+        });
+        break;
+      }
+    }
+
+    // Try interview type patterns
+    for (const pattern of interviewTypePatterns) {
+      const match = plainTextContent.match(pattern);
+      if (match) {
+        console.log("✅ Matched interview type pattern:", match[1]);
+        break;
+      }
+    }
+
+    // Try preparation content patterns
+    for (const pattern of preparationContentPatterns) {
+      const match = plainTextContent.match(pattern);
+      if (match) {
+        interviewContent = match[1]?.trim() || interviewContent;
+        console.log(
+          "✅ Matched preparation content pattern:",
+          interviewContent.substring(0, 100) + "..."
+        );
+        break;
+      }
+    }
+
+    // Fallback: try to extract from the main content
+    if (jobTitle === "Interview Position" && companyName === "") {
+      // Look for "role at company" pattern in the main message
+      const roleCompanyMatch = plainTextContent.match(
+        /(?:for|as)\s+(.+?)\s+(?:position|role)\s+at\s+(.+?)(?:\s|\.|\n|$)/i
+      );
+      if (roleCompanyMatch) {
+        jobTitle = roleCompanyMatch[1]?.trim() || jobTitle;
+        companyName = roleCompanyMatch[2]?.trim() || companyName;
+        console.log("✅ Fallback extraction successful:", {
+          jobTitle,
+          companyName,
+        });
+      }
+    }
+
+    // Extract flashcard data from HTML comment
+    let flashcardData: Array<{ question: string; answer: string }> = [];
+    const flashcardMatch = plainTextContent.match(
+      /<!--FLASHCARD_DATA:([\s\S]+?)-->/
+    );
+    if (flashcardMatch) {
+      try {
+        const flashcardJson = flashcardMatch[1];
+        const parsedData = JSON.parse(flashcardJson);
+
+        // Validate the parsed data is an array of Q&A objects
+        if (Array.isArray(parsedData) && parsedData.length > 0) {
+          const isValidFormat = parsedData.every(
+            (item) =>
+              typeof item === "object" &&
+              typeof item.question === "string" &&
+              typeof item.answer === "string" &&
+              item.question.trim().length > 0
+          );
+
+          if (isValidFormat) {
+            flashcardData = parsedData;
+            console.log(
+              "✅ Extracted flashcard data:",
+              flashcardData.length,
+              "questions"
+            );
+          } else {
+            console.warn("Invalid flashcard data format");
+          }
+        }
+      } catch (error) {
+        console.warn("Failed to parse flashcard data:", error);
+      }
+    }
+
+    const result = {
+      jobTitle,
+      companyName,
+      interviewContent: interviewContent.substring(0, 1000), // Limit content size
+      flashcardData: flashcardData.length > 0 ? flashcardData : undefined,
+    };
+
+    console.log("🎯 Final extracted job details:", result);
+    return result;
+  };
+
+  const jobDetails = extractJobDetailsForFlashcards();
+
+  // Flashcard dialog handler
+  const handleFlashcardOpen = () => {
+    setIsFlashcardDialogOpen(true);
+  };
 
   useEffect(() => {
     if (isEditing) {
@@ -1196,6 +1447,7 @@ export function ChatMessage({
       /📄 \*\*CV\/Resume uploaded successfully!\*\*/,
       /📎 Attached file:/i,
       /Attached file:/i,
+      /File Attached:/i,
     ];
 
     return attachmentPatterns.some((pattern) => pattern.test(msg));
@@ -1212,6 +1464,7 @@ export function ChatMessage({
       { regex: /📎 \*\*File Attached:\*\* (.+?)(?:\n|$)/, type: "file" },
       { regex: /📎 Attached file:\s*(.+?)(?:\n|$)/i, type: "file" },
       { regex: /Attached file:\s*(.+?)(?:\n|$)/i, type: "file" },
+      { regex: /File Attached:\s*(.+?)(?:\n|$)/i, type: "file" },
       {
         regex:
           /\*\*CV\/Resume uploaded successfully!\*\*[\s\S]*?\*\*File:\*\* (.+?)(?:\n|$)/,
@@ -1302,9 +1555,11 @@ export function ChatMessage({
         }}
       >
         {!isUser && (
-          <div className="flex h-8 w-8 sm:h-10 sm:w-10 lg:h-12 lg:w-12 shrink-0 select-none items-center justify-center rounded-xl sm:rounded-2xl bg-gradient-to-br from-blue-500 via-purple-500 to-blue-600 shadow-lg shadow-blue-500/25 ring-2 ring-white/20 dark:ring-black/20 transition-all duration-300 group-hover:shadow-xl group-hover:shadow-blue-500/30 group-hover:scale-105">
-            <Bot className="h-4 w-4 sm:h-5 sm:w-5 lg:h-6 lg:w-6 text-white drop-shadow-sm" />
-            <div className="absolute inset-0 rounded-xl sm:rounded-2xl bg-gradient-to-br from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+          <div className="shrink-0 select-none">
+            <Logo
+              size="sm"
+              className="h-8 w-8 sm:h-10 sm:w-10 lg:h-12 lg:w-12"
+            />
           </div>
         )}
 
@@ -1318,23 +1573,24 @@ export function ChatMessage({
           <div
             ref={messageRef}
             className={cn(
-              "relative rounded-2xl sm:rounded-3xl shadow-lg backdrop-blur-sm border transition-all duration-300 ease-out",
+              "relative rounded-2xl sm:rounded-3xl shadow-lg border transition-all duration-200 ease-out",
               isEditing ? "w-full" : "w-fit min-w-[100px] max-w-full",
               "px-4 py-3 sm:px-5 sm:py-4 md:px-6 md:py-5 lg:px-7 lg:py-6",
               "overflow-hidden break-words", // Ensure bubble content doesn't overflow
               isUser
                 ? cn(
-                    "bg-gradient-to-br from-blue-500 via-blue-600 to-purple-600 text-white border-white/30 shadow-blue-500/20",
-                    "hover:from-blue-600 hover:via-blue-700 hover:to-purple-700 hover:shadow-xl hover:shadow-blue-500/30",
-                    "dark:border-white/20"
+                    "bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-700 text-white border-blue-400/30 shadow-blue-500/20",
+                    "hover:shadow-xl hover:shadow-blue-500/25 hover:border-blue-300/40",
+                    "dark:border-blue-400/20 dark:shadow-blue-400/15"
                   )
                 : cn(
-                    "bg-gradient-to-br from-white via-gray-50/80 to-blue-50/50 text-foreground border-gray-200/60 shadow-gray-900/8",
-                    "hover:from-white hover:via-blue-50/90 hover:to-purple-50/60 hover:shadow-xl hover:shadow-gray-900/12 hover:border-gray-300/80",
-                    "dark:from-gray-800/80 dark:via-gray-800/60 dark:to-blue-900/20 dark:border-gray-700/50 dark:shadow-white/3",
-                    "dark:hover:from-gray-800/90 dark:hover:via-gray-700/80 dark:hover:to-blue-900/30 dark:hover:border-gray-600/60 dark:hover:shadow-white/8"
+                    "bg-white/95 text-foreground border-slate-200/70 shadow-slate-900/8",
+                    "hover:bg-white hover:shadow-lg hover:shadow-slate-900/12 hover:border-slate-300/80",
+                    "dark:bg-black/90 dark:border-gray-600/50 dark:shadow-black/15",
+                    "dark:hover:bg-black/95 dark:hover:border-gray-500/60 dark:hover:shadow-black/20"
                   ),
-              isEditing && "ring-2 ring-blue-500/50 shadow-blue-500/25"
+              isEditing &&
+                "ring-2 ring-blue-500/60 shadow-blue-500/30 border-blue-400/40"
             )}
             style={
               isEditing && originalWidth
@@ -1342,13 +1598,13 @@ export function ChatMessage({
                 : undefined
             }
           >
-            {/* Subtle gradient overlay for enhanced depth */}
+            {/* Subtle highlight overlay for premium feel */}
             <div
               className={cn(
-                "absolute inset-0 rounded-2xl sm:rounded-3xl pointer-events-none transition-opacity duration-300",
+                "absolute inset-0 rounded-2xl sm:rounded-3xl pointer-events-none",
                 isUser
-                  ? "bg-gradient-to-br from-white/10 via-transparent to-black/5 opacity-60 group-hover:opacity-80"
-                  : "bg-gradient-to-br from-white/60 via-white/20 to-transparent opacity-40 group-hover:opacity-60 dark:from-white/5 dark:via-white/2 dark:to-transparent dark:opacity-20 dark:group-hover:opacity-30"
+                  ? "bg-gradient-to-b from-white/8 to-transparent opacity-60"
+                  : "bg-gradient-to-b from-white/40 to-transparent opacity-30 dark:from-white/5 dark:opacity-20"
               )}
             />
 
@@ -1394,7 +1650,7 @@ export function ChatMessage({
                     {/* Attachment Card */}
                     <div
                       className={cn(
-                        "flex items-center gap-3 p-2.5 rounded-xl backdrop-blur-sm transition-all duration-300",
+                        "flex items-center gap-3 p-2.5 rounded-xl transition-all duration-200",
                         isUser
                           ? "bg-white/10 hover:bg-white/15"
                           : "bg-gray-100/50 hover:bg-gray-100/70 dark:bg-gray-700/50 dark:hover:bg-gray-700/70"
@@ -1403,7 +1659,7 @@ export function ChatMessage({
                       {/* Smart File Icon */}
                       <div
                         className={cn(
-                          "flex items-center justify-center w-9 h-9 rounded-xl transition-all duration-300 group-hover:scale-105",
+                          "flex items-center justify-center w-9 h-9 rounded-xl transition-all duration-200 group-hover:scale-105",
                           isUser
                             ? "bg-white/20"
                             : "bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg shadow-blue-500/25"
@@ -1516,7 +1772,7 @@ export function ChatMessage({
                           return (
                             <div
                               className={cn(
-                                "px-4 py-3 rounded-2xl backdrop-blur-sm",
+                                "px-4 py-3 rounded-2xl",
                                 isUser
                                   ? "bg-white/10 text-white border border-white/20"
                                   : "bg-white/60 text-gray-800 border border-gray-200/40 dark:bg-gray-800/40 dark:text-gray-200 dark:border-gray-700/40"
@@ -1539,13 +1795,13 @@ export function ChatMessage({
                     className={cn(
                       "prose prose-sm dark:prose-invert max-w-none relative z-10 break-words",
                       isUser ? "prose-invert" : "",
-                      // Enhanced mobile typography (1.5x bigger font sizes)
-                      "text-xl leading-[1.7] prose-p:text-xl prose-p:leading-[1.7] prose-p:mb-4 prose-p:break-words",
-                      "prose-headings:text-2xl prose-headings:mb-4 prose-headings:mt-0 prose-headings:font-semibold prose-headings:break-words prose-headings:leading-[1.4]",
-                      "prose-ul:text-xl prose-ul:mb-4 prose-ol:text-xl prose-ol:mb-4 prose-ul:mt-2 prose-ol:mt-2",
-                      "prose-li:text-xl prose-li:mb-2 prose-li:leading-[1.7] prose-li:break-words",
-                      "prose-strong:text-xl prose-em:text-xl prose-code:text-base",
-                      // Enhanced desktop typography
+                      // Standard mobile typography (14px - typical for mobile web apps)
+                      "text-sm leading-6 prose-p:text-sm prose-p:leading-6 prose-p:mb-3 prose-p:break-words",
+                      "prose-headings:text-base prose-headings:mb-3 prose-headings:mt-0 prose-headings:font-semibold prose-headings:break-words prose-headings:leading-7",
+                      "prose-ul:text-sm prose-ul:mb-3 prose-ol:text-sm prose-ol:mb-3 prose-ul:mt-2 prose-ol:mt-2",
+                      "prose-li:text-sm prose-li:mb-1 prose-li:leading-6 prose-li:break-words",
+                      "prose-strong:text-sm prose-em:text-sm prose-code:text-xs",
+                      // Desktop typography (16px - standard for desktop)
                       "sm:text-base sm:leading-7 sm:prose-p:text-base sm:prose-p:leading-7 sm:prose-p:mb-4",
                       "sm:prose-headings:text-lg sm:prose-headings:mb-4 sm:prose-headings:leading-8",
                       "sm:prose-ul:text-base sm:prose-ul:mb-4 sm:prose-ol:text-base sm:prose-ol:mb-4 sm:prose-ul:mt-2 sm:prose-ol:mt-2",
@@ -1553,8 +1809,8 @@ export function ChatMessage({
                       "sm:prose-strong:text-base sm:prose-em:text-base sm:prose-code:text-sm",
                       "prose-strong:font-semibold prose-em:italic",
                       "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-                      "prose-ul:space-y-1 prose-ol:space-y-1 sm:prose-ul:space-y-2 sm:prose-ol:space-y-2",
-                      "[&>*+*]:mt-2 sm:[&>*+*]:mt-4",
+                      "prose-ul:space-y-2 prose-ol:space-y-2 sm:prose-ul:space-y-2 sm:prose-ol:space-y-2",
+                      "[&>*+*]:mt-3 sm:[&>*+*]:mt-4",
                       "overflow-wrap-anywhere hyphens-auto word-break-break-word",
                       "w-auto min-w-0 max-w-full",
                       // Force URL wrapping
@@ -1564,7 +1820,7 @@ export function ChatMessage({
                         ? "prose-a:text-white prose-a:no-underline prose-a:font-medium hover:prose-a:underline prose-a:decoration-white/80"
                         : "prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline prose-a:font-medium hover:prose-a:underline prose-a:decoration-blue-600/80 dark:prose-a:decoration-blue-400/80",
                       // Enhanced code styling
-                      "prose-code:bg-gray-100 dark:prose-code:bg-gray-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:font-mono"
+                      "prose-code:bg-gray-100 dark:prose-code:bg-gray-800 prose-code:px-1.5 prose-code:py-1 prose-code:rounded prose-code:font-mono"
                     )}
                   >
                     <MessageContent content={displayContent} isUser={isUser} />
@@ -1578,13 +1834,13 @@ export function ChatMessage({
                 className={cn(
                   "prose prose-sm dark:prose-invert max-w-none relative z-10 break-words",
                   isUser ? "prose-invert" : "",
-                  // Enhanced mobile typography (1.5x bigger font sizes)
-                  "text-xl leading-[1.7] prose-p:text-xl prose-p:leading-[1.7] prose-p:mb-4 prose-p:break-words",
-                  "prose-headings:text-2xl prose-headings:mb-4 prose-headings:mt-0 prose-headings:font-semibold prose-headings:break-words prose-headings:leading-[1.4]",
-                  "prose-ul:text-xl prose-ul:mb-4 prose-ol:text-xl prose-ol:mb-4 prose-ul:mt-2 prose-ol:mt-2",
-                  "prose-li:text-xl prose-li:mb-2 prose-li:leading-[1.7] prose-li:break-words",
-                  "prose-strong:text-xl prose-em:text-xl prose-code:text-base",
-                  // Enhanced desktop typography
+                  // Standard mobile typography (14px - typical for mobile web apps)
+                  "text-sm leading-6 prose-p:text-sm prose-p:leading-6 prose-p:mb-3 prose-p:break-words",
+                  "prose-headings:text-base prose-headings:mb-3 prose-headings:mt-0 prose-headings:font-semibold prose-headings:break-words prose-headings:leading-7",
+                  "prose-ul:text-sm prose-ul:mb-3 prose-ol:text-sm prose-ol:mb-3 prose-ul:mt-2 prose-ol:mt-2",
+                  "prose-li:text-sm prose-li:mb-1 prose-li:leading-6 prose-li:break-words",
+                  "prose-strong:text-sm prose-em:text-sm prose-code:text-xs",
+                  // Desktop typography (16px - standard for desktop)
                   "sm:text-base sm:leading-7 sm:prose-p:text-base sm:prose-p:leading-7 sm:prose-p:mb-4",
                   "sm:prose-headings:text-lg sm:prose-headings:mb-4 sm:prose-headings:leading-8",
                   "sm:prose-ul:text-base sm:prose-ul:mb-4 sm:prose-ol:text-base sm:prose-ol:mb-4 sm:prose-ul:mt-2 sm:prose-ol:mt-2",
@@ -1592,8 +1848,8 @@ export function ChatMessage({
                   "sm:prose-strong:text-base sm:prose-em:text-base sm:prose-code:text-sm",
                   "prose-strong:font-semibold prose-em:italic",
                   "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-                  "prose-ul:space-y-1 prose-ol:space-y-1 sm:prose-ul:space-y-2 sm:prose-ol:space-y-2",
-                  "[&>*+*]:mt-2 sm:[&>*+*]:mt-4",
+                  "prose-ul:space-y-2 prose-ol:space-y-2 sm:prose-ul:space-y-2 sm:prose-ol:space-y-2",
+                  "[&>*+*]:mt-3 sm:[&>*+*]:mt-4",
                   "overflow-wrap-anywhere hyphens-auto word-break-break-word",
                   "w-auto min-w-0 max-w-full",
                   // Force URL wrapping
@@ -1603,7 +1859,7 @@ export function ChatMessage({
                     ? "prose-a:text-white prose-a:no-underline prose-a:font-medium hover:prose-a:underline prose-a:decoration-white/80"
                     : "prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline prose-a:font-medium hover:prose-a:underline prose-a:decoration-blue-600/80 dark:prose-a:decoration-blue-400/80",
                   // Enhanced code styling
-                  "prose-code:bg-gray-100 dark:prose-code:bg-gray-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:font-mono"
+                  "prose-code:bg-gray-100 dark:prose-code:bg-gray-800 prose-code:px-1.5 prose-code:py-1 prose-code:rounded prose-code:font-mono"
                 )}
               >
                 <MessageContent content={displayContent} isUser={isUser} />
@@ -1647,7 +1903,7 @@ export function ChatMessage({
           {/* Enhanced Action Buttons */}
           <div
             className={cn(
-              "flex items-center gap-0.5 sm:gap-1 mt-1 sm:mt-2 px-2 transition-all duration-300 ease-out",
+              "flex items-center gap-0.5 sm:gap-1 mt-1 sm:mt-2 px-2 transition-all duration-200 ease-out",
               isUser ? "justify-end" : "justify-start",
               "transform",
               // Show always for downloadable content, on mobile, or on hover/touch interaction, or when editing
@@ -1659,7 +1915,7 @@ export function ChatMessage({
             )}
           >
             {isEditing ? (
-              <div className="flex items-center gap-2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-xl px-3 py-2 shadow-lg border border-gray-200/50 dark:border-gray-700/50">
+              <div className="flex items-center gap-2 bg-white/95 dark:bg-black/95 rounded-2xl px-4 py-3 shadow-lg border border-white/60 dark:border-gray-700/70">
                 <Button
                   onClick={handleSaveEdit}
                   size="sm"
@@ -1679,7 +1935,7 @@ export function ChatMessage({
                 </Button>
               </div>
             ) : (
-              <div className="flex items-center gap-0.5 sm:gap-1 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl px-1.5 sm:px-2 py-1 sm:py-1.5 shadow-lg border border-gray-200/50 dark:border-gray-700/50">
+              <div className="flex items-center gap-0.5 sm:gap-1 bg-white/95 dark:bg-black/95 rounded-2xl px-2 sm:px-3 py-1.5 sm:py-2 shadow-lg border border-white/50 dark:border-gray-700/60">
                 {!isUser && (
                   <div className="relative group/audio">
                     <button
@@ -1806,6 +2062,22 @@ export function ChatMessage({
                   </button>
                 )}
 
+                {/* Flashcard Button - Only show for bot messages with interview content */}
+                {!isUser && hasInterviewContent && (
+                  <button
+                    onClick={handleFlashcardOpen}
+                    className={cn(
+                      "p-1 sm:p-1.5 md:p-2 rounded-lg transition-all duration-200 hover:scale-110 active:scale-95 touch-manipulation min-h-[28px] min-w-[28px] sm:min-h-[36px] sm:min-w-[36px] flex items-center justify-center",
+                      "hover:bg-purple-100 dark:hover:bg-purple-900/30 text-purple-600 dark:text-purple-400",
+                      // Subtle pulse animation to attract attention
+                      "animate-pulse"
+                    )}
+                    title="Practice with interview flashcards"
+                  >
+                    <Brain className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  </button>
+                )}
+
                 <button
                   onClick={handleDelete}
                   className="p-1 sm:p-1.5 md:p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400 transition-all duration-200 hover:scale-110 active:scale-95 touch-manipulation min-h-[28px] min-w-[28px] sm:min-h-[36px] sm:min-w-[36px] flex items-center justify-center"
@@ -1819,7 +2091,7 @@ export function ChatMessage({
         </div>
 
         {isUser && (
-          <div className="flex h-8 w-8 sm:h-10 sm:w-10 lg:h-12 lg:w-12 shrink-0 select-none items-center justify-center rounded-xl sm:rounded-2xl bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800 shadow-lg ring-2 ring-white/20 dark:ring-black/20 overflow-hidden transition-all duration-300 group-hover:shadow-xl group-hover:scale-105">
+          <div className="flex h-8 w-8 sm:h-10 sm:w-10 lg:h-12 lg:w-12 shrink-0 select-none items-center justify-center rounded-xl sm:rounded-2xl bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800 shadow-lg ring-2 ring-white/20 dark:ring-black/20 overflow-hidden transition-all duration-200 group-hover:shadow-xl group-hover:scale-105">
             {user && user.imageUrl ? (
               <img
                 src={user.imageUrl}
@@ -1832,7 +2104,7 @@ export function ChatMessage({
                 strokeWidth={1.5}
               />
             )}
-            <div className="absolute inset-0 rounded-xl sm:rounded-2xl bg-gradient-to-br from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+            <div className="absolute inset-0 rounded-xl sm:rounded-2xl bg-gradient-to-br from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
           </div>
         )}
       </div>
@@ -1855,6 +2127,18 @@ export function ChatMessage({
           contentId={contentId}
           companyName={contentDetection.companyName}
           jobTitle={contentDetection.jobTitle}
+        />
+      )}
+
+      {/* Flashcard Dialog */}
+      {hasInterviewContent && (
+        <FlashcardDialog
+          open={isFlashcardDialogOpen}
+          onOpenChange={setIsFlashcardDialogOpen}
+          jobTitle={jobDetails.jobTitle}
+          companyName={jobDetails.companyName}
+          interviewContent={jobDetails.interviewContent}
+          preGeneratedFlashcards={jobDetails.flashcardData}
         />
       )}
     </>

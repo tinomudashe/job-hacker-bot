@@ -10,6 +10,7 @@ from app.dependencies import get_current_active_user
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers.pydantic import PydanticOutputParser
 from app.usage import UsageManager
 
 logger = logging.getLogger(__name__)
@@ -17,36 +18,70 @@ router = APIRouter()
 
 # --- Pydantic Models ---
 
+class PersonalInfo(BaseModel):
+    """Structured personal information for the user."""
+    fullName: str
+    email: str
+    phone: str
+    linkedin: str
+    website: str | None = None
+
+class CoverLetterDetails(BaseModel):
+    """The structured output for the generated cover letter."""
+    company_name: str
+    job_title: str
+    recipient_name: str | None = None
+    recipient_title: str | None = None
+    body: str
+    personal_info: PersonalInfo
+
 class CoverLetterRequest(BaseModel):
+    """The request model for generating a cover letter."""
     job_description: str
     company_name: str
     job_title: str
-    user_name: str
-    user_skills: str # A summary of user's skills
+    user_profile: PersonalInfo
+    user_skills: str
 
 class CoverLetterResponse(BaseModel):
-    cover_letter_text: str
+    """The final structured response from the endpoint."""
+    structured_cover_letter: CoverLetterDetails
 
 # --- Agent Logic ---
 
 def create_cover_letter_chain():
-    """Sets up the chain for generating cover letters."""
+    """Sets up the chain for generating structured cover letters."""
+    
+    parser = PydanticOutputParser(pydantic_object=CoverLetterDetails)
     
     prompt = ChatPromptTemplate.from_template(
-        "You are an expert career coach. Write a professional and compelling cover letter.\n\n"
-        "**My Details:**\n"
-        "Name: {user_name}\n"
-        "My key skills: {user_skills}\n\n"
+        "You are an expert career coach AI. Your task is to generate a professional and compelling cover letter based on the provided user and job details.\n\n"
+        "**User Profile:**\n"
+        "Name: {fullName}\n"
+        "Email: {email}\n"
+        "Phone: {phone}\n"
+        "LinkedIn: {linkedin}\n"
+        "Website: {website}\n"
+        "Key Skills Summary: {user_skills}\n\n"
         "**Job Details:**\n"
         "Company: {company_name}\n"
         "Position: {job_title}\n"
         "Job Description: {job_description}\n\n"
-        "Please draft a cover letter that is tailored to this specific role, highlighting how my skills align with the job description. Do not include placeholders for contact information like address or phone number."
+        "**Instructions:**\n"
+        "1.  Analyze the job description and the user's skills to create a highly tailored cover letter body.\n"
+        "2.  Highlight the strongest alignments between the user's experience and the job requirements.\n"
+        "3.  If possible, infer the hiring manager's name and title from the job description (e.g., 'reports to the Engineering Manager'). If not, leave them as null.\n"
+        "4.  The cover letter body should be professional, concise, and engaging. Do not include placeholders for contact info in the body itself, as it is handled separately.\n"
+        "5.  Fill out the personal information from the provided user profile.\n\n"
+        "**Output Format:**\n"
+        "Please format your response as a JSON object that strictly follows this schema:\n"
+        "{format_instructions}\n",
+        partial_variables={"format_instructions": parser.get_format_instructions()}
     )
     
     llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.7)
     
-    chain = prompt | llm | StrOutputParser()
+    chain = prompt | llm | parser
     
     return chain
 
@@ -60,31 +95,35 @@ async def generate_cover_letter(
     _ = Depends(UsageManager(feature="cover_letters"))
 ):
     """
-    Generates a cover letter based on user details and a job description.
+    Generates a structured cover letter based on user details and a job description.
     """
     try:
-        logger.info(f"Generating cover letter for {request.job_title} at {request.company_name}")
+        logger.info(f"Generating structured cover letter for {request.job_title} at {request.company_name}")
         chain = create_cover_letter_chain()
         
-        cover_letter_text = await chain.ainvoke({
-            "user_name": request.user_name,
+        structured_result = await chain.ainvoke({
+            "fullName": request.user_profile.fullName,
+            "email": request.user_profile.email,
+            "phone": request.user_profile.phone,
+            "linkedin": request.user_profile.linkedin,
+            "website": request.user_profile.website,
             "user_skills": request.user_skills,
             "company_name": request.company_name,
             "job_title": request.job_title,
             "job_description": request.job_description,
         })
         
-        # Save record to database
+        # Save the structured record to the database as a JSON string
         new_record = GeneratedCoverLetter(
             id=str(uuid4()),
             user_id=db_user.id,
-            content=cover_letter_text
+            content=structured_result.model_dump_json()
         )
         db.add(new_record)
         await db.commit()
         
-        return CoverLetterResponse(cover_letter_text=cover_letter_text)
+        return CoverLetterResponse(structured_cover_letter=structured_result)
 
     except Exception as e:
-        logger.error(f"Error generating cover letter: {e}")
-        raise HTTPException(status_code=500, detail="Failed to generate cover letter.") 
+        logger.error(f"Error generating structured cover letter: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to generate structured cover letter.")

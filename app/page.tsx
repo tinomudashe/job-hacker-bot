@@ -1,3 +1,0 @@
-import ChatContainer from "@/components/chat/chat-container.tsx";
-
-// ... existing code ... 

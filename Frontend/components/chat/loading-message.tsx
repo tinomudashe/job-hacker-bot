@@ -1,6 +1,6 @@
 "use client";
 
-import { Sparkles } from "lucide-react";
+import { Logo } from "../ui/logo";
 import { AIProgressIndicator } from "./ai-progress-indicator";
 
 interface LoadingMessageProps {
@@ -24,9 +24,9 @@ export function LoadingMessage({
 }: LoadingMessageProps) {
   return (
     <div className="flex items-start gap-3 py-2">
-      {/* Polished AI Avatar */}
-      <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-primary/10 to-primary/5 flex items-center justify-center mt-0.5 border border-primary/10">
-        <Sparkles className="w-3.5 h-3.5 text-primary/70" />
+      {/* Premium AI Avatar with Logo */}
+      <div className="shrink-0 select-none mt-0.5">
+        <Logo size="sm" className="w-7 h-7" />
       </div>
 
       {/* Progress Content */}

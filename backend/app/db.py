@@ -2,6 +2,8 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 import os
 from dotenv import load_dotenv
+from typing import AsyncGenerator
+from contextlib import asynccontextmanager
 
 load_dotenv()
 print("--- .env file loaded by app/db.py ---")
@@ -18,9 +20,20 @@ async_session_maker = sessionmaker(
 )
 
 # for dependency injection
-async def get_db():
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with async_session_maker() as session:
-        yield session 
+        yield session
 
-def get_session():
-    return async_session_maker() 
+
+
+@asynccontextmanager
+async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
+    """Provide a database session for use in isolated contexts."""
+    async with async_session_maker() as session:
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()

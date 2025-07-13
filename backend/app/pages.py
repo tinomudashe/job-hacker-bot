@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import delete
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 
 from app.db import get_db
@@ -15,6 +15,7 @@ class PageResponse(BaseModel):
     id: str
     title: str
     created_at: str
+    last_opened_at: Optional[str] = None
 
 class CreatePageRequest(BaseModel):
     first_message: str
@@ -42,28 +43,9 @@ async def create_page(
     return PageResponse(
         id=new_page.id, 
         title=new_page.title,
-        created_at=new_page.created_at.isoformat()
+        created_at=new_page.created_at.isoformat(),
+        last_opened_at=new_page.last_opened_at.isoformat() if new_page.last_opened_at else None
     )
-
-@router.get("/pages", response_model=List[PageResponse])
-async def get_pages(
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Get all pages/conversations for the current user.
-    """
-    result = await db.execute(
-        select(Page).where(Page.user_id == current_user.id).order_by(Page.created_at.desc())
-    )
-    pages = result.scalars().all()
-    return [
-        PageResponse(
-            id=page.id, 
-            title=page.title,
-            created_at=page.created_at.isoformat()
-        ) for page in pages
-    ]
 
 @router.get("/pages/recent", response_model=PageResponse)
 async def get_most_recent_page(
@@ -82,8 +64,54 @@ async def get_most_recent_page(
     return PageResponse(
         id=page.id, 
         title=page.title,
-        created_at=page.created_at.isoformat()
+        created_at=page.created_at.isoformat(),
+        last_opened_at=page.last_opened_at.isoformat() if page.last_opened_at else None
     )
+
+@router.get("/pages/{page_id}", response_model=PageResponse)
+async def get_single_page(
+    page_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+):
+    """Get a single page by its ID."""
+    result = await db.execute(
+        select(Page).where(Page.id == page_id, Page.user_id == user.id)
+    )
+    page = result.scalar_one_or_none()
+
+    if not page:
+        raise HTTPException(status_code=404, detail="Page not found")
+
+    return PageResponse(
+        id=page.id,
+        title=page.title,
+        created_at=page.created_at.isoformat(),
+        last_opened_at=page.last_opened_at.isoformat() if page.last_opened_at else None
+    )
+
+@router.get("/pages", response_model=List[PageResponse])
+async def get_pages(
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get all pages/conversations for the current user.
+    """
+    result = await db.execute(
+        select(Page).where(Page.user_id == current_user.id).order_by(Page.created_at.desc())
+    )
+    pages = result.scalars().all()
+    return [
+        PageResponse(
+            id=page.id, 
+            title=page.title,
+            created_at=page.created_at.isoformat(),
+            last_opened_at=page.last_opened_at.isoformat() if page.last_opened_at else None
+        ) for page in pages
+    ]
+
+
 
 @router.delete("/pages/{page_id}")
 async def delete_page(
@@ -96,7 +124,10 @@ async def delete_page(
     """
     # Check if page exists and belongs to user
     result = await db.execute(
-        select(Page).where(Page.id == page_id, Page.user_id == current_user.id)
+        select(Page)
+        .where(Page.user_id == current_user.id)
+        .order_by(Page.last_opened_at.desc().nulls_last(), Page.created_at.desc())
+        .limit(1)
     )
     page = result.scalars().first()
     

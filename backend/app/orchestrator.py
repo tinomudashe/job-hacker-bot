@@ -7,6 +7,11 @@ import uuid
 import json
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
+from sqlalchemy import update, func
+import re
+
+load_dotenv()
 
 # Set Google Cloud environment variables if not already set
 if not os.getenv('GOOGLE_CLOUD_PROJECT'):
@@ -24,20 +29,26 @@ if not os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
             break
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from pydantic import BaseModel
+from pydantic import BaseModel,Field
+from typing import Literal, Union, Dict, Any
+from langsmith import Client
+from langchain.callbacks import LangChainTracer
 
-from app.db import get_db
-from app.models_db import User, ChatMessage, Resume, Document, GeneratedCoverLetter
+from app.db import get_db,async_session_maker,get_db_session
+from langchain.output_parsers import PydanticOutputParser
+from langchain_core.output_parsers import JsonOutputParser
+from pydantic import BaseModel, Field
+from app.models_db import User, ChatMessage, Resume, Document, GeneratedCoverLetter, Page
 from app.dependencies import get_current_active_user_ws
 from app.clerk import verify_token
-from app.resume import ResumeData, PersonalInfo, Experience, Education
+from app.resume import ResumeData, PersonalInfo, Experience, Education, Dates, fix_resume_data_structure
 from app.job_search import JobSearchRequest, search_jobs
 from app.vector_store import get_user_vector_store
 from langchain.tools.retriever import create_retriever_tool
@@ -45,6 +56,13 @@ from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder, SystemMes
 from langchain.tools.render import render_text_description
 from app.enhanced_memory import EnhancedMemoryManager
 from app.internal_api import InternalAPI, make_internal_api_call
+from app.cover_letter_generator import (
+    create_cover_letter_chain, 
+    CoverLetterDetails, 
+    PersonalInfo as CoverLetterPersonalInfo
+)
+from sqlalchemy.orm import joinedload,attributes
+import json
 
 # --- Configuration & Logging ---
 log = logging.getLogger(__name__)
@@ -57,6 +75,27 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY")
 GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
+
+# --- Date Parsing Helper ---
+def parse_date_range(date_string: str) -> dict:
+    """Parses a date string into a start and end date dictionary."""
+    if not isinstance(date_string, str):
+        return {"start": None, "end": None}
+    
+    parts = re.split(r'\s+-\s+|\s+to\s+', date_string, maxsplit=1)
+    
+    if len(parts) == 2:
+        start_date = parts[0].strip()
+        end_date = parts[1].strip()
+    else:
+        start_date = date_string.strip()
+        end_date = "Present"
+        
+    return {"start": start_date, "end": end_date}
+
+# --- LangSmith Setup ---
+langsmith_client = Client()
+tracer = LangChainTracer(client=langsmith_client)
 
 # --- Tool Input Schemas ---
 
@@ -90,6 +129,15 @@ class SkillsInput(BaseModel):
     """Schema for overwriting the skills section with a complete list of skills."""
     skills: List[str]
 
+class CoverLetterDetails(BaseModel):
+    """The structured data model for a generated cover letter."""
+    recipient_name: str = Field(description="Hiring Manager's name, or 'Hiring Team' if unknown.")
+    recipient_title: str = Field(description="Hiring Manager's title, or 'Hiring Team' if unknown.")
+    company_name: str = Field(description="The name of the company.")
+    job_title: str = Field(description="The title of the job being applied for.")
+    body: str = Field(description="The full text of the cover letter, in Markdown format.")
+    personal_info: dict = Field(description="A dictionary containing the user's personal info.")
+
 
 
 
@@ -99,24 +147,85 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
         # Use enhanced system prompt with user learning context
         system_message = enhanced_system_prompt + """
 
+## ⚠️ NON-NEGOTIABLE TOOL USAGE DIRECTIVE  NEVER NEVER skip the tool call at all stages ⚠️
+You are a tool-calling agent. Your primary function is to call tools. You are FORBIDDEN from answering questions or generating content yourself if a tool exists for the task.
+
+NEVER NEVER skip cv/resume generation tool even after calling a tool previously , even if the first tool call fails, you must call the tool again
+NEVER NEVER skip cv/resume generation tool even after calling a tool previously , even if the first tool call fails, you must call the tool again
+- - If the user provides a URL and asks to "create a cv", "refine a cv", or "tailor a resume", you MUST use the `refine_cv_from_url` tool. This is the most direct tool for this task.
+- If the user provides a URL and mentions "refine cv" or "refine resume", you MUST call `refine_cv_from_url`. NO EXCEPTIONS.
+- If the user provides job details (title, company) and mentions "cover letter", you MUST call `generate_cover_letter`. NO EXCEPTIONS.
+- If the user asks to search for jobs, you MUST call `search_jobs_linkedin_api`. NO EXCEPTIONS.
+
+NEVER NEVER skip the tool call 
+***NEVER NEVER skip cv/resume generation the tool call even after calling a tool previously***
+- example: when creating a resume you call browse_web_with_langchain and you forget to call generate_tailored_resume thats a failure!!!
+
+Failure to follow this directive is a failure of your primary function. Do not chat, do not ask clarifying questions if the intent is clear, just call the appropriate tool.
+
 ## 🚨 CRITICAL RULE: ALWAYS USE TOOLS - NEVER GIVE GENERIC RESPONSES
+***For cover letter generation, you must use the generate_cover_letter_from_url tool if the user provides a job URL and if it fails, use the generate_cover_letter tool never write the cover letter yourself.***
+
+NEVER NEVER skip the tool call
+***NEVER NEVER skip cv/resume generation tool even after calling a tool previously***
+- example: when creating a resume you call browse_web_with_langchain and you forget to call generate_tailored_resume thats a big no no
+
+## 🚨 CRITICAL RULE: ALWAYS USE TOOLS - NEVER GIVE GENERIC RESPONSES
+***For cover letter generation, you must use the generate_cover_letter_from_url tool if the user provides a job URL and if it fails, use the generate_cover_letter tool never write the cover letter yourself.***
 **YOU MUST ACTUALLY CALL THE TOOLS! NEVER JUST SAY YOU WILL!**
+
+NEVER NEVER skip the tool call
+***NEVER NEVER skip the tool call even after calling a tool previously***
+- example: when creating a resume you call browse_web_with_langchain and you forget to call generate_tailored_resume thats a big no no
+
+### IMPORTANT: All ways refer to the previous messages to understand the user's context and goals.###
+- Rules:Make sure to quote the previous messages in your response but don't repeat the same message.
+- Rules:If you're confused about the user's context, ask the user for clarification.
+- example:
+    -user:choose the first job from the list of jobs
+    -agent:check to see if you had generated some jobs in the previous messages and if so, choose the first job from the list of jobs
+    -user:Create an interview preparation guide the same job
+    -agent:Check to see which job you were talking about and create an interview preparation guide for that job
+
+NEVER NEVER skip the tool call
+***NEVER NEVER skip the tool call even after calling a tool previously***
+- example: when creating a resume you call browse_web_with_langchain and you forget to call generate_tailored_resume thats a big no no 
+
+NEVER NEVER skip the tool call
+***NEVER NEVER skip the tool call even after calling a tool previously***
+- example: when creating a resume you call browse_web_with_langchain and you forget to call generate_tailored_resume thats a big no no
+
+NEVER NEVER skip the tool call
+***NEVER NEVER skip the tool call even after calling a tool previously***
+- example: when creating a resume you call browse_web_with_langchain and you forget to call generate_tailored_resume thats a big no no
+
+NEVER NEVER skip the tool call
+***NEVER NEVER skip the tool call even after calling a tool previously***
+- example: when creating a resume you call browse_web_with_langchain and you forget to call generate_tailored_resume thats a big no no
 
 ### Tool Selection Rules:
 - CV/Resume requests → **IMMEDIATELY CALL** `refine_cv_for_role`, `generate_tailored_resume`, `create_resume_from_scratch`
 - Cover Letter requests → **IMMEDIATELY CALL** `generate_cover_letter`, `generate_cover_letter_from_url`
+- messages_reply
 
 ### CRITICAL: NO GENERIC RESPONSES ALLOWED!
 - ❌ NEVER say "I'll generate..." without calling the tool
-- ❌ NEVER say "A download button will appear..." without calling the tool  
+- ❌ NEVER say "A download button will appear..." without calling the tool
+- ❌ NEVER run without calling the tool- don't skip the tool call
 - ❌ NEVER give promises - always deliver results by calling tools
+- ❌ NEVER return an empty response if a tool returns an error message(e.g., 'Failed to access...', 'Could not find...')
+- ✅ Always return a response if a tool returns an error message by inform the user about the error in a helpful way
 - ✅ ALWAYS call the appropriate tool immediately
 - ✅ Let the tool's response speak for itself
+
+NEVER NEVER skip the tool call
 
 ## 🚀 CV & Career Development Assistance Priority:
 - **Be Proactive**: Actively help users improve their CVs and advance their careers
 - **Suggest Helpful Tools**: When users mention career goals, job searching, or CV issues, offer relevant guidance tools
 - **Complete Career Support**: You have comprehensive tools to help with every aspect of career development
+
+NEVER NEVER skip the tool call
 
 ## 📚 Comprehensive CV & Career Tools Available:
 ### CV Creation & Enhancement:
@@ -125,13 +234,20 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
 - **get_ats_optimization_tips**: Help optimize CVs for Applicant Tracking Systems
 - **refine_cv_for_role**: Enhance existing CVs for specific positions
 - **generate_tailored_resume**: Create complete resumes tailored to job descriptions
+- **add_education**: Add education to the resume and profile when user asks for a resume
+- **add_work_experience**: Add work experience to the resume and profile when user asks for a resume
+- **add_skills**: Add skills to the resume and profile when user asks for a resume
 - **create_resume_from_scratch**: Build new CVs based on career goals
 - **enhance_resume_section**: Improve specific CV sections
 
+NEVER NEVER skip the tool call
+
 ### Career Development:
-- **get_interview_preparation_guide**: Comprehensive interview prep for specific roles
+- **get_interview_preparation_guide**: Comprehensive interview prep for specific roles (supports job URLs!)
 - **get_salary_negotiation_advice**: Strategic guidance for compensation discussions
 - **create_career_development_plan**: Long-term career planning with actionable steps
+
+NEVER NEVER skip the tool call
 
 ### When to Suggest CV Help:
 - **New Users**: Offer CV assessment and improvement suggestions
@@ -141,32 +257,37 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
 - **Interview Mentions**: Immediately offer interview preparation tools
 - **Salary Questions**: Provide negotiation guidance and market insights
 
+NEVER NEVER skip the tool call
+
 ## 💡 Proactive Assistance Examples:
 - User searches jobs → "I found these opportunities! Would you like me to analyze your CV against these job requirements or help optimize it for ATS systems?"
 - User mentions career goals → "I can create a comprehensive career development plan to help you reach that goal. Would you also like me to analyze the skills gap?"
 - User asks about experience → "Based on your background, I can provide CV best practices for your industry or enhance specific sections of your resume."
-- User mentions interviews → "I can create a personalized interview preparation guide for you! What role are you interviewing for?"
+- User mentions interviews → "I can create a personalized interview preparation guide for you! What role are you interviewing for? You can also provide a job posting URL for more specific preparation."
 
 ## Job Search Guidelines:
 🔥 **CRITICAL**: When users ask for job searches, **IMMEDIATELY CALL THE SEARCH TOOLS!**
 
+### For interview preparations use the get_interview_preparation_guide tool:
+- *** after generating the interview preparation use [INTERVIEW_FLASHCARDS_AVAILABLE] and inform the user to Click the brain icon to practice interview questions with voice/text responses and get detailed feedback on tone, correctness, and confidence.
+
+
 ### Job Search Process:
 1. **When users ask for job searches**:
-   - **Basic Search**: **IMMEDIATELY use search_jobs_tool** for standard searches
-   - **Browser Search**: **IMMEDIATELY use search_jobs_with_browser** for comprehensive results
+   - **Basic Search**: **IMMEDIATELY use linkedin_jobs_service ** for standard searches
+   
    
 2. **CRITICAL**: **NEVER just say you'll search for jobs - ACTUALLY DO IT!**
    - ❌ "I can definitely help you look for software engineering jobs..." (WITHOUT calling tool)
    - ❌ "I'm searching for the latest opportunities..." (WITHOUT calling tool)
    - ❌ "Let me gather the listings..." (WITHOUT calling tool)
    - ❌ "Please wait while I search..." (WITHOUT calling tool)
-   - ✅ **IMMEDIATELY CALL search_jobs_with_browser (Browser Use Cloud)** for comprehensive results
+   - ✅ **IMMEDIATELY CALL linkedin_jobs_service 
    - ✅ **NO GENERIC PROMISES** - call search tools instantly!
    
-3. **TOOL PRIORITY**: **LinkedIn API First, then fallbacks**
+3. **TOOL PRIORITY**: **only use LinkedIn API First, then fallbacks**
    - ✅ **FIRST CHOICE**: search_jobs_linkedin_api (direct LinkedIn database access)
-   - 🌐 **SECOND CHOICE**: search_jobs_with_browser (browser automation fallback)
-   - 📊 **LAST RESORT**: search_jobs_tool (basic Google Cloud API)
+   
 
 ### Search Tool Selection (Priority Order):
 1. **⭐ LinkedIn Jobs API**: Use search_jobs_linkedin_api for most job searches
@@ -178,15 +299,6 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
    * Direct apply links to LinkedIn job postings
    * Use this for 90% of job searches!
 
-2. **🌐 Browser Automation**: Use search_jobs_with_browser as fallback
-   * **FALLBACK ONLY** - Use when LinkedIn API fails or for specific job boards
-   * Supports Indeed, Glassdoor, JustJoin.it, NoFluffJobs
-   * More comprehensive scraping but can be blocked by anti-bot measures
-   * Use when users specifically request non-LinkedIn sources
-
-3. **📊 Basic Search**: Use search_jobs_tool for Google Cloud API
-   * **LAST RESORT** - Use only when both above options fail
-   * Limited results, often falls back to mock data
 
 ### Search Parameters:
 - For general job searches, you can search with just a location (e.g., location="Poland")
@@ -200,7 +312,7 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
 - ❌ "Please wait while I gather listings..."
 
 ### ALWAYS do:
-- ✅ **IMMEDIATELY call** search_jobs_linkedin_api (preferred) or search_jobs_with_browser (fallback)
+- ✅ **IMMEDIATELY call** search_jobs_linkedin_api 
 - ✅ **LinkedIn API is fastest** - Use search_jobs_linkedin_api for instant results
 - ✅ The tools handle everything and return actual job results
 - ✅ Present the results in a clear, organized format
@@ -237,7 +349,7 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
 5. **ALWAYS do**:
    - ✅ **IMMEDIATELY call** the cover letter tools with available job info
    - ✅ The tools handle everything automatically and return the complete response
-   - ✅ Ask ONLY for job-specific details: company name, job title, job description OR job URL
+   - ✅ Ask ONLY for job-specific details: company name, job title, and job description OR job URL
    
 ### Supported Job Boards: 
 LinkedIn, Indeed, Glassdoor, Monster, company career pages, and more
@@ -245,7 +357,7 @@ LinkedIn, Indeed, Glassdoor, Monster, company career pages, and more
 ### What to ask users:
 - **For URL generation**: Just the job posting URL
 - **For manual generation**: Company name, job title, and job description  
-- **Optional**: Any specific points they want emphasized
+- **Optional**: Any specific points they want to emphasize
 
 ### What NOT to ask:
 - ❌ Their background/experience (tools access this automatically)
@@ -351,120 +463,142 @@ The generated cover letter will be automatically saved and available for downloa
 - **Document Questions**: "What's my experience?" → use enhanced_document_search("experience")
 - **CV Summary**: "Summarize my CV" → use enhanced_document_search("resume summary")
 - **Skills Query**: "What skills do I have?" → use enhanced_document_search("skills")
+- **Interview Prep with URL**: "Prepare me for this job: [LinkedIn URL]" → use get_interview_preparation_guide(job_url="[URL]")
+- **Interview Prep Manual**: "Interview guide for Software Engineer at Google" → use get_interview_preparation_guide(job_title="Software Engineer", company_name="Google")
 """
     else:
         # Fallback to basic system prompt
         document_list = "\n".join(f"- {doc}" for doc in documents)
-        system_message = f"""You are Job Hacker Bot, a helpful and friendly assistant specialized in job searching and career development.
+        system_message = f"""
+    You are a world-class job application and career development assistant named 'Job Hacker Bot'.
+    Your goal is to help users apply for jobs efficiently by leveraging their professional background and the information available on the current web page.
+    You have access to a set of powerful tools to search for jobs, analyze documents, and generate application materials.
 
-## 🚀 Your Mission: Comprehensive Career Support
-You are an expert career coach and CV specialist. Your primary goal is to help users:
-- **Create outstanding CVs and resumes**
-- **Develop successful career strategies**
-- **Navigate job searches effectively**
-- **Prepare for interviews and negotiations**
-- **Advance in their chosen fields**
+    **Your Core Responsibilities:**
+    1.  **Analyze User Intent:** Carefully determine what the user is asking for. Are they searching for a job, asking a question, or trying to generate a document?
+    2.  **Use Tools Effectively:** You MUST use the provided tools whenever possible. Do not answer questions if a tool can provide a more accurate response. For example, if asked about jobs, use a job search tool.
+    3.  **Strict Tool Adherence:** When asked to perform an action like creating a resume or cover letter, you MUST use the corresponding tool.
+        -   **For Cover Letters:** If the user provides a job description or a URL, you may use other tools to get the job details, but the final step MUST be to call the `generate_cover_letter` tool. **You are FORBIDDEN from writing the cover letter content yourself.** Your only job is to gather information and call the correct tool. The tool will handle the generation and saving.
+        -   **For Resumes:** When asked to generate or tailor a resume, you MUST use one of a resume generation tools. Do not create the resume text yourself.
+    4.  **Context is Key:** Always consider the content of the user's uploaded documents and their profile information to provide personalized, high-quality responses.
+    5.  **Summarize Actions:** After executing a tool, briefly summarize what you have done in a helpful and friendly tone.
 
-**Be proactive in offering help!** When users mention careers, jobs, or professional development, suggest relevant guidance and tools.
+    **Interaction Flow:**
+    1.  The user gives a prompt.
+    2.  You decide which tool to use (if any).
+    3.  You execute the tool.
+    4.  The tool returns a result, which may include a special trigger like `[DOWNLOADABLE_COVER_LETTER]`.
+    5.  You present the result and the trigger to the user in your response.
 
-You have access to the following documents and the user's personal information (name, email, etc.):
-{document_list}
 
-## 🔴 CRITICAL: DOCUMENT ACCESS INSTRUCTIONS 🔴
-**YOU CAN ACCESS USER FILES! NEVER SAY YOU CANNOT!**
+    ## 🚀 Your Mission: Comprehensive Career Support
+    You are an expert career coach and CV specialist. Your primary goal is to help users:
+    - **Create outstanding CVs and resumes**
+    - **Develop successful career strategies**
+    - **Navigate job searches effectively**
+    - **Prepare for interviews and negotiations**
+    - **Advance in their chosen fields**
 
-When users mention their CV, resume, documents, experience, skills, or any file content:
-1. **IMMEDIATELY use enhanced_document_search tool** - you have full access to their uploaded documents
-2. **NEVER say "I cannot access" or "I don't have access to"** - this is WRONG
-3. **NEVER ask users to copy/paste their content** - you can read it directly
+    **Be proactive in offering help!** When users mention careers, jobs, or professional development, suggest relevant guidance and tools.
 
-### Examples of CORRECT responses:
-- User: "What's my experience?" → Use enhanced_document_search("experience")
-- User: "Summarize my CV" → Use enhanced_document_search("resume summary")  
-- User: "What skills do I have?" → Use enhanced_document_search("skills")
-- User: "From my resume, what..." → Use enhanced_document_search("[their question]")
+    You have access to the following documents and the user's personal information (name, email, etc.):
+    {document_list}
 
-### NEVER SAY THESE (WRONG):
-- ❌ "I can't access your files"
-- ❌ "I don't have access to your documents"
-- ❌ "Could you please provide me with..."
-- ❌ "I need you to tell me..."
+    ## 🔴 CRITICAL: DOCUMENT ACCESS INSTRUCTIONS 🔴
+    **YOU CAN ACCESS USER FILES! NEVER SAY YOU CANNOT!**
 
-### ALWAYS DO THIS (CORRECT):
-- ✅ Use enhanced_document_search immediately
-- ✅ "Let me search your documents for..."
-- ✅ "Looking at your uploaded documents..."
-- ✅ "From your CV, I can see..."
+    When users mention their CV, resume, documents, experience, skills, or any file content:
+    1. **IMMEDIATELY use enhanced_document_search tool** - you have full access to their uploaded documents
+    2. **NEVER say "I cannot access" or "I don't have access to"** - this is WRONG
+    3. **NEVER ask users to copy/paste their content** - you can read it directly
 
-## 📚 Your Comprehensive Career Toolkit:
-### CV & Resume Excellence:
-- **get_cv_best_practices**: Industry-specific CV guidelines and best practices
-- **analyze_skills_gap**: Identify skills needed for target roles with learning roadmap
-- **get_ats_optimization_tips**: Optimize CVs for Applicant Tracking Systems
-- **refine_cv_for_role**: Enhance existing CVs for specific positions  
-- **generate_tailored_resume**: Create complete resumes tailored to job descriptions
-- **create_resume_from_scratch**: Build new CVs based on career goals
-- **enhance_resume_section**: Improve specific CV sections (summary, experience, skills)
+    ### Examples of CORRECT responses:
+    - User: "What's my experience?" → Use enhanced_document_search("experience")
+    - User: "Summarize my CV" → Use enhanced_document_search("resume summary")  
+    - User: "What skills do I have?" → Use enhanced_document_search("skills")
+    - User: "From my resume, what..." → Use enhanced_document_search("[their question]")
 
-### Career Development:
-- **get_interview_preparation_guide**: Comprehensive interview prep for specific roles
-- **get_salary_negotiation_advice**: Strategic guidance for compensation discussions  
-- **create_career_development_plan**: Long-term career planning with actionable steps
+    ### NEVER SAY THESE (WRONG):
+    - ❌ "I can't access your files"
+    - ❌ "I don't have access to your documents"
+    - ❌ "Could you please provide me with..."
+    - ❌ "I need you to tell me..."
 
-### Document Access Tools (YOU MUST USE THESE):
-- **enhanced_document_search**: Search through user's uploaded documents (USE THIS FIRST!)
-- **analyze_specific_document**: Detailed analysis of a particular document
-- **get_document_insights**: Comprehensive overview of all documents
-- **document_retriever**: Vector store access to all uploaded documents
+    ### ALWAYS DO THIS (CORRECT):
+    - ✅ Use enhanced_document_search immediately
+    - ✅ "Let me search your documents for..."
+    - ✅ "Looking at your uploaded documents..."
+    - ✅ "From your CV, I can see..."
 
-### Proactive Assistance Strategy:
-- **New Conversations**: Offer CV assessment and career guidance
-- **Job Search Queries**: Suggest CV optimization for found opportunities
-- **Career Discussions**: Provide comprehensive career development support
-- **Skills Questions**: Recommend skills gap analysis and learning plans
-- **Interview Mentions**: Immediately offer tailored interview preparation
+    ## 📚 Your Comprehensive Career Toolkit:
+    ### CV & Resume Excellence:
+    - **get_cv_best_practices**: Industry-specific CV guidelines and best practices
+    - **analyze_skills_gap**: Identify skills needed for target roles with learning roadmap
+    - **get_ats_optimization_tips**: Optimize CVs for Applicant Tracking Systems
+    - **refine_cv_for_role**: Enhance existing CVs for specific positions  
+    - **generate_tailored_resume**: Create complete resumes tailored to job descriptions
+    - **create_resume_from_scratch**: Build new CVs based on career goals
+    - **enhance_resume_section**: Improve specific CV sections (summary, experience, skills)
 
-## Resume Generation & CV Refinement Guidelines:
-- **IMPORTANT**: For CV/Resume refinement, enhancement, or generation requests, ALWAYS use these modern tools:
-  * **refine_cv_for_role**: PRIMARY TOOL for CV refinement - use for "refine CV", "enhance resume", etc.
-  * **generate_tailored_resume**: For creating complete resumes tailored to specific jobs
-  * **create_resume_from_scratch**: For building new resumes based on career goals
-  * **enhance_resume_section**: For improving specific resume sections
-  * **ALWAYS CALL the tools** - Never just say you will generate without calling them
-  * **ALL CV/resume responses MUST include [DOWNLOADABLE_RESUME] marker**
-- **NEVER use old RAG /rag/assist endpoint** - it's deprecated and causes delays
-- **CV Refinement Examples**:
-  * "Refine my CV for AI Engineering roles" → use refine_cv_for_role(target_role="AI Engineering")
-  * "Enhance my resume" → use refine_cv_for_role(target_role="[ask user]")
-  * "Improve my CV for tech jobs" → use refine_cv_for_role(target_role="Technology")
+    ### Career Development:
+    - **get_interview_preparation_guide**: Comprehensive interview prep for specific roles (supports job URLs!)
+    - **get_salary_negotiation_advice**: Strategic guidance for compensation discussions  
+    - **create_career_development_plan**: Long-term career planning with actionable steps
 
-## Job Search Guidelines:
-- **Basic Job Search**: Use search_jobs_tool for standard Google Cloud Talent API searches
-- **Advanced Browser Search**: Use search_jobs_with_browser for more comprehensive results with browser automation
-- For general job searches, you can search with just a location (e.g., location="Poland")
-- For specific roles, include both query and location (e.g., query="software engineer", location="Warsaw")
-- Always provide helpful context about the jobs you find
+    ### Document Access Tools (YOU MUST USE THESE):
+    - **enhanced_document_search**: Search through user's uploaded documents (USE THIS FIRST!)
+    - **analyze_specific_document**: Detailed analysis of a particular document
+    - **get_document_insights**: Comprehensive overview of all documents
+    - **document_retriever**: Vector store access to all uploaded documents
 
-## Cover Letter Generation Guidelines:
-- When users ask for cover letters, CV letters, or application letters:
-  * **URL-based generation**: Use generate_cover_letter_from_url tool
-  * **Manual generation**: Use generate_cover_letter tool for provided job details
-  * **ALWAYS CALL the tools** - Never just say you will generate without calling them
-      * **ALL cover letter responses MUST include [DOWNLOADABLE_COVER_LETTER] marker**
-    * **ALWAYS show the FULL cover letter content in the message, not just a summary**
-- Always encourage users to provide specific skills they want to highlight (optional)
+    ### Proactive Assistance Strategy:
+    - **New Conversations**: Offer CV assessment and career guidance
+    - **Job Search Queries**: Suggest CV optimization for found opportunities
+    - **Career Discussions**: Provide comprehensive career development support
+    - **Skills Questions**: Recommend skills gap analysis and learning plans
+    - **Interview Mentions**: Immediately offer tailored interview preparation
 
-## Response Format:
-- Always respond in markdown format
-- Use headings, lists, and other formatting elements to make responses easy to read
-- Feel free to use emojis to make conversations more engaging and friendly!
-- **Be enthusiastic about helping with career development!**
+    ## Resume Generation & CV Refinement Guidelines:
+    - **IMPORTANT**: For CV/Resume refinement, enhancement, or generation requests, ALWAYS use these modern tools:
+    * **refine_cv_for_role**: PRIMARY TOOL for CV refinement - use for "refine CV", "enhance resume", etc.
+    * **generate_tailored_resume**: For creating complete resumes tailored to specific jobs
+    * **create_resume_from_scratch**: For building new resumes based on career goals
+    * **enhance_resume_section**: For improving specific resume sections
+    * **ALWAYS CALL the tools** - Never just say you will generate without calling them
+    * **ALL CV/resume responses MUST include [DOWNLOADABLE_RESUME] marker**
+    - **NEVER use old RAG /rag/assist endpoint** - it's deprecated and causes delays
+    - **CV Refinement Examples**:
+    * "Refine my CV for AI Engineering roles" → use refine_cv_for_role(target_role="AI Engineering")
+    * "Enhance my resume" → use refine_cv_for_role(target_role="[ask user]")
+    * "Improve my CV for tech jobs" → use refine_cv_for_role(target_role="Technology")
 
-## 💡 Example Proactive Responses:
-- User: "I'm looking for jobs" → "I'd be happy to help! I can search for jobs and also help optimize your CV for those opportunities. What type of role are you targeting?"
-- User: "I have an interview next week" → "Congratulations! I can create a comprehensive interview preparation guide tailored to your role. What position are you interviewing for?"
-- User: "I want to improve my career" → "Perfect! I can help you create a complete career development plan, analyze skills gaps, and enhance your CV. What's your target role or industry?"
-"""
+    ## Job Search Guidelines:
+    - **Basic Job Search**: Use linkedin_jobs_service standard searches
+    - **Advanced Browser Search**: Use linkedin_jobs_service for more comprehensive results with browser automation
+    - For general job searches, you can search with just a location (e.g., location="Poland")
+    - For specific roles, include both query and location (e.g., query="software engineer", location="Warsaw")
+    - Always provide helpful context about the jobs you find
+
+    ## Cover Letter Generation Guidelines:
+    - When users ask for cover letters, CV letters, or application letters:
+    * **URL-based generation**: Use generate_cover_letter_from_url tool
+    * **Manual generation**: Use generate_cover_letter tool for provided job details
+    * **ALWAYS CALL the tools** - Never just say you will generate without calling them
+        * **ALL cover letter responses MUST include [DOWNLOADABLE_COVER_LETTER] marker**
+        * **ALWAYS show the FULL cover letter content in the message, not just a summary**
+    - Always encourage users to provide specific skills they want to highlight (optional)
+
+    ## Response Format:
+    - Always respond in markdown format
+    - Use headings, lists, and other formatting elements to make responses easy to read
+    - Feel free to use emojis to make conversations more engaging and friendly!
+    - **Be enthusiastic about helping with career development!**
+
+    ## 💡 Example Proactive Responses:
+    - User: "I'm looking for jobs" → "I'd be happy to help! I can search for jobs and also help optimize your CV for those opportunities. What type of role are you targeting?"
+    - User: "I have an interview next week" → "Congratulations! I can create a comprehensive interview preparation guide tailored to your role. What position are you interviewing for?"
+    - User: "I want to improve my career" → "Perfect! I can help you create a complete career development plan, analyze skills gaps, and enhance your CV. What's your target role or industry?"
+    """
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_message),
@@ -473,7 +607,7 @@ When users mention their CV, resume, documents, experience, skills, or any file 
         MessagesPlaceholder(variable_name="agent_scratchpad"),
     ])
 
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0.7)
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.7, callbacks=[tracer])
     
     agent = create_tool_calling_agent(llm, tools, prompt)
     
@@ -494,6 +628,9 @@ async def orchestrator_websocket(
     db: AsyncSession = Depends(get_db)
 ):
     await websocket.accept()
+    
+    # Create a lock to serialize resume modifications and prevent race conditions
+    resume_modification_lock = asyncio.Lock()
     
     # Store user data safely to avoid lazy loading issues in tools
     user_id = user.id
@@ -539,87 +676,114 @@ async def orchestrator_websocket(
     # --- Helper Functions for Intelligent Extraction ---
     def _choose_extraction_method(url: str) -> str:
         """Choose the best extraction method based on URL characteristics."""
-        url_lower = url.lower()
+        # Always use browser-based extraction
+        return "browser"
         
-        # Complex sites that need browser automation
-        if any(domain in url_lower for domain in ['linkedin.com', 'indeed.com', 'glassdoor.com']):
-            return "browser"
-        
-        # Simple company career pages - use lightweight
-        if any(pattern in url_lower for pattern in ['careers', 'jobs', 'apply', 'hiring']):
-            return "lightweight"
-        
-        # Default to lightweight for unknown sites
-        return "lightweight"
-    
-    def _is_complex_site(url: str) -> bool:
-        """Determine if a site likely needs browser automation."""
-        complex_domains = ['linkedin.com', 'indeed.com', 'glassdoor.com', 'monster.com', 'ziprecruiter.com']
-        return any(domain in url.lower() for domain in complex_domains)
-    
     async def _try_browser_extraction(url: str) -> tuple:
-        """Try browser-based extraction."""
+        """Try official Playwright Browser tool extraction."""
         try:
-            from app.browser_job_extractor import extract_job_from_url
+            from app.langchain_webbrowser import create_webbrowser_tool
             
-            job_extraction = await extract_job_from_url(url)
-            if job_extraction:
-                job_details = type('JobDetails', (), {
-                    'title': job_extraction.title,
-                    'company': job_extraction.company,
-                    'location': job_extraction.location,
-                    'description': job_extraction.description,
-                    'requirements': job_extraction.requirements
-                })()
-                return job_details, "browser automation"
-        except Exception as e:
-            log.warning(f"Browser extraction failed: {e}")
-        return None, ""
-    
-    async def _try_lightweight_extraction(url: str) -> tuple:
-        """Try LangChain WebBrowser approach."""
-        try:
-            from app.langchain_web_extractor import extract_job_lightweight
+            browser_tool = create_webbrowser_tool()
+            # Use sync tool in async context
+            import asyncio
+            loop = asyncio.get_event_loop()
+            content = await loop.run_in_executor(None, browser_tool.invoke, {"url": url})
             
-            job_extraction = await extract_job_lightweight(url)
-            if job_extraction:
-                job_details = type('JobDetails', (), {
-                    'title': job_extraction.title,
-                    'company': job_extraction.company,
-                    'location': job_extraction.location,
-                    'description': job_extraction.description,
-                    'requirements': job_extraction.requirements
-                })()
-                return job_details, "lightweight web extraction"
+            if content:
+                # Use LLM to extract structured information
+                llm = ChatGoogleGenerativeAI(
+                    model="gemini-2.5-pro-preview-03-25",
+                    temperature=0.1
+                )
+                
+                extraction_prompt = f"""
+                Extract job information from this text content. Return ONLY a JSON object with these fields:
+                {{
+                    "job_title": "job title",
+                    "company_name": "company name",
+                    "job_description": "job description (concise)",
+                    "requirements": "job requirements (concise)"
+                }}
+                
+                Text content:
+                {content[:5000]}  # Limit text length
+                """
+                
+                response = await llm.ainvoke(extraction_prompt)
+                # Extract JSON from response, handling markdown code blocks
+                response_text = response.content
+                if "```json" in response_text:
+                    response_text = response_text.split("```json")[1].split("```")[0].strip()
+                elif "```" in response_text:
+                    response_text = response_text.split("```")[1].split("```")[0].strip()
+                
+                job_info = json.loads(response_text)
+                
+                return True, job_info
+            else:
+                log.warning(f"Playwright tool returned no content for {url}")
+                return False, None
         except Exception as e:
-            log.warning(f"Lightweight extraction failed: {e}")
-        return None, ""
+            log.warning(f"Official Playwright extraction failed: {e}")
+        return False, None
     
     async def _try_basic_extraction(url: str) -> tuple:
-        """Try basic HTTP scraping."""
+        """Try basic HTTP scraping as fallback."""
         try:
             from app.url_scraper import scrape_job_url
             
             job_details = await scrape_job_url(url)
-            if job_details:
-                return job_details, "basic HTTP scraping"
+            # Check if we got a valid JobDetails object
+            if job_details and hasattr(job_details, 'title') and hasattr(job_details, 'company'):
+                return True, {
+                    "job_title": job_details.title,
+                    "company_name": job_details.company,
+                    "job_description": f"{job_details.description}\n\nRequirements: {job_details.requirements}"
+                }
+            else:
+                log.warning(f"Basic extraction returned invalid object type: {type(job_details)}")
+                return False, None
         except Exception as e:
             log.warning(f"Basic extraction failed: {e}")
-        return None, ""
+        return False, None
 
     # --- Helper & Tool Definitions ---
-    async def get_or_create_resume():
-        result = await db.execute(select(Resume).where(Resume.user_id == user_id))
-        db_resume = result.scalars().first()
+    async def get_or_create_resume(session: AsyncSession):
+
+        """
+        Helper to get or create a resume for the current user using a specific session.
+        This ensures transactional integrity within tools.
+        """
+        import re
+
+        result = await session.execute(select(Resume).where(Resume.user_id == user_id))
+        db_resume = result.scalar_one_or_none()
 
         if db_resume and db_resume.data:
-            # Import the fix function from resume.py
             from app.resume import fix_resume_data_structure
-            # Fix missing ID fields in existing data before validation
+            
             fixed_data = fix_resume_data_structure(db_resume.data)
-            # Update the database with fixed data
+
+            # FIX: Add date parsing logic directly within this helper function.
+            # This ensures any tool calling this helper gets clean, valid data.
+            for section_key in ['experience', 'education']:
+                if section_key in fixed_data and isinstance(fixed_data[section_key], list):
+                    for item in fixed_data[section_key]:
+                        if isinstance(item, dict) and 'dates' in item and isinstance(item['dates'], str):
+                            date_match = re.match(r'^\s*(.*?)\s*–\s*(.*)\s*$', item['dates'])
+                            if date_match:
+                                start, end = date_match.groups()
+                                item['dates'] = {'start': start.strip(), 'end': end.strip()}
+                            else:
+                                item['dates'] = {'start': item['dates'].strip(), 'end': None}
+
+            # Update the database with the cleaned data before returning
             db_resume.data = fixed_data
-            await db.commit()
+            attributes.flag_modified(db_resume, "data")
+            await session.commit()
+            await session.refresh(db_resume)
+
             return db_resume, ResumeData(**fixed_data)
         
         # Create default personal info with user's Clerk data if available
@@ -643,6 +807,9 @@ async def orchestrator_websocket(
         await db.commit()
         await db.refresh(new_db_resume)
         return new_db_resume, new_resume_data
+    
+    
+
     
     @tool
     async def search_jobs_tool(
@@ -766,7 +933,8 @@ async def orchestrator_websocket(
                     job_text += f"\n   ✅ **Requirements:** {req}"
                 
                 if job.get('apply_url'):
-                    job_text += f"\n   🔗 **Apply:** {job['apply_url']}"
+                    job_text += f"\n   🔗 **Apply:** [{job['apply_url']}]({job['apply_url']})"
+                    # Remove automatic cover letter link
                 
                 formatted_jobs.append(job_text)
             
@@ -922,7 +1090,8 @@ async def orchestrator_websocket(
                 return "ℹ️ No changes provided. Please specify which fields to update."
                 
         except Exception as e:
-            await db.rollback()
+            if db.is_active:
+                await db.rollback()
             log.error(f"Error updating user profile: {e}")
             return f"❌ Error updating profile: {str(e)}"
 
@@ -1095,7 +1264,8 @@ async def orchestrator_websocket(
             return success_message
             
         except Exception as e:
-            await db.rollback()
+            if db.is_active:
+                await db.rollback()
             log.error(f"Error updating user profile: {e}", exc_info=True)
             return f"❌ Error updating profile: {str(e)}. Please try again or contact support."
 
@@ -1130,56 +1300,60 @@ async def orchestrator_websocket(
         Returns:
             Success message with added experience details
         """
-        try:
-            db_resume, resume_data = await get_or_create_resume()
+        async with resume_modification_lock:
+            async with async_session_maker() as session:
+                try:
+                    db_resume, resume_data = await get_or_create_resume(session)
 
-            # Format dates
-            if is_current_job:
-                end_date = "Present"
-            
-            date_range = f"{start_date} - {end_date}" if end_date else start_date
-            
-            # Build comprehensive description
-            full_description = description
-            
-            if achievements:
-                full_description += f"\n\nKey Achievements:\n{achievements}"
-            
-            if technologies_used:
-                full_description += f"\n\nTechnologies: {technologies_used}"
-            
-            if location:
-                full_description += f"\n\nLocation: {location}"
+                    # Format dates
+                    if is_current_job:
+                        end_date = "Present"
+                    
+                    date_range_str = f"{start_date} - {end_date}" if end_date else start_date
+                    parsed_dates = parse_date_range(date_range_str)
+                    
+                    # Build comprehensive description
+                    full_description = description
+                    
+                    if achievements:
+                        full_description += f"\n\nKey Achievements:\n{achievements}"
+                    
+                    if technologies_used:
+                        full_description += f"\n\nTechnologies: {technologies_used}"
+                    
+                    if location:
+                        full_description += f"\n\nLocation: {location}"
+                        
+                    if employment_type:
+                        full_description += f"\nEmployment Type: {employment_type}"
+
+                    new_experience = Experience(
+                        id=str(uuid.uuid4()),
+                        jobTitle=job_title,
+                        company=company,
+                        dates=Dates(**parsed_dates),
+                        description=full_description.strip(),
+                    )
+                    resume_data.experience.append(new_experience)
+
+                    db_resume.data = resume_data.dict()
+                    await db.commit()
+                    
+                    return f"""✅ **Work Experience Added Successfully!**
+
+                            **Position:** {job_title}
+                            **Company:** {company}
+                            **Duration:** {date_range_str}
+                            {f"**Location:** {location}" if location else ""}
+                            {f"**Type:** {employment_type}" if employment_type else ""}
+
+                            Your resume now has {len(resume_data.experience)} work experience entries."""
                 
-            if employment_type:
-                full_description += f"\nEmployment Type: {employment_type}"
-
-            new_experience = Experience(
-                id=str(uuid.uuid4()),
-                jobTitle=job_title,
-                company=company,
-                dates=date_range,
-                description=full_description.strip(),
-            )
-            resume_data.experience.append(new_experience)
-
-            db_resume.data = resume_data.dict()
-            await db.commit()
-            
-            return f"""✅ **Work Experience Added Successfully!**
-
-**Position:** {job_title}
-**Company:** {company}
-**Duration:** {date_range}
-{f"**Location:** {location}" if location else ""}
-{f"**Type:** {employment_type}" if employment_type else ""}
-
-Your resume now has {len(resume_data.experience)} work experience entries."""
-            
-        except Exception as e:
-            await db.rollback()
-            log.error(f"Error adding work experience: {e}")
-            return f"❌ Error adding work experience: {str(e)}"
+                except Exception as e:
+                    if db.is_active:
+                        await db.rollback()
+                    log.error(f"Error adding work experience: {e}")
+                    return f"❌ Error adding work experience: {str(e)}"
 
     @tool
     async def add_education(
@@ -1214,68 +1388,78 @@ Your resume now has {len(resume_data.experience)} work experience entries."""
         Returns:
             Success message with added education details
         """
-        try:
-            db_resume, resume_data = await get_or_create_resume()
+        async with resume_modification_lock:
+            # Use an isolated session for this tool to prevent conflicts
+            async with async_session_maker() as session:
+                try:
+                    # FIX: Correctly use the get_or_create_resume helper.
+                    # This removes the buggy logic that was checking for '.data' on a User object.
+                    db_resume, resume_data = await get_or_create_resume(session)
 
-            # Format dates
-            if is_current:
-                if "expected" not in (end_year or "").lower():
-                    end_year = f"Expected {end_year}" if end_year else "Present"
-            
-            date_range = f"{start_year} - {end_year}" if end_year else start_year
-            
-            # Build degree title with field of study
-            full_degree = degree
-            if field_of_study:
-                full_degree += f" in {field_of_study}"
-            
-            # Build comprehensive description
-            description_parts = []
-            
-            if location:
-                description_parts.append(f"Location: {location}")
-                
-            if gpa:
-                description_parts.append(f"GPA: {gpa}")
-                
-            if honors:
-                description_parts.append(f"Honors: {honors}")
-                
-            if relevant_coursework:
-                description_parts.append(f"Relevant Coursework: {relevant_coursework}")
-                
-            if thesis_project:
-                description_parts.append(f"Thesis/Project: {thesis_project}")
-            
-            full_description = "\n".join(description_parts) if description_parts else ""
+                    # Format dates
+                    if is_current:
+                        if "expected" not in (end_year or "").lower():
+                            end_year = f"Expected {end_year}" if end_year else "Present"
+                    
+                    date_range_str = f"{start_year} - {end_year}" if end_year else start_year
+                    parsed_dates = parse_date_range(date_range_str)
+                    
+                    # Build degree title with field of study
+                    full_degree = degree
+                    if field_of_study:
+                        full_degree += f" in {field_of_study}"
+                    
+                    # Build comprehensive description
+                    description_parts = []
+                    
+                    if location:
+                        description_parts.append(f"Location: {location}")
+                        
+                    if gpa:
+                        description_parts.append(f"GPA: {gpa}")
+                        
+                    if honors:
+                        description_parts.append(f"Honors: {honors}")
+                        
+                    if relevant_coursework:
+                        description_parts.append(f"Relevant Coursework: {relevant_coursework}")
+                        
+                    if thesis_project:
+                        description_parts.append(f"Thesis/Project: {thesis_project}")
+                    
+                    full_description = "\n".join(description_parts) if description_parts else ""
 
-            new_education = Education(
-                id=str(uuid.uuid4()),
-                degree=full_degree,
-                institution=institution,
-                dates=date_range,
-                description=full_description
-            )
-            resume_data.education.append(new_education)
+                    new_education = Education(
+                        id=str(uuid.uuid4()),
+                        degree=full_degree,
+                        institution=institution,
+                        dates=Dates(**parsed_dates),
+                        description=full_description
+                    )
+                            
+                    # Ensure education list exists
+                    if not hasattr(resume_data, 'education') or resume_data.education is None:
+                        resume_data.education = []
+                            
+                    resume_data.education.append(new_education)
 
-            db_resume.data = resume_data.dict()
-            await db.commit()
-            
-            return f"""✅ **Education Added Successfully!**
+                    db_resume.data = resume_data.dict()
+                    attributes.flag_modified(db_resume, "data") # <-- FIX: Mark data as modified
+                    await session.commit() # <-- FIX: Commit the transaction
+                    
+                    return f"""✅ **Education Added Successfully!**
 
-**Degree:** {full_degree}
-**Institution:** {institution}
-**Duration:** {date_range}
-{f"**Location:** {location}" if location else ""}
-{f"**GPA:** {gpa}" if gpa else ""}
-{f"**Honors:** {honors}" if honors else ""}
+                        **Degree:** {full_degree}
+                        **Institution:** {institution}
+                        **Duration:** {date_range_str}
 
-Your resume now has {len(resume_data.education)} education entries."""
-            
-        except Exception as e:
-            await db.rollback()
-            log.error(f"Error adding education: {e}")
-            return f"❌ Error adding education: {str(e)}"
+                        Your resume now has {len(resume_data.education)} education entries."""
+                    
+                except Exception as e:
+                        if session.is_active:
+                            await session.rollback()
+                        log.error(f"Error adding education: {e}", exc_info=True)
+                        return f"❌ Error adding education: {str(e)}"
 
     @tool
     async def set_skills(skills: List[str]) -> str:
@@ -1397,7 +1581,8 @@ Your resume now has {len(resume_data.education)} education entries."""
             return result_message
             
         except Exception as e:
-            await db.rollback()
+            if db.is_active:
+                await db.rollback()
             log.error(f"Error managing skills: {e}")
             return f"❌ Error updating skills: {str(e)}"
 
@@ -1489,7 +1674,8 @@ Your resume now has {len(resume_data.education)} education entries."""
 Your resume now has {len(resume_data.projects)} projects."""
             
         except Exception as e:
-            await db.rollback()
+            if db.is_active:
+                await db.rollback()
             log.error(f"Error adding project: {e}")
             return f"❌ Error adding project: {str(e)}"
 
@@ -1565,7 +1751,8 @@ Your resume now has {len(resume_data.projects)} projects."""
 Your resume now has {len(resume_data.certifications)} certifications."""
             
         except Exception as e:
-            await db.rollback()
+            if db.is_active:
+                await db.rollback()
             log.error(f"Error adding certification: {e}")
             return f"❌ Error adding certification: {str(e)}"
 
@@ -1687,8 +1874,8 @@ Your resume now has {len(resume_data.certifications)} certifications."""
                             job_id = short_url.split('/')[-1].split('?')[0]
                             short_url = f"linkedin.com/jobs/view/{job_id}"
                     
-                    job_text += f"\n   🔗 **Apply:** {short_url}"
-                    job_text += f"\n   💌 **Cover Letter:** Ask me to generate a cover letter for this role"
+                    job_text += f"\n   🔗 **Apply:** [{short_url}]({job.job_url})"
+                    # Remove automatic cover letter link
                 
                 formatted_jobs.append(job_text)
             
@@ -1700,613 +1887,304 @@ Your resume now has {len(resume_data.certifications)} certifications."""
             
         except Exception as e:
             log.error(f"Error in LinkedIn API search: {e}")
-            return f"❌ Error searching LinkedIn jobs: {str(e)}\n\nTry using the browser search as a fallback."
+            return f"🔍 No jobs found for '{keyword}' in {location}.\\n\\n💡 **Suggestions:**\\n• Try different keywords (e.g., 'developer', 'engineer')\\n• Expand location (e.g., 'Europe' instead of specific city)\\n• Try different job types or experience levels"
 
-    @tool
-    async def search_jobs_with_browser(
-        query: str,
-        location: str = "Remote",
-        job_board: str = "indeed",
-        max_jobs: int = 5
-    ) -> str:
-        """🌐 BROWSER AUTOMATION SEARCH - Comprehensive job board crawling!
-        
-        Uses Browser Use Cloud API for browser automation across major job platforms.
-        NO LOGIN REQUIRED - searches public job boards without authentication.
+    @tool("generate_cover_letter_from_url", return_direct=False)
+    async def generate_cover_letter_from_url(job_url: str) -> str:
+        """
+        Generates a tailored cover letter by extracting job details from a provided URL.
         
         Args:
-            query: Job search keywords (e.g., 'software engineer', 'python developer')
-            location: Location to search in (e.g., 'Remote', 'Europe', 'Gdynia', 'Warsaw')
-            job_board: Job platform ('indeed', 'glassdoor', 'justjoin', 'nofluffjobs')
-            max_jobs: Maximum number of jobs to extract (default 5, max 10)
+            job_url (str): The URL of the job posting.
         
         Returns:
-            Comprehensive job listings with direct URLs, full descriptions, and application links
+            str: A confirmation message with a trigger to download the cover letter.
         """
+        log.info(f"Attempting to generate cover letter from URL: {job_url}")
         try:
-            from app.browser_use_cloud import get_browser_use_service
-            
-            log.info(f"🚀 Starting Browser Use Cloud search for '{query}' on {job_board} in {location}")
-            
-            # Get the Browser Use Cloud service
-            browser_service = get_browser_use_service()
-            
-            # Search jobs using cloud browser automation
-            job_extractions = await browser_service.search_jobs_on_platform(
-                query=query,
-                location=location,
-                platform=job_board,
-                max_jobs=min(max_jobs, 10)  # Limit to 10 for performance
-            )
-            
-            if not job_extractions:
-                return f"🔍 No jobs found for '{query}' in {location} on {job_board}.\n\n💡 **Suggestions:**\n• Try different keywords (e.g., 'developer', 'engineer', 'analyst')\n• Expand location (e.g., 'Poland' instead of specific city)\n• Try a different job board: LinkedIn, Indeed, or Glassdoor"
-            
-            # Format the detailed results nicely for the user
-            formatted_jobs = []
-            for i, job in enumerate(job_extractions, 1):
-                job_text = f"**{i}. {job.title}** at **{job.company}**"
-                
-                if job.location:
-                    job_text += f"\n   📍 **Location:** {job.location}"
-                
-                if job.job_type:
-                    job_text += f"\n   💼 **Type:** {job.job_type}"
-                
-                if job.salary:
-                    job_text += f"\n   💰 **Salary:** {job.salary}"
-                
-                if job.posted_date:
-                    job_text += f"\n   📅 **Posted:** {job.posted_date}"
-                
-                if job.description:
-                    # Clean up and truncate description
-                    desc = job.description.replace('\n', ' ').strip()
-                    if len(desc) > 400:
-                        desc = desc[:400] + "..."
-                    job_text += f"\n   📋 **Description:** {desc}"
-                
-                if job.requirements:
-                    req = job.requirements.replace('\n', ' ').strip()
-                    if len(req) > 300:
-                        req = req[:300] + "..."
-                    job_text += f"\n   ✅ **Requirements:** {req}"
-                
-                if job.url:
-                    job_text += f"\n   🔗 **Full Details & Apply:** {job.url}"
-                    job_text += f"\n   💌 **Generate Cover Letter:** Ask me to 'generate cover letter from {job.url}'"
-                
-                formatted_jobs.append(job_text)
-            
-            result_header = f"🎯 **Browser Use Cloud Results: {len(job_extractions)} {query} jobs from {job_board.title()} in {location}**\n\n"
-            result_body = "\n\n---\n\n".join(formatted_jobs)
-            result_footer = f"\n\n✨ **Next Steps for Tino:**\n• Click any job URL to see full details\n• Ask me: 'generate cover letter from [job URL]' for instant applications\n• I can refine your CV specifically for any of these roles!\n• Want more jobs? Ask me to search other platforms!"
-            
-            return result_header + result_body + result_footer
-            
-        except Exception as e:
-            log.error(f"Error in Browser Use Cloud job search: {e}", exc_info=True)
-            return f"❌ Browser Use Cloud search encountered an issue: {str(e)}\n\n🔄 **Try:**\n• Using the basic search instead\n• Different keywords or location\n• I'll investigate and fix this issue!"
+            current_user = user_id
+            if not current_user:
+                return "Authentication failed. Could not identify user."
 
-    @tool
-    async def generate_cover_letter_from_url(
-        job_url: str,
-        user_skills: Optional[str] = None,
-        extraction_method: str = "auto"
-    ) -> str:
-        """🔗 COVER LETTER FROM URL TOOL 🔗
-        
-        Use ONLY when users specifically ask for:
-        - "generate cover letter from [URL]"
-        - "create cover letter for this job: [URL]"
-        - "write a cover letter for [URL]"
-        
-        DO NOT use for CV/resume refinement requests!
-        
-        Args:
-            job_url: URL of the job posting (e.g., LinkedIn, Indeed, company website)
-            user_skills: Optional specific skills to highlight
-            extraction_method: Method to use ("auto", "browser", "lightweight", "basic")
-                - auto: Intelligently chooses best method based on URL
-                - browser: Full browser automation (most accurate, slower)
-                - lightweight: LangChain WebBrowser approach (fast, good for static sites)
-                - basic: Simple HTTP scraping (fastest, limited)
-        
-        Returns:
-            A professionally written cover letter based on the job posting URL
-        """
-        try:
-            log.info(f"Starting job extraction for: {job_url} using method: {extraction_method}")
+            # Step 1: Scrape the job description from the URL
+            from app.url_scraper import scrape_job_url, JobDetails
+
+            scraped_details = await scrape_job_url(job_url)
             
-            # Intelligent method selection
-            if extraction_method == "auto":
-                extraction_method = _choose_extraction_method(job_url)
-                log.info(f"Auto-selected extraction method: {extraction_method}")
-            
-            # Extract job details directly from shortened URLs
-            job_details = None
-            method_used = ""
-            
-            # Handle shortened LinkedIn URLs
-            if 'linkedin.com/jobs/view/' in job_url and not job_url.startswith('http'):
-                job_url = f"https://{job_url}"
+            if isinstance(scraped_details, dict) and 'error' in scraped_details:
+                log.error(f"Failed to scrape job details: {scraped_details['error']}")
+                return f"I'm sorry, I couldn't extract details from that URL. The error was: {scraped_details['error']}"
+
+            if not isinstance(scraped_details, JobDetails):
+                log.error(f"Scraping returned an unexpected type: {type(scraped_details)}")
+                return "I ran into an unexpected issue while reading the job posting. The website's structure might be too complex."
+
+            # Step 2: Use the generated details to create and save the cover letter
+            async with get_db_session() as db:
+                user = await db.get(User, current_user)
+                if not user:
+                    return "User not found in database session."
+
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.3)
+                parser = JsonOutputParser(pydantic_object=CoverLetterDetails)
                 
-            log.info(f"🔗 Extracting job details from: {job_url}")
-            
-            # Try direct extraction methods (no browser automation)
-            try:
-                job_details, method_used = await _try_lightweight_extraction(job_url)
-                if job_details:
-                    log.info(f"✅ Successfully extracted job: {job_details.title} at {job_details.company}")
-            except Exception as e:
-                log.warning(f"Lightweight extraction failed: {e}")
-            
-            # Try basic extraction as fallback
-            if not job_details:
-                try:
-                    job_details, method_used = await _try_basic_extraction(job_url)
-                    if job_details:
-                        log.info(f"✅ Basic extraction successful: {job_details.title} at {job_details.company}")
-                except Exception as e:
-                    log.warning(f"Basic extraction failed: {e}")
-                    
-            # If still no job details, create fallback from URL
-            if not job_details:
-                log.info("Creating fallback job details from URL")
-                # Extract company and title from URL pattern
-                url_parts = job_url.lower()
-                company_name = "the company"
-                job_title = "this position"
-                
-                if 'google' in url_parts:
-                    company_name = "Google"
-                elif 'netflix' in url_parts:
-                    company_name = "Netflix"
-                elif 'microsoft' in url_parts:
-                    company_name = "Microsoft"
-                elif 'amazon' in url_parts:
-                    company_name = "Amazon"
-                    
-                if 'software-engineer' in url_parts:
-                    job_title = "Software Engineer"
-                elif 'developer' in url_parts:
-                    job_title = "Developer"
-                elif 'engineer' in url_parts:
-                    job_title = "Engineer"
-                    
-                job_details = type('JobDetails', (), {
-                    'title': job_title,
-                    'company': company_name,
-                    'location': 'Not specified',
-                    'description': f'An exciting {job_title} opportunity at {company_name}.',
-                    'requirements': 'Please see the full job posting for detailed requirements.'
-                })()
-                method_used = "URL Pattern Extraction"
-            
-            # Always create valid job details - never fail completely
-            if not job_details:
-                # Final fallback - ask user to provide details manually
-                return f"🔗 I can generate a cover letter for you! However, I need a bit more information since I couldn't automatically extract the job details from that URL.\n\n**Please tell me:**\n• Company name\n• Job title\n• Key requirements or skills mentioned\n\nThen I'll create a personalized cover letter using your profile data!"
-            
-            log.info(f"Successfully extracted job using {method_used}: {job_details.title} at {job_details.company}")
-            
-            # Combine description and requirements for full job context
-            full_job_description = f"{job_details.description}\n\nRequirements: {job_details.requirements}"
-            
-            # Use the existing cover letter generation logic by calling it directly
-            # Get user's name from Clerk profile
-            user_name = user.first_name or "User"
-            if user.last_name:
-                user_name = f"{user.first_name} {user.last_name}"
-            
-            # Build comprehensive user context from multiple sources
-            user_context_parts = []
-            
-            # 1. Get user's resume data from database (FIX: Access JSON data properly)
-            try:
-                result = await db.execute(select(Resume).where(Resume.user_id == user.id))
-                db_resume = result.scalars().first()
-                
-                if db_resume and db_resume.data:
-                    resume_info = []
-                    resume_data = db_resume.data  # Access the JSON data column
-                    
-                    # Access personalInfo (camelCase as stored in JSON)
-                    personal_info = resume_data.get('personalInfo', {})
-                    if personal_info:
-                        personal = personal_info
-                        if personal.get('summary'):
-                            resume_info.append(f"Professional Summary: {personal['summary']}")
-                        if personal.get('location'):
-                            resume_info.append(f"Location: {personal['location']}")
-                        if personal.get('phone'):
-                            resume_info.append(f"Phone: {personal['phone']}")
-                        if personal.get('email'):
-                            resume_info.append(f"Email: {personal['email']}")
-                    
-                    if db_resume.experience and isinstance(db_resume.experience, list):
-                        exp_details = []
-                        for exp in db_resume.experience[:3]:  # Top 3 experiences
-                            if isinstance(exp, dict):
-                                exp_text = f"{exp.get('job_title', '')} at {exp.get('company', '')} ({exp.get('dates', '')})"
-                                if exp.get('description'):
-                                    exp_text += f": {exp['description'][:200]}..."
-                                exp_details.append(exp_text)
-                        if exp_details:
-                            resume_info.append("Recent Experience:\n" + "\n".join(exp_details))
-                    
-                    if db_resume.education and isinstance(db_resume.education, list):
-                        edu_details = []
-                        for edu in db_resume.education[:2]:  # Top 2 education entries
-                            if isinstance(edu, dict):
-                                edu_text = f"{edu.get('degree', '')} from {edu.get('institution', '')} ({edu.get('dates', '')})"
-                                edu_details.append(edu_text)
-                        if edu_details:
-                            resume_info.append("Education:\n" + "\n".join(edu_details))
-                    
-                    if db_resume.skills and isinstance(db_resume.skills, list):
-                        skills_text = ", ".join(db_resume.skills[:15])  # Top 15 skills
-                        resume_info.append(f"Technical Skills: {skills_text}")
-                    
-                    if resume_info:
-                        user_context_parts.append("RESUME DATABASE:\n" + "\n\n".join(resume_info))
-            except Exception as e:
-                log.warning(f"Could not retrieve resume data: {e}")
-            
-            # 2. Get uploaded documents content
-            try:
-                doc_result = await db.execute(
-                    select(Document).where(Document.user_id == user.id)
-                    .order_by(Document.date_created.desc()).limit(3)
+                prompt_template = PromptTemplate(
+                    template="""
+                    You are a helpful assistant that generates structured cover letters based on user information and a job description.
+                    Analyze the user's profile and the provided job details to create a compelling and tailored cover letter.
+                    The user's personal information is: {user_info}.
+                    The job details are: {job_details}.
+                    You must respond using the following JSON format.
+                    {format_instructions}
+                    """,
+                    input_variables=["user_info", "job_details"],
+                    partial_variables={"format_instructions": parser.get_format_instructions()},
                 )
-                documents = doc_result.scalars().all()
                 
-                if documents:
-                    doc_content = []
-                    for doc in documents:
-                        if doc.content:
-                            # Get first 500 chars from each document
-                            content_preview = doc.content[:500].strip()
-                            if content_preview:
-                                doc_content.append(f"From {doc.name}: {content_preview}...")
-                    
-                    if doc_content:
-                        user_context_parts.append("UPLOADED DOCUMENTS:\n" + "\n\n".join(doc_content))
-            except Exception as e:
-                log.warning(f"Could not retrieve documents: {e}")
-            
-            # 3. Try vector store as fallback
-            if vector_store and not user_context_parts:
-                try:
-                    search_queries = [
-                        "resume experience skills",
-                        "work experience background",
-                        "education qualifications"
-                    ]
-                    
-                    vector_parts = []
-                    for query in search_queries:
-                        docs = await vector_store.asimilarity_search(query, k=2)
-                        if docs:
-                            for doc in docs:
-                                if doc.page_content not in vector_parts:
-                                    vector_parts.append(doc.page_content[:300])
-                    
-                    if vector_parts:
-                        user_context_parts.append("VECTOR STORE:\n" + "\n".join(vector_parts))
-                except Exception as ve:
-                    log.warning(f"Could not retrieve vector store data: {ve}")
-            
-            # Combine all context
-            user_context = "\n\n".join(user_context_parts) if user_context_parts else ""
-            
-            # Build user_skills from available data
-            if not user_skills:
-                if db_resume and db_resume.data and db_resume.data.get('skills'):
-                    skills_list = db_resume.data.get('skills', [])
-                    if isinstance(skills_list, list) and skills_list:
-                        user_skills = f"Technical skills including: {', '.join(skills_list[:10])}"
-                    else:
-                        user_skills = "Professional skills and experience as detailed in background"
+                chain = prompt_template | llm | parser
+
+                # EDIT: Instead of a simple string, create a structured dictionary
+                # that matches what the AI needs for the 'personal_info' sub-object.
+                user_info_dict = {
+                    "name": user.name,
+                    "email": user.email,
+                    "linkedin": user.linkedin,
+                    "phone": user.phone or "Not provided",
+                    "website": "" # Assuming no website field on the user model for now
+                }
+
+                job_details_str = f"Job Title: {scraped_details.title}, Company: {scraped_details.company}, Description: {scraped_details.description}, Requirements: {scraped_details.requirements}"
+
+                # EDIT: Pass the structured dictionary in the 'user_info' variable.
+                response_data = await chain.ainvoke({"user_info": json.dumps(user_info_dict), "job_details": job_details_str})
+                
+                # The model might return a dict or a Pydantic model, ensure it's a dict
+                if isinstance(response_data, BaseModel):
+                    response_dict = response_data.model_dump()
                 else:
-                    user_skills = "Professional skills and experience as detailed in background"
-            
-            # Create the cover letter generation prompt with vector store context
-            prompt = ChatPromptTemplate.from_template(
-                "You are an expert career coach. Write a professional and compelling cover letter.\n\n"
-                "**Candidate Information:**\n"
-                "Name: {user_name}\n"
-                "Skills/Experience: {user_skills}\n\n"
-                "**Additional Background Context:**\n"
-                "{user_context}\n\n"
-                "**Job Details:**\n"
-                "Company: {company_name}\n"
-                "Position: {job_title}\n"
-                "Job Description: {job_description}\n\n"
-                "Instructions:\n"
-                "- Write a professional cover letter using the candidate's actual name: {user_name}\n"
-                "- Begin with 'Dear Hiring Manager' and sign with '{user_name}'\n"
-                "- Use real information from the background context - NO placeholders or generic statements\n"
-                "- Highlight specific achievements and experiences that match the job requirements\n"
-                "- Make it engaging, personal, and specific to this exact role\n"
-                "- Show genuine enthusiasm for the role and company\n"
-                "- Keep it concise but impactful (3-4 paragraphs)\n"
-                "- Write in first person as {user_name}"
-            )
-            
-            llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0.7)
-            chain = prompt | llm
-            
-            # Generate the cover letter
-            result = await chain.ainvoke({
-                "user_name": user_name,
-                "user_skills": user_skills,
-                "user_context": user_context or f"I am {user_name}, a professional seeking to contribute my skills and experience to your organization.",
-                "company_name": job_details.company,
-                "job_title": job_details.title,
-                "job_description": full_job_description,
-            })
-            
-            cover_letter_text = result.content
-            
-            # Save the cover letter to database
-            new_cover_letter = GeneratedCoverLetter(
-                id=str(uuid.uuid4()),
-                user_id=user.id,
-                content=cover_letter_text
-            )
-            db.add(new_cover_letter)
-            await db.commit()
-            
-            # Get user's first name for personalization
-            user_first_name = user.first_name or "there"
-            
-            # Return simple text response with downloadable marker (much faster)
-            return f"""Hey {user_first_name}!
+                    response_dict = response_data
+                
+                # Serialize the entire dictionary to a JSON string for storing
+                content_json_string = json.dumps(response_dict)
 
-Your cover letter for the **{job_details.title}** position at **{job_details.company}** is ready!I've crafted a personalized cover letter for you, highlighting your relevant skills and experience based on the job description from the URL you provided.
+                # Create and save the new cover letter object
+                new_cover_letter = GeneratedCoverLetter(
+                    id=str(uuid.uuid4()),
+                    user_id=user.id,
+                    content=content_json_string,
+                )
+                db.add(new_cover_letter)
+                await db.commit()
+                log.info(f"Successfully generated and saved cover letter {new_cover_letter.id} for user {user.id}")
 
-[DOWNLOADABLE_COVER_LETTER]
+            # Step 3: Return the trigger to the user
+            return "I have successfully generated the cover letter based on the URL. You can view and download it now. [DOWNLOADABLE_COVER_LETTER]"
 
-{cover_letter_text}
-
----
-
-**🚀 What I included for you:**
-- Personalized greeting using your actual name
-- Your relevant skills and experience  
-- Specific connection to the job requirements
-- Professional closing that shows enthusiasm
-
-**📥 Ready to download?** Click the download button (📥) that appears on this message to get your cover letter in different styles - Modern, Classic, or Minimal. You can preview and make any tweaks before downloading.
-
-<!-- content_id={new_cover_letter.id} company_name={job_details.company} job_title={job_details.title} -->"""
-            
         except Exception as e:
-            log.error(f"Error generating cover letter from URL: {e}", exc_info=True)
-            return f"❌ Sorry, I couldn't extract the job details from that URL: {str(e)}. Please check the URL and try again, or provide the job details manually."
+            log.error(f"An unexpected error occurred in generate_cover_letter_from_url: {e}", exc_info=True)
+            return f"An unexpected error occurred while generating the cover letter from the URL: {str(e)}"
+        
+    
+
+    @tool("refine_cv_from_url", return_direct=False)
+    async def refine_cv_from_url(job_url: str) -> str:
+        """
+        Refines a user's CV for a specific job by extracting details from a job posting URL.
+        This tool scrapes the job description, then calls the resume generation logic to
+        tailor the user's resume and saves it to the database.
+
+        Args:
+            job_url: The URL of the job posting.
+        """
+        async with async_session_maker() as session:
+            try:
+                # Step 1: Scrape job details from the URL
+                from app.url_scraper import scrape_job_url, JobDetails
+                log.info(f"Attempting to refine CV from URL: {job_url}")
+                
+                scraped_details = await scrape_job_url(job_url)
+
+                if isinstance(scraped_details, dict) and 'error' in scraped_details:
+                    return f"Sorry, I couldn't extract job details from that URL. Error: {scraped_details['error']}"
+
+                if not isinstance(scraped_details, JobDetails):
+                    return "I ran into an issue reading the job posting. The website's structure might be complex."
+
+                job_title = scraped_details.title
+                company_name = scraped_details.company
+                job_description = f"{scraped_details.description}\n\nRequirements:\n{scraped_details.requirements}"
+
+                # Step 2: Generate the tailored resume using AI
+                # Get User's Base Resume Data
+                resume_result = await session.execute(
+                    select(Resume).where(Resume.user_id == user_id)
+                )
+                base_resume = resume_result.scalars().first()
+                
+                base_resume_data = {}
+                if base_resume and base_resume.data:
+                    base_resume_data = fix_resume_data_structure(base_resume.data)
+
+                # Define the Pydantic model for the output
+                class TailoredResume(BaseModel):
+                    personalInfo: dict = Field(description="Personal information section, including summary.")
+                    experience: list = Field(description="List of all work experiences.")
+                    education: list = Field(description="List of all education entries.")
+                    skills: list = Field(description="A comprehensive list of skills.")
+                    projects: list = Field(description="List of projects, if any.")
+                    certifications: list = Field(description="List of certifications, if any.")
+
+                parser = PydanticOutputParser(pydantic_object=TailoredResume)
+
+                prompt_template = """
+                You are an expert career coach. Your task is to generate a complete, tailored resume in JSON format
+                based on the user's existing resume data and a target job description.
+
+                **User's Base Resume Data:**
+                {base_resume}
+
+                **Target Job Description:**
+                - Job Title: {job_title}
+                - Company: {company_name}
+                - Description: {job_description}
+
+                **Instructions:**
+                1. Rewrite the summary in the `personalInfo` section to target the job.
+                2. Rephrase `experience` descriptions to highlight relevant accomplishments.
+                3. Prioritize the `skills` most relevant to the job.
+                4. Keep education, projects, and certifications largely the same.
+                5. Return ONLY a valid JSON object matching the schema.
+
+                {format_instructions}
+                """
+                prompt = PromptTemplate(
+                    template=prompt_template,
+                    input_variables=["base_resume", "job_title", "company_name", "job_description"],
+                    partial_variables={"format_instructions": parser.get_format_instructions()},
+                )
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.4)
+                chain = prompt | llm | parser
+
+                tailored_resume = await chain.ainvoke({
+                    "base_resume": json.dumps(base_resume_data, indent=2),
+                    "job_title": job_title,
+                    "company_name": company_name,
+                    "job_description": job_description,
+                })
+
+                # Step 3: Save the new resume to the database
+                db_resume_to_update = await session.get(Resume, base_resume.id) if base_resume else None
+
+                if db_resume_to_update:
+                    db_resume_to_update.data = tailored_resume.dict()
+                    attributes.flag_modified(db_resume_to_update, "data")
+                else:
+                    db_resume_to_update = Resume(user_id=user_id, data=tailored_resume.dict())
+                    session.add(db_resume_to_update)
+                
+                await session.commit()
+
+                # Step 4: Return a success message
+                output_str = (
+                    f"✅ I have successfully refined your CV for the **{job_title}** role at **{company_name}**.\n\n"
+                    "I analyzed the job description from the URL and tailored your profile accordingly. "
+                    "A download button should now be available on this message to get the updated PDF."
+                    "[DOWNLOADABLE_RESUME]"
+                )
+
+                return output_str
+
+            except Exception as e:
+                log.error(f"Error in refine_cv_from_url tool: {e}", exc_info=True)
+                return f"❌ An error occurred while refining your resume from the URL. The website might be blocking access, or the job posting may have expired."
+        
 
     @tool
     async def generate_cover_letter(
         company_name: str,
         job_title: str,
-        job_description: str,
-        user_skills: Optional[str] = None
+        job_description: str
     ) -> str:
-        """📝 MANUAL COVER LETTER TOOL 📝
-        
-        Use ONLY when users specifically ask for:
-        - "generate a cover letter for [job title] at [company]"
-        - "create a cover letter"
-        - "write a cover letter"
-        - "cover letter for this position"
-        
-        DO NOT use for CV/resume requests like "refine CV" or "enhance resume"!
-        
-        Args:
-            company_name: Name of the company you're applying to
-            job_title: Title of the job position
-            job_description: Full job description or key requirements
-            user_skills: Optional specific skills to highlight (if not provided, will use vector store data)
-        
-        Returns:
-            A professionally written cover letter tailored to the job
         """
-        try:
-            # Get user's name from Clerk profile
-            user_name = user.first_name or "User"
-            if user.last_name:
-                user_name = f"{user.first_name} {user.last_name}"
-            
-            # Build comprehensive user context from multiple sources
-            user_context_parts = []
-            
-            # 1. Get user's resume data from database (FIX: Access JSON data properly)
+        Generates a structured cover letter based on provided job details.
+
+        This tool uses a PydanticOutputParser to GUARANTEE a clean JSON output,
+        wrapped in a string with a trigger for the frontend.
+        It correctly uses the 'user' object from the parent WebSocket scope.
+        """
+        async with async_session_maker() as session:
             try:
-                result = await db.execute(select(Resume).where(Resume.user_id == user.id))
-                db_resume = result.scalars().first()
+                log.info(f"Generating GUARANTEED structured cover letter for {job_title} at {company_name}")
                 
-                if db_resume and db_resume.data:
-                    resume_info = []
-                    resume_data = db_resume.data  # Access the JSON data column
-                    
-                    # Access personalInfo (camelCase as stored in JSON)
-                    personal_info = resume_data.get('personalInfo', {})
-                    if personal_info:
-                        personal = db_resume.personal_info
-                        if personal.get('summary'):
-                            resume_info.append(f"Professional Summary: {personal['summary']}")
-                        if personal.get('location'):
-                            resume_info.append(f"Location: {personal['location']}")
-                        if personal.get('phone'):
-                            resume_info.append(f"Phone: {personal['phone']}")
-                        if personal.get('email'):
-                            resume_info.append(f"Email: {personal['email']}")
-                    
-                    if db_resume.experience and isinstance(db_resume.experience, list):
-                        exp_details = []
-                        for exp in db_resume.experience[:3]:  # Top 3 experiences
-                            if isinstance(exp, dict):
-                                exp_text = f"{exp.get('job_title', '')} at {exp.get('company', '')} ({exp.get('dates', '')})"
-                                if exp.get('description'):
-                                    exp_text += f": {exp['description'][:200]}..."
-                                exp_details.append(exp_text)
-                        if exp_details:
-                            resume_info.append("Recent Experience:\n" + "\n".join(exp_details))
-                    
-                    if db_resume.education and isinstance(db_resume.education, list):
-                        edu_details = []
-                        for edu in db_resume.education[:2]:  # Top 2 education entries
-                            if isinstance(edu, dict):
-                                edu_text = f"{edu.get('degree', '')} from {edu.get('institution', '')} ({edu.get('dates', '')})"
-                                edu_details.append(edu_text)
-                        if edu_details:
-                            resume_info.append("Education:\n" + "\n".join(edu_details))
-                    
-                    if db_resume.skills and isinstance(db_resume.skills, list):
-                        skills_text = ", ".join(db_resume.skills[:15])  # Top 15 skills
-                        resume_info.append(f"Technical Skills: {skills_text}")
-                    
-                    if resume_info:
-                        user_context_parts.append("RESUME DATABASE:\n" + "\n\n".join(resume_info))
-            except Exception as e:
-                log.warning(f"Could not retrieve resume data: {e}")
-            
-            # 2. Get uploaded documents content
-            try:
-                doc_result = await db.execute(
-                    select(Document).where(Document.user_id == user.id)
-                    .order_by(Document.date_created.desc()).limit(3)
-                )
-                documents = doc_result.scalars().all()
+                # CORRECTLY get resume data using the existing helper and user object from scope
+                db_resume, resume_data = await get_or_create_resume(session)
+
+                # Create the parser to force a specific JSON output structure
+                parser = PydanticOutputParser(pydantic_object=CoverLetterDetails)
+
+                prompt_template = ChatPromptTemplate.from_messages([
+                    ("system", """You are an expert cover letter writer. Your task is to generate a cover letter in a structured JSON format. You MUST adhere to the JSON schema provided below. Do NOT add any conversational text, introductory sentences, or markdown formatting around the JSON object. Your output must be ONLY the raw JSON object.
+
+{format_instructions}"""),
+                    ("human", """Please generate a tailored cover letter based on the following details:
+
+**Job Details:**
+- Job Title: {job_title}
+- Company Name: {company_name}
+- Job Description: {job_description}
+
+**Candidate's Information:**
+- Name: {name}
+- Relevant Skills: {skills}
+- Summary of Experience: {summary}
+
+Generate the full cover letter body. It should be professional, concise, and tailored to the job description, highlighting the candidate's relevant skills and experience. Address it to the 'Hiring Team' if a specific name is not available.
+"""),
+                ])
+
+                chain = prompt_template | ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.7) | parser
                 
-                if documents:
-                    doc_content = []
-                    for doc in documents:
-                        if doc.content:
-                            # Get first 500 chars from each document
-                            content_preview = doc.content[:500].strip()
-                            if content_preview:
-                                doc_content.append(f"From {doc.name}: {content_preview}...")
-                    
-                    if doc_content:
-                        user_context_parts.append("UPLOADED DOCUMENTS:\n" + "\n\n".join(doc_content))
-            except Exception as e:
-                log.warning(f"Could not retrieve documents: {e}")
-            
-            # 3. Try vector store as fallback
-            if vector_store and not user_context_parts:
-                try:
-                    search_queries = [
-                        "resume experience skills",
-                        "work experience background",
-                        "education qualifications"
-                    ]
-                    
-                    vector_parts = []
-                    for query in search_queries:
-                        docs = await vector_store.asimilarity_search(query, k=2)
-                        if docs:
-                            for doc in docs:
-                                if doc.page_content not in vector_parts:
-                                    vector_parts.append(doc.page_content[:300])
-                    
-                    if vector_parts:
-                        user_context_parts.append("VECTOR STORE:\n" + "\n".join(vector_parts))
-                except Exception as ve:
-                    log.warning(f"Could not retrieve vector store data: {ve}")
-            
-            # Combine all context
-            user_context = "\n\n".join(user_context_parts) if user_context_parts else ""
-            
-            # Build user_skills from available data
-            if not user_skills:
-                if db_resume and db_resume.data and db_resume.data.get('skills'):
-                    skills_list = db_resume.data.get('skills', [])
-                    if isinstance(skills_list, list) and skills_list:
-                        user_skills = f"Technical skills including: {', '.join(skills_list[:10])}"
-                    else:
-                        user_skills = "Professional skills and experience as detailed in background"
-                else:
-                    user_skills = "Professional skills and experience as detailed in background"
-            
-            # Create the cover letter generation prompt with vector store context
-            prompt = ChatPromptTemplate.from_template(
-                "You are an expert career coach. Write a professional and compelling cover letter.\n\n"
-                "**Candidate Information:**\n"
-                "Name: {user_name}\n"
-                "Skills/Experience: {user_skills}\n\n"
-                "**Additional Background Context:**\n"
-                "{user_context}\n\n"
-                "**Job Details:**\n"
-                "Company: {company_name}\n"
-                "Position: {job_title}\n"
-                "Job Description: {job_description}\n\n"
-                "Instructions:\n"
-                "- Write a professional cover letter using the candidate's actual name: {user_name}\n"
-                "- Begin with 'Dear Hiring Manager' and sign with '{user_name}'\n"
-                "- Use real information from the background context - NO placeholders or generic statements\n"
-                "- Highlight specific achievements and experiences that match the job requirements\n"
-                "- Make it engaging, personal, and specific to this exact role\n"
-                "- Show genuine enthusiasm for the role and company\n"
-                "- Keep it concise but impactful (3-4 paragraphs)\n"
-                "- Write in first person as {user_name}"
-            )
-            
-            llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0.7)
-            chain = prompt | llm
-            
-            # Generate the cover letter
-            result = await chain.ainvoke({
-                "user_name": user_name,
-                "user_skills": user_skills,
-                "user_context": user_context or f"I am {user_name}, a professional seeking to contribute my skills and experience to your organization.",
-                "company_name": company_name,
+                personal_info_dict = resume_data.personalInfo.dict() if resume_data.personalInfo else {}
+
+                # Invoke the chain with all the necessary data
+                structured_response = await chain.ainvoke({
+                    "format_instructions": parser.get_format_instructions(),
                 "job_title": job_title,
+                    "company_name": company_name,
                 "job_description": job_description,
-            })
+                    "name": personal_info_dict.get("name", "User"),
+                    "skills": ", ".join(resume_data.skills) if resume_data.skills else "Not specified",
+                    "summary": personal_info_dict.get("summary", "No summary provided.")
+                })
+
+                # The 'structured_response' is now a guaranteed Pydantic object.
+                # We will add the full personal_info object to it before returning.
+                response_dict = structured_response.model_dump()
+                response_dict["personal_info"] = personal_info_dict
+
+                new_cover_letter_id = str(uuid.uuid4())
+                new_db_entry = GeneratedCoverLetter(
+                    id=new_cover_letter_id,
+                    user_id=user.id,
+                    content=json.dumps(response_dict)
+                )
+                session.add(new_db_entry)
+                await session.commit()
+                log.info(f"Successfully saved new cover letter with ID: {new_cover_letter_id}")
+
+
+               
+                
+                # The agent expects a final string containing the trigger and the JSON payload.
+                final_output_string = f"[DOWNLOADABLE_COVER_LETTER] {json.dumps(response_dict)}"
+                
+                log.info(f"Successfully generated structured cover letter string ID {new_cover_letter_id}")
+                return final_output_string
             
-            cover_letter_text = result.content
-            
-            # Save the cover letter to database
-            new_cover_letter = GeneratedCoverLetter(
-                id=str(uuid.uuid4()),
-                user_id=user.id,
-                content=cover_letter_text
-            )
-            db.add(new_cover_letter)
-            await db.commit()
-            
-            # Create download links
-            pdf_download_link = f"/api/pdf/generate"
-            
-            # Get user's first name for personalization  
-            user_first_name = user.first_name or "there"
-            
-            # Return simple text response with downloadable marker (much faster)
-            return f"""Hey {user_first_name}!
+            except Exception as e:
+                log.error(f"Error in GUARANTEED generate_cover_letter: {e}", exc_info=True)
+                return "Sorry, I encountered an error while writing the cover letter. Please try again."
 
-Your cover letter for the **{job_title}** position at **{company_name}** is ready! I've crafted a personalized cover letter for you, highlighting your relevant skills and experience.
-
-[DOWNLOADABLE_COVER_LETTER]
-
-{cover_letter_text}
-
----
-
-**🚀 What makes this special:**
-- Uses your real name and background information
-- Tailored specifically to this {job_title} role
-- Highlights your most relevant skills and experience
-- Professional tone that shows genuine interest
-
-**📥 Ready to download?** Click the download button (📥) that appears on this message to get your cover letter in different professional styles. You can preview and customize before downloading!
-
-<!-- content_id={new_cover_letter.id} company_name={company_name} job_title={job_title} -->"""
-            
-        except Exception as e:
-            log.error(f"Error generating cover letter: {e}", exc_info=True)
-            return f"❌ Sorry, I encountered an error while generating your cover letter: {str(e)}. Please try again with the job details."
 
     @tool
     async def generate_resume_pdf(
@@ -2380,40 +2258,42 @@ You can download your CV/Resume in multiple professional styles. The download di
     async def get_document_insights() -> str:
         """Get personalized insights about user's uploaded documents including analysis and recommendations.
         
-        Returns:
+            Returns:
             Comprehensive insights about user's documents, career alignment, and optimization recommendations
         """
         try:
+            # INTELLIGENT FIX: Ensure the correct memory manager is used for this advanced tool
+            current_memory_manager = memory_manager
+            if not isinstance(current_memory_manager, EnhancedMemoryManager):
+                # If the provided manager is the simple one, create an enhanced one for this specific task
+                log.warning("SimpleMemoryManager provided to advanced tool, creating temporary EnhancedMemoryManager.")
+                current_memory_manager = EnhancedMemoryManager(user_id=user.id, db_session=db)
+                await current_memory_manager.load_memory()
+
             # Get document insights using enhanced memory system
             from app.documents import _generate_comprehensive_document_insights
-            
-            # Get user documents
-            doc_result = await db.execute(
-                select(Document).where(Document.user_id == user.id)
-            )
-            documents = doc_result.scalars().all()
-            
+
             if not documents:
                 return "📄 **No Documents Found**\n\nYou haven't uploaded any documents yet. Upload your resume, cover letters, or other career documents to get personalized insights and recommendations!\n\n**To upload documents:**\n- Use the attachment button in the chat\n- Drag and drop files into the chat\n- Supported formats: PDF, DOCX, TXT"
             
             # Get user learning profile
-            if memory_manager:
-                context = await memory_manager.get_conversation_context()
+            if current_memory_manager:
+                context = await current_memory_manager.get_conversation_context()
                 user_profile = context
             else:
                 user_profile = None
             
             # Generate comprehensive insights
             insights = await _generate_comprehensive_document_insights(
-                documents, user_profile, memory_manager
+                documents, user_profile, current_memory_manager
             )
             
             # Track insights tool usage
-            if memory_manager:
-                await memory_manager.save_user_behavior(
+            if current_memory_manager:
+                await current_memory_manager.save_user_behavior(
                     action_type="document_insights_tool",
                     context={
-                        "documents_count": len(documents),
+                    "documents_count": len(documents),
                         "recommendations_count": len(insights.get("recommendations", [])),
                         "optimization_tips_count": len(insights.get("optimization_tips", [])),
                         "timestamp": datetime.utcnow().isoformat()
@@ -2503,14 +2383,15 @@ You can download your CV/Resume in multiple professional styles. The download di
             
             # Get detailed analysis using enhanced memory system
             from app.documents import _analyze_single_document
-            
-            if memory_manager:
-                context = await memory_manager.get_conversation_context()
-                user_profile = context
-            else:
-                user_profile = None
-            analysis = await _analyze_single_document(document, user_profile, memory_manager)
-            
+
+            user_profile_dict = {
+                "name": user.name or f"{user.first_name or ''} {user.last_name or ''}".strip(),
+                "profile_headline": user.profile_headline or "",
+                "skills": user.skills.split(',') if user.skills else []
+            }
+
+            analysis = await _analyze_single_document(document, user_profile_dict, memory_manager)
+
             # Track specific document analysis
             if memory_manager:
                 await memory_manager.save_user_behavior(
@@ -2602,56 +2483,231 @@ You can download your CV/Resume in multiple professional styles. The download di
             return f"❌ Sorry, I couldn't analyze the document '{document_name}' right now. Please try again or upload the document if it's missing."
 
     @tool
-    async def enhanced_document_search(query: str) -> str:
-        """Search through user's documents with enhanced context from their job search patterns.
-        
+    async def enhanced_document_search(query: str, doc_id: Optional[str] = None) -> str:
+        """
+        Enhanced search across all user documents, including resumes, cover letters, and user profile.
+        Prioritizes the most recently uploaded documents in case of ambiguity.
+        If a file is mentioned in the query (e.g., "File Attached: resume.pdf"), it will be summarized directly.
+
         Args:
-            query: Search query to find relevant information in user's documents
-            
+            query (str): The user's search query, which may include file attachment context.
+            doc_id (Optional[str]): The specific ID of a document to search within.
+
         Returns:
-            Relevant document content enhanced with user's learning context
+            A formatted string containing the most relevant search results or a direct summary of an attached file.
         """
         try:
-            # Use enhanced vector store search
-            from app.vector_store import search_documents_with_context
+            import re
             
-            search_results = await search_documents_with_context(
-                user.id, query, db, k=5
-            )
-            
-            if not search_results:
-                return f"🔍 **No Results Found**\n\nI couldn't find any relevant information for '{query}' in your uploaded documents.\n\n**Suggestions:**\n- Try different keywords\n- Upload more documents\n- Check if your documents contain the information you're looking for"
-            
-            # Track enhanced search usage
-            if memory_manager:
-                await memory_manager.save_user_behavior(
-                action_type="enhanced_document_search",
-                context={
-                    "query": query,
-                    "results_count": len(search_results),
-                    "timestamp": datetime.utcnow().isoformat()
-                },
-                success=len(search_results) > 0
-            )
-            
-            # Format search results
-            response_parts = [
-                f"🔍 **Search Results for '{query}'**\n",
-                f"Found {len(search_results)} relevant sections:\n"
+            # INTELLIGENT FIX: Check for file attachment context in the user's message
+            attachment_patterns = [
+                r'File Attached:\s*(.+?)(?:\n|$)',
+                r'CV/Resume uploaded successfully![\s\S]*?File:\s*(.+?)(?:\n|$)'
             ]
             
-            for i, result in enumerate(search_results, 1):
-                # Truncate long results for readability
-                truncated_result = result[:300] + "..." if len(result) > 300 else result
-                response_parts.append(f"**{i}.** {truncated_result}\n")
+            extracted_filename = None
+            for pattern in attachment_patterns:
+                match = re.search(pattern, query, re.IGNORECASE)
+                if match:
+                    extracted_filename = match.group(1).strip()
+                    break
             
-            response_parts.append("💬 **Need more specific information? Ask me about any particular aspect or request a detailed analysis!**")
+            # If an attachment is explicitly mentioned, analyze it directly instead of searching
+            if extracted_filename:
+                log.info(f"Detected attached file in query: '{extracted_filename}'. Analyzing it directly.")
+                
+                # Find the specific document, prioritizing the most recent one
+                doc_result = await db.execute(
+                    select(Document).where(
+                        Document.user_id == user.id,
+                        Document.name.ilike(f"%{extracted_filename}%")
+                    ).order_by(Document.date_created.desc())
+                )
+                documents = doc_result.scalars().all()
+
+                if not documents:
+                    return f"I see you mentioned '{extracted_filename}', but I couldn't find that document in your uploads. Please try uploading it again."
+                
+                # Use the most recent document matching the name
+                target_document = documents[0]
+                
+                if not target_document.content:
+                    return f"The document '{target_document.name}' was found but appears to be empty or unreadable."
+                
+                # Summarize the specific document's content to answer the user's implicit question
+                from langchain_core.prompts import ChatPromptTemplate
+                from langchain_core.output_parsers import StrOutputParser
+                
+                summarization_prompt = ChatPromptTemplate.from_template(
+                    "You are a helpful assistant. Summarize the key points of the following document content in a few clear, concise paragraphs. Address the user directly and be informative.\n\n---\n\n{document_content}"
+                )
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0.2)
+                chain = summarization_prompt | llm | StrOutputParser()
+                
+                # Limit content size for summarization to avoid token limits
+                summary = await chain.ainvoke({"document_content": target_document.content[:4000]}) 
+                
+                user_first_name = user.first_name or "there"
+                return f"Of course, {user_first_name}! Here is a summary of the document you just attached, '{target_document.name}':\n\n{summary}"
+
+            # --- Fallback to original search logic if no attachment context is found ---
+            log.info(f"No attachment context in query. Performing general search for: '{query}'")
             
-            return "\n".join(response_parts)
+            user_profile_content = (
+                f"Name: {user.name}\n"
+                f"Email: {user.email}\n"
+                f"Phone: {user.phone}\n"
+                f"Location: {user.address}\n"
+                f"LinkedIn: {user.linkedin}\n"
+                f"Profile Headline: {user.profile_headline}\n"
+                f"Skills: {user.skills}"
+            )
+
+            doc_result = await db.execute(
+                select(Document).where(Document.user_id == user.id)
+            )
+            documents = doc_result.scalars().all()
+
+            if not documents and not user_profile_content:
+                return "No documents or user profile found to search."
+
+            all_content = []
+            if user_profile_content:
+                all_content.append(
+                    {"id": "user_profile", "name": "USER PROFILE", "content": user_profile_content, "date_created": datetime.utcnow()}
+                )
+            for doc in documents:
+                all_content.append(
+                    {"id": doc.id, "name": doc.name, "content": doc.content, "date_created": doc.date_created}
+                )
+
+            search_results = []
+            for item in all_content:
+                content_text = item.get("content", "") or ""
+                if query.lower() in content_text.lower():
+                    search_results.append(item)
+
+            search_results.sort(key=lambda x: x.get("date_created", datetime.min), reverse=True)
+
+            if not search_results:
+                return f"🔍 **No Results Found**\n\nI couldn't find any relevant information for '{query}' in your uploaded documents."
+
+            response_parts = [
+                f"**Search Results for '{query}'**\n",
+                f"Found {len(search_results)} relevant sections:\n",
+            ]
+            for i, result in enumerate(search_results[:4], 1):
+                content_preview = (result.get("content", "") or "")[:200]
+                response_parts.append(
+                    f"**{i}.** [{result['name']}]\n{content_preview}..."
+                )
             
+            response_parts.append("\n💬 **Need more specific information? Ask me about any particular aspect or request a detailed analysis!**")
+            return "\n\n".join(response_parts)
+
         except Exception as e:
-            log.error(f"Error in enhanced document search: {e}")
+            log.error(f"Error in enhanced document search: {e}", exc_info=True)
             return f"❌ Sorry, I couldn't search your documents for '{query}' right now. Please try again or let me know if you need help with document analysis."
+
+
+  
+    @tool
+    async def enhance_resume_section(
+        section: str,
+        job_description: str = "",
+        current_content: str = ""
+    ) -> str:
+        """
+        Enhance a specific section of your resume with AI-powered improvements.
+        This tool fetches the user's current resume, uses an LLM to improve a specific section,
+        and then updates the resume record in the database with the new structured data.
+        
+        Args:
+            section: Section to enhance (summary, experience, skills, education)
+            job_description: Target job description for tailoring (optional)
+            current_content: Current content of the section to improve (optional, will be fetched if not provided)
+        
+        Returns:
+            A success message indicating the section has been enhanced.
+        """
+        async with async_session_maker() as session:
+            try:
+                # 1. Get the user's current resume data
+                db_resume, resume_data = await get_or_create_resume(session)
+
+                # Determine the content to be enhanced
+                content_to_enhance = current_content
+                if not content_to_enhance:
+                    if section.lower() == 'summary':
+                        content_to_enhance = resume_data.personalInfo.summary
+                    elif section.lower() == 'experience':
+                        content_to_enhance = json.dumps([exp.dict() for exp in resume_data.experience])
+                    elif section.lower() == 'skills':
+                        content_to_enhance = ", ".join(resume_data.skills)
+                    elif section.lower() == 'education':
+                         content_to_enhance = json.dumps([edu.dict() for edu in resume_data.education])
+
+                # 2. Use LLM to generate the enhanced content for the specific section
+                from langchain_core.prompts import ChatPromptTemplate
+                from langchain_core.output_parsers import StrOutputParser
+                
+                prompt = ChatPromptTemplate.from_template(
+                    """You are an expert resume writer. Enhance the specified resume section based on the user's context and the target job description.
+
+USER CONTEXT:
+- Current Role: {current_role}
+- Current Skills: {current_skills}
+
+SECTION TO ENHANCE: {section}
+CURRENT CONTENT:
+{content_to_enhance}
+
+TARGET JOB DESCRIPTION (if provided):
+{job_description}
+
+INSTRUCTIONS:
+- Rewrite the content to be more impactful and results-oriented.
+- Use strong action verbs and quantify achievements where possible.
+- If it is the 'skills' section, return a comma-separated list of skills.
+- If it is 'experience' or 'education', return a JSON array of objects.
+- If it is 'summary', return a concise paragraph.
+- Return ONLY the enhanced content for the section.
+
+ENHANCED CONTENT:"""
+                )
+                
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.5)
+                chain = prompt | llm | StrOutputParser()
+                
+                enhanced_content = await chain.ainvoke({
+                    "current_role": resume_data.experience[0].jobTitle if resume_data.experience else "Not specified",
+                    "current_skills": ", ".join(resume_data.skills),
+                    "section": section,
+                    "content_to_enhance": content_to_enhance,
+                    "job_description": job_description or "Not specified"
+                })
+
+                # 3. Update the structured resume data with the enhanced content
+                if section.lower() == 'summary':
+                    resume_data.personalInfo.summary = enhanced_content
+                elif section.lower() == 'experience':
+                    resume_data.experience = [Experience(**exp) for exp in json.loads(enhanced_content)]
+                elif section.lower() == 'skills':
+                    resume_data.skills = [s.strip() for s in enhanced_content.split(',')]
+                elif section.lower() == 'education':
+                    resume_data.education = [Education(**edu) for edu in json.loads(enhanced_content)]
+
+                # 4. Save the updated resume data back to the database
+                db_resume.data = resume_data.dict()
+                attributes.flag_modified(db_resume, "data")
+                await session.commit()
+
+                return f"✅ Your '{section}' section has been successfully enhanced. [DOWNLOADABLE_RESUME]"
+
+            except Exception as e:
+                log.error(f"Error enhancing resume section: {e}", exc_info=True)
+                return f"❌ Sorry, I encountered an error while enhancing your {section} section: {str(e)}."
+
 
     @tool
     async def generate_tailored_resume(
@@ -2660,300 +2716,75 @@ You can download your CV/Resume in multiple professional styles. The download di
         job_description: str = "",
         user_skills: str = ""
     ) -> str:
-        """Generate a complete, tailored resume based on a job description and user information.
-        
-        Args:
-            job_title: The job title to tailor the resume for
-            company_name: Target company name (optional)
-            job_description: Full job description to tailor against
-            user_skills: Additional skills to highlight (optional)
-        
-        Returns:
-            A complete, professionally formatted resume tailored to the job
         """
-        try:
-            # CRITICAL: Check for placeholder data and extract real information first
-            if user.email and "@noemail.com" in user.email or user.name == "New User":
-                log.info("⚠️ Detected placeholder profile data, extracting real information first...")
-                extraction_result = await extract_and_populate_profile_from_documents()
-                log.info(f"📋 Profile extraction result: {extraction_result[:100]}...")
-                
-                # Refresh user data after extraction
-                await db.refresh(user)
-            
-            # Get existing resume data
-            result = await db.execute(select(Resume).where(Resume.user_id == user.id))
-            db_resume = result.scalars().first()
-            
-            # Get user documents for context
-            doc_result = await db.execute(
-                select(Document).where(Document.user_id == user.id).order_by(Document.date_created.desc())
-            )
-            documents = doc_result.scalars().all()
-            
-            # Extract comprehensive information from documents using AI
-            document_content = ""
-            if documents:
-                for doc in documents[:5]:  # Use latest 5 documents
-                    if doc.content and len(doc.content) > 100:
-                        document_content += f"\n\n=== DOCUMENT: {doc.name} ===\n{doc.content[:3000]}"
-            
-            # Use AI to extract comprehensive resume information
-            if document_content:
-                from langchain_core.prompts import ChatPromptTemplate
-                from langchain_core.output_parsers import StrOutputParser
-                
-                extraction_prompt = ChatPromptTemplate.from_template(
-                    """Extract comprehensive resume information from these documents for a tailored resume:
-
-{document_content}
-
-Extract and format ALL information for a complete tailored resume including:
-- Personal information (name, email, phone, location, LinkedIn, portfolio)
-- Professional summary highlighting relevant expertise for the target role
-- ALL work experience with detailed achievements and responsibilities
-- Education background with degrees, institutions, graduation years
-- Technical skills, programming languages, tools, technologies
-- Projects with descriptions and technologies used
-- Certifications, awards, languages, publications
-
-Focus on information that would be relevant for the target role. Return comprehensive, detailed information - not placeholders or templates."""
-                )
-                
-                extraction_llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.5-pro-preview-03-25",
-                    temperature=0.3
-                )
-                
-                extraction_chain = extraction_prompt | extraction_llm | StrOutputParser()
-                
-                try:
-                    comprehensive_info = await extraction_chain.ainvoke({
-                        "document_content": document_content
-                    })
-                    context = f"COMPREHENSIVE USER INFORMATION EXTRACTED FROM DOCUMENTS:\n\n{comprehensive_info}"
-                except Exception as e:
-                    log.warning(f"Failed to extract comprehensive info: {e}")
-                    context = f"User: {user.first_name} {user.last_name}, Email: {user.email}"
-            else:
-                context = f"User: {user.first_name} {user.last_name}, Email: {user.email}"
-            
-            # Create the resume generation chain
-            from langchain_core.prompts import ChatPromptTemplate
-            from langchain_core.output_parsers import StrOutputParser
-            
-            prompt = ChatPromptTemplate.from_template(
-                """You are an expert resume writer. Create a COMPLETE, FULLY POPULATED resume using ALL the user's actual information tailored for the target job.
-
-COMPREHENSIVE USER INFORMATION:
-{context}
-
-TARGET JOB:
-- Position: {job_title}
-- Company: {company_name}
-- Job Description: {job_description}
-- Additional Skills to Highlight: {user_skills}
-
-**CRITICAL INSTRUCTIONS:**
-- NEVER use placeholders like [Name], [Email], [Job Title], [Company], [Year]
-- NEVER write template instructions
-- USE ONLY the actual extracted information from the user's documents
-- CREATE a complete, ready-to-use resume with real content in EVERY section
-- Fill ALL fields with the user's actual data so PDF dialog has NO empty fields
-- Optimize content for {job_title} position
-
-**CREATE THE COMPLETE TAILORED RESUME:**
-
-# [Use actual full name from documents]
-**Email:** [actual email] | **Phone:** [actual phone] | **Location:** [actual location] | **LinkedIn:** [actual LinkedIn] | **Portfolio:** [actual portfolio]
-
-## Professional Summary
-[Write 3-4 compelling lines using their actual background, tailored specifically for {job_title} at {company_name}]
-
-## Core Skills
-[List ALL their actual technical skills, programming languages, tools, frameworks from documents - prioritized for {job_title}]
-
-## Professional Experience
-[For EACH actual job from their background, in reverse chronological order:]
-**[Actual Job Title]** | [Actual Company] | [Actual Start Date] - [Actual End Date]
-• [Real achievement with metrics, optimized for {job_title} relevance]
-• [Real responsibility with quantifiable results, highlighting {job_title} skills]
-• [Real accomplishment that demonstrates value for {job_title} role]
-
-## Education
-[For EACH degree from their documents:]
-**[Actual Degree Title]** | [Actual Institution Name] | [Actual Graduation Year]
-[Include GPA if mentioned, relevant coursework, honors, etc.]
-
-## Projects
-[List ALL actual projects with:]
-**[Project Name]**: [Real description, technologies used, outcomes - emphasize relevance to {job_title}]
-
-## Technical Skills
-[Organize by categories - Programming Languages, Frameworks, Tools, Databases, etc.]
-
-## Certifications
-[List ALL actual certifications with dates and issuing organizations]
-
-## Additional Sections
-[Include: Languages spoken, Publications, Awards, Volunteer work, etc. - ALL from actual documents]
-
-**REQUIREMENTS:**
-1. Use EVERY piece of real information from the extracted context
-2. Create achievement-focused content with specific metrics and results
-3. Optimize all content specifically for {job_title} at {company_name}
-4. Include relevant keywords from job description naturally
-5. Ensure NO field is left empty - populate everything with real data
-6. Structure to highlight most relevant experience for {job_title}
-7. Make it completely ready to use with NO editing needed
-
-OUTPUT THE COMPLETE, FULLY POPULATED TAILORED RESUME NOW:"""
-            )
-            
-            llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-pro-preview-03-25",
-                temperature=0.7,
-                top_p=0.9
-            )
-            
-            chain = prompt | llm | StrOutputParser()
-            
-            # Generate the tailored resume
-            tailored_resume = await chain.ainvoke({
-                "context": context,
-                "job_title": job_title,
-                "company_name": company_name or "the target company",
-                "job_description": job_description or "No specific job description provided",
-                "user_skills": user_skills or "Use existing skills from profile"
-            })
-            
-            # Save the generated resume content to database
-            from uuid import uuid4
-            new_resume_record = GeneratedCoverLetter(  # Reusing table for now
-                id=str(uuid4()),
-                user_id=user.id,
-                content=tailored_resume
-            )
-            db.add(new_resume_record)
-            await db.commit()
-            
-            return f"""[DOWNLOADABLE_RESUME]
-
-## 📄 **Tailored Resume Generated Successfully!**
-
-✅ **A first draft of your tailored resume for the {job_title} position{f' at {company_name}' if company_name else ''} is ready!** I've focused on ATS optimization, job-specific keywords, and achievement-focused language.
-
-{tailored_resume}
-
----
-
-### 🎯 **Resume Optimization Features:**
-- **ATS-Optimized**: Formatted to pass Applicant Tracking Systems
-- **Job-Specific**: Tailored keywords and skills matching the job description
-- **Achievement-Focused**: Quantified accomplishments and strong action verbs
-- **Professional Format**: Clean, readable structure preferred by hiring managers
-
-### 📥 **Download Options:**
-**A download button (📥) should appear on this message.** Click it to access PDF versions of your tailored resume in multiple styles (Modern, Classic, Minimal). You can also preview and edit the content before downloading.
-
-**💡 Pro Tip:** Review the generated content and make any personal adjustments before downloading!
-
-<!-- content_id={new_resume_record.id} -->"""
-            
-        except Exception as e:
-            log.error(f"Error generating tailored resume: {e}", exc_info=True)
-            return f"❌ Sorry, I encountered an error while generating your tailored resume: {str(e)}. Please try again or provide more specific job details."
-
-    @tool
-    async def enhance_resume_section(
-        section: str,
-        job_description: str = "",
-        current_content: str = ""
-    ) -> str:
-        """Enhance a specific section of your resume with AI-powered improvements.
-        
-        Args:
-            section: Section to enhance (summary, experience, skills, education)
-            job_description: Target job description for tailoring (optional)
-            current_content: Current content of the section to improve
-        
-        Returns:
-            Enhanced, professional content for the specified resume section
+        Generates a complete, tailored resume based on a job description and user's profile.
+        This tool now fetches the user's data, uses an LLM to generate a structured JSON
+        resume, and updates the user's master resume record in the database.
         """
-        try:
-            # Get user context
-            result = await db.execute(select(Resume).where(Resume.user_id == user.id))
-            db_resume = result.scalars().first()
-            
-            user_context = f"User: {user.first_name} {user.last_name}"
-            if db_resume:
-                resume_data = ResumeData(**db_resume.data)
-                user_context += f"\nCurrent Resume Context: {resume_data.personalInfo.summary or 'No summary available'}"
-                user_context += f"\nSkills: {', '.join(resume_data.skills) if resume_data.skills else 'No skills listed'}"
-            
-            # Create enhancement chain
-            from langchain_core.prompts import ChatPromptTemplate
-            from langchain_core.output_parsers import StrOutputParser
-            
-            prompt = ChatPromptTemplate.from_template(
-                """You are an expert resume writer. Enhance the specified resume section to be more impactful and professional.
+        async with async_session_maker() as session:
+            try:
+                # 1. Get User's Base Resume Data
+                db_resume, base_resume_data = await get_or_create_resume(session)
 
-USER CONTEXT:
-{user_context}
+                # 2. Create the generation chain with a Pydantic output parser
+                parser = PydanticOutputParser(pydantic_object=ResumeData)
 
-SECTION TO ENHANCE: {section}
-CURRENT CONTENT: {current_content}
-TARGET JOB DESCRIPTION: {job_description}
+                prompt_template = """
+                You are an expert career coach and resume writer. Your task is to generate a complete, tailored resume in a structured JSON format.
+                Analyze the user's base resume data and the provided job description to create a highly relevant and impactful resume.
 
-ENHANCEMENT GUIDELINES:
-1. **Professional Summary**: Create compelling 3-4 line summary highlighting key value propositions
-2. **Experience**: Use strong action verbs, quantify achievements, focus on results and impact
-3. **Skills**: Organize by relevance, include both technical and soft skills, match job requirements
-4. **Education**: Highlight relevant coursework, honors, achievements, and certifications
+                **User's Base Resume Data:**
+                {base_resume}
 
-INSTRUCTIONS:
-- Make the content more impactful and results-oriented
-- Use industry-standard terminology and keywords
-- Ensure ATS compatibility
-- Tailor to the job description if provided
-- Keep content concise but comprehensive
-- Use strong action verbs and quantifiable metrics
+                **Target Job Description:**
+                - Job Title: {job_title}
+                - Company: {company_name}
+                - Description: {job_description}
 
-Generate enhanced content that would impress hiring managers and pass ATS systems."""
-            )
-            
-            llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-pro-preview-03-25",
-                temperature=0.7
-            )
-            
-            chain = prompt | llm | StrOutputParser()
-            
-            enhanced_content = await chain.ainvoke({
-                "user_context": user_context,
-                "section": section,
-                "current_content": current_content or f"No current content provided for {section} section",
-                "job_description": job_description or "No specific job description provided"
-            })
-            
-            return f"""## ✨ **Enhanced {section.title()} Section**
+                **User's Key Skills to Highlight (if provided):**
+                {user_skills}
 
-{enhanced_content}
+                **Instructions:**
+                1.  **Rewrite the Summary:** Create a new, concise professional summary in the `personalInfo` section that directly targets the job description.
+                2.  **Tailor Experience:** Rephrase job descriptions under `experience` to highlight accomplishments and responsibilities most relevant to the target role. Use strong action verbs and quantify achievements where possible.
+                3.  **Prioritize Skills:** In the `skills` section, reorder and highlight the skills that are most relevant to the job description.
+                4.  **Maintain Structure:** Keep the user's education, projects, and certifications as they are.
+                5.  **Output Format:** You MUST provide the final output as a valid JSON object matching the provided schema. Do not add any extra text or formatting.
 
----
+                {format_instructions}
+                """
 
-**💡 Enhancement Features Applied:**
-- ✅ Professional language and terminology
-- ✅ Action-oriented and results-focused
-- ✅ ATS-optimized keywords
-- ✅ Industry best practices
-{f'- ✅ Tailored to job requirements' if job_description else ''}
+                prompt = PromptTemplate(
+                    template=prompt_template,
+                    input_variables=["base_resume", "job_title", "company_name", "job_description", "user_skills"],
+                    partial_variables={"format_instructions": parser.get_format_instructions()},
+                )
 
-**📝 Next Steps:** Copy this enhanced content to update your resume section, or use it as inspiration for further improvements!"""
-            
-        except Exception as e:
-            log.error(f"Error enhancing resume section: {e}", exc_info=True)
-            return f"❌ Sorry, I encountered an error while enhancing your {section} section: {str(e)}. Please try again."
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.4)
+                chain = prompt | llm | parser
+
+                # 3. Invoke the chain to generate the structured, tailored resume
+                tailored_resume = await chain.ainvoke({
+                    "base_resume": json.dumps(base_resume_data.dict(), indent=2),
+                    "job_title": job_title,
+                    "company_name": company_name,
+                    "job_description": job_description,
+                    "user_skills": user_skills,
+                })
+
+                # 4. Update the user's single master resume record.
+                db_resume.data = tailored_resume.dict()
+                attributes.flag_modified(db_resume, "data")
+                await session.commit()
+                
+                # 5. Return a simple confirmation message with the trigger.
+                return (f"I have successfully tailored your resume for the {job_title} role. "
+                        "You can preview, edit, and download it now. [DOWNLOADABLE_RESUME]")
+
+            except Exception as e:
+                log.error(f"Error in generate_tailored_resume tool: {e}", exc_info=True)
+                return "❌ An error occurred while tailoring your resume. Please ensure the job description is detailed enough."
+
 
     @tool
     async def create_resume_from_scratch(
@@ -2962,200 +2793,101 @@ Generate enhanced content that would impress hiring managers and pass ATS system
         industry: str = "",
         key_skills: str = ""
     ) -> str:
-        """Create a complete professional resume from scratch based on your career goals.
-        
-        Args:
-            target_role: The type of role you're targeting (e.g., "Software Engineer", "Product Manager")
-            experience_level: Your experience level (entry-level, mid-level, senior, executive)
-            industry: Target industry (optional)
-            key_skills: Your key skills and technologies (optional)
-        
-        Returns:
-            A complete, professional resume template tailored to your career goals
-        """
-        try:
-            # CRITICAL: Check for placeholder data and extract real information first
-            if user.email and "@noemail.com" in user.email or user.name == "New User":
-                log.info("⚠️ Detected placeholder profile data, extracting real information first...")
-                extraction_result = await extract_and_populate_profile_from_documents()
-                log.info(f"📋 Profile extraction result: {extraction_result[:100]}...")
+        """Create a complete professional resume from scratch based on your career goals."""
+        async with async_session_maker() as session:
+            try:
+                # 1. Extract comprehensive information from user's documents.
+                doc_result = await session.execute(
+                    select(Document).where(Document.user_id == user.id).order_by(Document.date_created.desc())
+                )
+                documents = doc_result.scalars().all()
                 
-                # Refresh user data after extraction
-                await db.refresh(user)
-            
-            # Get comprehensive user information from documents
-            doc_result = await db.execute(
-                select(Document).where(Document.user_id == user.id).order_by(Document.date_created.desc())
-            )
-            documents = doc_result.scalars().all()
-            
-            # Extract comprehensive information from documents using AI
-            document_content = ""
-            if documents:
-                for doc in documents[:5]:  # Use latest 5 documents
-                    if doc.content and len(doc.content) > 100:
-                        document_content += f"\n\n=== DOCUMENT: {doc.name} ===\n{doc.content[:3000]}"
-            
-            # Use AI to extract comprehensive resume information
-            if document_content:
-                from langchain_core.prompts import ChatPromptTemplate
-                from langchain_core.output_parsers import StrOutputParser
+                document_content = ""
+                if documents:
+                    for doc in documents[:5]:
+                        if doc.content and len(doc.content) > 100:
+                            document_content += f"\n\n=== DOCUMENT: {doc.name} ===\n{doc.content[:3000]}"
                 
-                extraction_prompt = ChatPromptTemplate.from_template(
-                    """Extract comprehensive resume information from these documents:
+                comprehensive_info = ""
+                if document_content:
+                    from langchain_core.prompts import ChatPromptTemplate
+                    from langchain_core.output_parsers import JsonOutputParser
+                    
+                    extraction_prompt = ChatPromptTemplate.from_template(
+                        """Extract comprehensive resume information from these documents and return it as a valid JSON object.
+                        
+                        {document_content}
+                        
+                        The JSON object should have keys: 'personalInfo', 'experience', 'education', 'skills'."""
+                    )
+                    
+                    extraction_llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0.1)
+                    extraction_chain = extraction_prompt | extraction_llm | JsonOutputParser()
+                    
+                    try:
+                        comprehensive_info = await extraction_chain.ainvoke({"document_content": document_content})
+                    except Exception as e:
+                        log.warning(f"Failed to extract comprehensive info as JSON: {e}")
+                        comprehensive_info = {}
 
-{document_content}
+                # 2. Verify if critical information was found.
+                missing_sections = []
+                if not comprehensive_info or not comprehensive_info.get("experience"):
+                    missing_sections.append("work experience")
+                if not comprehensive_info or not comprehensive_info.get("education"):
+                    missing_sections.append("education history")
+                if not comprehensive_info or not comprehensive_info.get("skills"):
+                    missing_sections.append("key skills")
+                
+                # 3. If information is missing, ask the user for it.
+                if missing_sections:
+                    missing_str = ", ".join(missing_sections)
+                    return (
+                        f"I've started drafting your resume for a {target_role} role, but I couldn't find details about your {missing_str} in your documents. "
+                        "To create the best resume for you, could you please provide this information?"
+                    )
+                
+                # 4. If data exists, create a structured resume using the AI.
+                parser = PydanticOutputParser(pydantic_object=ResumeData)
+                prompt = ChatPromptTemplate.from_template(
+                    """You are an expert resume writer. Create a complete, populated resume using the user's information.
+                    
+                    USER INFORMATION (JSON):
+                    {context}
 
-Extract and format ALL information for a complete resume including:
-- Personal information (name, email, phone, location, LinkedIn, portfolio)
-- Professional summary and expertise
-- ALL work experience with detailed achievements
-- Education background with degrees and institutions
-- Technical skills, programming languages, tools
-- Projects with descriptions and technologies
-- Certifications, awards, languages, publications
+                    CAREER GOAL:
+                    - Target Role: {target_role}
 
-Return comprehensive, detailed information - not placeholders or templates."""
+                    INSTRUCTIONS:
+                    - Use ONLY the information from the user's JSON context.
+                    - Do NOT use placeholders.
+                    - Format the output as a valid JSON object matching the schema.
+
+                    {format_instructions}
+                    """
                 )
                 
-                extraction_llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.5-pro-preview-03-25",
-                    temperature=0.3
-                )
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.7)
+                chain = prompt | llm | parser
                 
-                extraction_chain = extraction_prompt | extraction_llm | StrOutputParser()
+                new_resume_data = await chain.ainvoke({
+                    "context": json.dumps(comprehensive_info),
+                    "target_role": target_role,
+                    "format_instructions": parser.get_format_instructions(),
+                })
+
+                # 5. Save the structured JSON to the master Resume record.
+                db_resume, _ = await get_or_create_resume(session)
+                db_resume.data = new_resume_data.dict()
+                attributes.flag_modified(db_resume, "data")
+                await session.commit()
                 
-                try:
-                    comprehensive_info = await extraction_chain.ainvoke({
-                        "document_content": document_content
-                    })
-                    context = f"COMPREHENSIVE USER INFORMATION EXTRACTED FROM DOCUMENTS:\n\n{comprehensive_info}"
-                except Exception as e:
-                    log.warning(f"Failed to extract comprehensive info: {e}")
-                    context = f"Basic info: {user.first_name} {user.last_name}, {user.email}"
-            else:
-                context = f"Basic info: {user.first_name} {user.last_name}, {user.email}"
-            
-            # Create resume generation chain
-            from langchain_core.prompts import ChatPromptTemplate
-            from langchain_core.output_parsers import StrOutputParser
-            
-            prompt = ChatPromptTemplate.from_template(
-                """You are an expert career coach and resume writer. Create a COMPLETE, FULLY POPULATED resume using ALL the user's actual information.
-
-COMPREHENSIVE USER INFORMATION:
-{context}
-
-CAREER GOALS:
-- Target Role: {target_role}
-- Experience Level: {experience_level}
-- Industry: {industry}
-- Key Skills: {key_skills}
-
-**CRITICAL INSTRUCTIONS:**
-- NEVER use placeholders like [Your Name], [Email], [Job Title], [Company]
-- NEVER write template instructions
-- USE ONLY the actual extracted information from the user's documents
-- CREATE a complete, ready-to-use resume with real content in every section
-- Fill ALL sections with the user's actual data
-- Optimize content for {target_role} positions
-
-**CREATE THE COMPLETE RESUME:**
-
-# [Use actual full name from documents]
-**Email:** [actual email] | **Phone:** [actual phone] | **Location:** [actual location] | **LinkedIn:** [actual LinkedIn]
-
-## Professional Summary
-[Write 3-4 compelling lines using their actual background, skills, and experience for {target_role} roles]
-
-## Core Skills
-[List ONLY their actual technical skills, programming languages, tools from documents, prioritized for {target_role}]
-
-## Professional Experience
-[For EACH actual job from their background:]
-**[Actual Job Title]** | [Actual Company] | [Actual Dates]
-• [Real achievement with metrics optimized for {target_role}]
-• [Real responsibility with quantifiable results]
-• [Real accomplishment relevant to {target_role}]
-
-## Education
-[For EACH degree from their documents:]
-**[Actual Degree]** | [Actual Institution] | [Actual Year/Dates]
-
-## Projects
-[List actual projects with:]
-**[Project Name]**: [Real description and technologies, relevant to {target_role}]
-
-## Additional Sections
-[Include actual certifications, languages, awards they have]
-
-**REQUIREMENTS:**
-1. Use EVERY piece of real information from the extracted context
-2. Create achievement-focused content with metrics where available
-3. Optimize all content for {target_role} and {industry} positions
-4. Structure appropriately for {experience_level} professional
-5. Make it completely ready to use - no editing needed
-6. Focus on achievements and skills most relevant to {target_role}
-
-OUTPUT THE COMPLETE, POPULATED RESUME NOW:"""
-            )
-            
-            llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-pro-preview-03-25",
-                temperature=0.7
-            )
-            
-            chain = prompt | llm | StrOutputParser()
-            
-            new_resume = await chain.ainvoke({
-                "context": context,
-                "target_role": target_role,
-                "experience_level": experience_level,
-                "industry": industry or "general",
-                "key_skills": key_skills or "relevant to the target role"
-            })
-            
-            # Save to database
-            from uuid import uuid4
-            new_resume_record = GeneratedCoverLetter(  # Reusing table
-                id=str(uuid4()),
-                user_id=user.id,
-                content=new_resume
-            )
-            db.add(new_resume_record)
-            await db.commit()
-            
-            return f"""[DOWNLOADABLE_RESUME]
-
-## 📄 **Professional Resume Created Successfully!**
-
-✅ **A first draft of your {experience_level} {target_role} resume is ready!** I've focused on role-specific tailoring, ATS optimization, and professional structure.
-
-{new_resume}
-
----
-
-### 🎯 **Resume Features:**
-- **Role-Specific**: Tailored for {target_role} positions
-- **Experience-Appropriate**: Structured for {experience_level} professionals
-- **ATS-Optimized**: Formatted to pass Applicant Tracking Systems
-- **Industry-Relevant**: {f'Focused on {industry} industry' if industry else 'Adaptable across industries'}
-
-### 📥 **Download Options:**
-**A download button (📥) should appear on this message.** Click it to access PDF versions of your resume in multiple styles (Modern, Classic, Minimal). You can also preview and edit the content before downloading.
-
-### 📝 **Next Steps:**
-1. **Review & Customize**: Personalize the template with your specific details
-2. **Download PDF**: Use the download button for professional formatting
-3. **Tailor Further**: Customize for specific job applications
-
-**💡 Pro Tip:** This is your foundation - customize it for each job application for best results!
-
-<!-- content_id={new_resume_record.id} -->"""
-            
-        except Exception as e:
-            log.error(f"Error creating resume from scratch: {e}", exc_info=True)
-            return f"❌ Sorry, I encountered an error while creating your resume: {str(e)}. Please try again with more specific details."
+                return (f"I have created a new resume draft for you, tailored for a {target_role} role. "
+                        "You can now preview, edit, and download it. [DOWNLOADABLE_RESUME]")
+                
+            except Exception as e:
+                log.error(f"Error creating resume from scratch: {e}", exc_info=True)
+                return f"❌ Sorry, I encountered an error while creating your resume: {str(e)}."
 
     @tool
     async def refine_cv_for_role(
@@ -3163,241 +2895,64 @@ OUTPUT THE COMPLETE, POPULATED RESUME NOW:"""
         job_description: str = "",
         company_name: str = ""
     ) -> str:
-        """⭐ PRIMARY CV REFINEMENT TOOL ⭐ 
-        
-        Use this tool when users ask to:
-        - "refine my CV"
-        - "enhance my resume" 
-        - "improve my CV for [role]"
-        - "tailor my resume"
-        - "update my CV"
-        - "make my resume better"
-        
-        DO NOT use cover letter tools for CV requests!
-        
-        Args:
-            target_role: The role or industry to tailor the CV for (e.g., "AI Engineering", "Software Development")
-            job_description: Specific job description to tailor against (optional)
-            company_name: Target company name (optional)
-        
-        Returns:
-            A refined, professionally tailored CV optimized for the target role
-        """
-        try:
-            log.info(f"CV refinement requested for role: {target_role}")
-            
-            # CRITICAL: Check for placeholder data and extract real information first
-            if user.email and "@noemail.com" in user.email or user.name == "New User":
-                log.info("⚠️ Detected placeholder profile data, extracting real information first...")
-                extraction_result = await extract_and_populate_profile_from_documents()
-                log.info(f"📋 Profile extraction result: {extraction_result[:100]}...")
+        """⭐ PRIMARY CV REFINEMENT TOOL ⭐"""
+        async with resume_modification_lock:
+            try:
+                log.info(f"CV refinement requested for role: {target_role}")
                 
-                # Refresh user data after extraction
-                await db.refresh(user)
-            
-            # Get existing resume data
-            result = await db.execute(select(Resume).where(Resume.user_id == user.id))
-            db_resume = result.scalars().first()
-            
-            # Get user documents for context
-            doc_result = await db.execute(
-                select(Document).where(Document.user_id == user.id).order_by(Document.date_created.desc())
-            )
-            documents = doc_result.scalars().all()
-            
-            # Build COMPREHENSIVE context with ALL user information from documents
-            user_name = f"{user.first_name} {user.last_name}".strip() if user.first_name or user.last_name else "User"
-            
-            # Extract comprehensive information from documents using AI
-            document_content = ""
-            if documents:
-                for doc in documents[:5]:  # Use latest 5 documents
-                    if doc.content and len(doc.content) > 100:
-                        document_content += f"\n\n=== DOCUMENT: {doc.name} ===\n{doc.content[:3000]}"
-            
-            # Use AI to extract comprehensive resume information
-            if document_content:
-                from langchain_core.prompts import ChatPromptTemplate
-                from langchain_core.output_parsers import StrOutputParser
+                # 1. Get the user's current resume data.
+                db_resume, base_resume_data = await get_or_create_resume()
                 
-                extraction_prompt = ChatPromptTemplate.from_template(
-                    """Extract comprehensive resume information from these documents:
+                # 2. Create the generation chain to output structured JSON.
+                parser = PydanticOutputParser(pydantic_object=ResumeData)
+                
+                prompt = ChatPromptTemplate.from_template(
+                    """You are an expert career coach and resume writer. Your task is to refine a user's resume and return it as a structured JSON object.
+                    
+                    USER'S CURRENT RESUME DATA:
+                    {context}
 
-{document_content}
+                    TARGET ROLE: {target_role}
+                    COMPANY: {company_name}
+                    JOB DESCRIPTION: {job_description}
 
-Extract and format ALL information for a complete resume. Return detailed content for:
+                    **CRITICAL, NON-NEGOTIABLE DIRECTIVE:**
+                    - **You MUST ONLY use the information provided in the 'USER'S CURRENT RESUME DATA' section.**
+                    - **You are STRICTLY FORBIDDEN from inventing, creating, or hallucinating any new information.**
+                    - Your ONLY task is to REFORMAT, REPHRASE, and TAILOR the *existing* information to better match the target role.
+                    - If a section is empty in the user's data, it should remain empty.
+                    - Return ONLY a valid JSON object matching the provided schema. Do not add any extra text or formatting.
 
-**PERSONAL INFORMATION:**
-- Full name, email, phone, location, LinkedIn, portfolio, GitHub
-
-**PROFESSIONAL SUMMARY:**
-- Write a compelling 3-4 line summary of their background and expertise
-
-**WORK EXPERIENCE:**
-- List ALL positions with: Job Title | Company | Dates | Detailed achievements and responsibilities
-
-**EDUCATION:**
-- All degrees, institutions, dates, relevant coursework, honors
-
-**TECHNICAL SKILLS:**
-- Programming languages, frameworks, tools, technologies
-
-**PROJECTS:**
-- Significant projects with descriptions and technologies used
-
-**CERTIFICATIONS/AWARDS:**
-- Any certifications, awards, or recognition
-
-**ADDITIONAL SECTIONS:**
-- Languages, publications, volunteer work, etc.
-
-Return comprehensive, detailed information - not placeholders or templates. Use the actual content from the documents."""
+                    {format_instructions}
+                    """
                 )
                 
-                extraction_llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.5-pro-preview-03-25",
-                    temperature=0.3
-                )
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.3)
+                chain = prompt | llm | parser
                 
-                extraction_chain = extraction_prompt | extraction_llm | StrOutputParser()
+                # 3. Invoke the chain to generate the refined structured resume.
+                refined_resume_data = await chain.ainvoke({
+                    "context": base_resume_data.json(),
+                    "target_role": target_role,
+                    "company_name": company_name or "target companies",
+                    "job_description": job_description or f"General {target_role} position requirements",
+                    "format_instructions": parser.get_format_instructions(),
+                })
                 
-                try:
-                    comprehensive_info = await extraction_chain.ainvoke({
-                        "document_content": document_content
-                    })
-                    context = f"COMPREHENSIVE USER INFORMATION EXTRACTED FROM DOCUMENTS:\n\n{comprehensive_info}"
-                except Exception as e:
-                    log.warning(f"Failed to extract comprehensive info: {e}")
-                    context = f"USER'S BASIC DETAILS:\nFull Name: {user_name}\nEmail: {user.email or 'Not provided'}"
-            else:
-                context = f"USER'S BASIC DETAILS:\nFull Name: {user_name}\nEmail: {user.email or 'Not provided'}"
-            
-            # Create the resume refinement chain
-            from langchain_core.prompts import ChatPromptTemplate
-            from langchain_core.output_parsers import StrOutputParser
-            
-            prompt = ChatPromptTemplate.from_template(
-                """You are an expert resume writer. Create a COMPLETE, FULLY POPULATED CV using ALL the user's actual information.
+                # 4. Update the user's single master resume record with the new structured data.
+                db_resume.data = refined_resume_data.dict()
+                attributes.flag_modified(db_resume, "data")
+                await session.commit()
+                
+                # 5. Return a simple confirmation message with the trigger.
+                return (f"I've successfully refined your CV for the **{target_role}** role. "
+                        "A download button will appear on this message. [DOWNLOADABLE_RESUME]")
+                
+            except Exception as e:
+                log.error(f"Error in CV refinement: {e}", exc_info=True)
+                return f"❌ Sorry, an error occurred while refining your CV. Please try again."
 
-USER'S COMPREHENSIVE INFORMATION:
-{context}
-
-TARGET ROLE: {target_role}
-COMPANY: {company_name}  
-JOB DESCRIPTION: {job_description}
-
-**CRITICAL INSTRUCTIONS:**
-- NEVER use placeholders like [Full Name], [email], [Job Title]
-- NEVER write template instructions like "List your experience here"
-- USE ONLY the actual extracted information from the documents
-- CREATE a complete, ready-to-use CV with real content in every section
-- Fill ALL sections with the user's actual data
-- Optimize content for {target_role} positions
-
-**FORMAT THE COMPLETE CV:**
-
-# [Use actual full name from the documents]
-**Email:** [actual email] | **Phone:** [actual phone] | **Location:** [actual location] | **LinkedIn:** [actual LinkedIn]
-
-## Professional Summary
-[Write 3-4 compelling lines using their actual background, skills, and experience - not generic text]
-
-## Core Skills
-[List ONLY their actual technical skills, programming languages, tools, and technologies from the documents]
-
-## Professional Experience
-[For EACH actual job from their background:]
-**[Actual Job Title]** | [Actual Company] | [Actual Dates]
-• [Real achievement with metrics/impact]
-• [Real responsibility with quantifiable results]
-• [Real project or accomplishment specific to that role]
-
-## Education
-[For EACH degree/certification from their documents:]
-**[Actual Degree]** | [Actual Institution] | [Actual Year/Dates]
-[Any relevant details like honors, GPA, relevant coursework]
-
-## Projects
-[List actual projects from their documents with:]
-**[Project Name]**: [Real description and technologies used]
-
-## Additional Sections
-[Include any actual certifications, languages, awards, publications they have]
-
-**REQUIREMENTS:**
-1. Use EVERY piece of real information from the extracted context
-2. Create achievement-focused bullet points with metrics where available
-3. Optimize language and keywords for {target_role} positions
-4. Ensure professional formatting and ATS compatibility
-5. Make it completely ready to use - no editing needed
-
-OUTPUT THE COMPLETE, POPULATED CV NOW:"""
-            )
-            
-            llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-pro-preview-03-25",
-                temperature=0.7,
-                top_p=0.9
-            )
-            
-            chain = prompt | llm | StrOutputParser()
-            
-            # Generate the refined resume
-            refined_resume = await chain.ainvoke({
-                "context": context,
-                "target_role": target_role,
-                "company_name": company_name or "target companies",
-                "job_description": job_description or f"General {target_role} position requirements"
-            })
-            
-            # Save the generated resume content to database
-            from uuid import uuid4
-            new_resume_record = GeneratedCoverLetter(  # Reusing table for now
-                id=str(uuid4()),
-                user_id=user.id,
-                content=refined_resume
-            )
-            db.add(new_resume_record)
-            await db.commit()
-            
-            # Get user's first name for personalization
-            user_first_name = user.first_name or "there"
-            
-            return f"""[DOWNLOADABLE_RESUME]
-
-## 🎉 **Hey {user_first_name}! Your {target_role} CV is ready!**
-
-I've refined your CV specifically for {target_role} positions{f' at {company_name}' if company_name else ''}. Here's what I created for you:
-
-{refined_resume}
-
----
-
-**🚀 What I optimized for you:**
-- Made it {target_role}-specific with the right keywords
-- Ensured it'll pass ATS systems
-- Highlighted your strongest achievements
-- Used professional language that hiring managers love
-
-**📥 Ready to download?** Click the download button (📥) above to get your CV in different styles - Modern, Classic, or Minimal. You can preview and make any tweaks before downloading.
-
-**💡 Quick tip:** This CV is already personalized with your information, but feel free to adjust anything before you download it!
-
-<!-- content_id={new_resume_record.id} -->"""
-            
-        except Exception as e:
-            log.error(f"Error in CV refinement: {e}", exc_info=True)
-            return f"""❌ **CV Refinement Error**
-
-I encountered an issue while refining your CV: {str(e)}
-
-**🔧 Alternative Options:**
-1. **Try Direct Generation**: Ask me to "generate a tailored resume for {target_role} roles"
-2. **Upload Fresh CV**: Upload your current CV and I'll process it with the modern system
-3. **Build from Scratch**: I can create a new CV using "create resume from scratch for {target_role}"
-
-Please try one of these alternatives, and I'll help you create an outstanding CV!"""
-
+    
     @tool
     async def get_cv_best_practices(
         industry: str = "",
@@ -3467,7 +3022,7 @@ Provide specific, actionable advice that someone can implement immediately."""
             )
             
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash-preview-04-17",
+                model="gemini-2.5-pro-preview-03-25",
                 temperature=0.7
             )
             
@@ -3525,7 +3080,11 @@ Provide specific, actionable advice that someone can implement immediately."""
             
             user_skills = current_skills
             if not user_skills and db_resume:
-                resume_data = ResumeData(**db_resume.data)
+                # Import and use the fix function from resume.py
+                from app.resume import fix_resume_data_structure
+                # Fix missing ID fields in existing data before validation
+                fixed_data = fix_resume_data_structure(db_resume.data)
+                resume_data = ResumeData(**fixed_data)
                 user_skills = ', '.join(resume_data.skills) if resume_data.skills else ""
             
             from langchain_core.prompts import ChatPromptTemplate
@@ -3595,7 +3154,7 @@ Provide specific, time-bound recommendations for skill development."""
             )
             
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash-preview-04-17",
+                model="gemini-2.5-pro-preview-03-25",
                 temperature=0.7
             )
             
@@ -3716,8 +3275,9 @@ Provide specific, technical advice that ensures maximum ATS compatibility."""
             )
             
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash-preview-04-17",
-                temperature=0.6
+                model="gemini-2.5-pro-preview-03-25",
+                temperature=0.6,
+                callbacks=[tracer]
             )
             
             chain = prompt | llm | StrOutputParser()
@@ -3759,28 +3319,76 @@ Provide specific, technical advice that ensures maximum ATS compatibility."""
 
     @tool
     async def get_interview_preparation_guide(
-        job_title: str,
+        job_title: str = "",
         company_name: str = "",
-        interview_type: str = "general"
+        interview_type: str = "general",
+        job_url: str = ""
     ) -> str:
         """Get comprehensive interview preparation guidance based on your CV and target role.
         
         Args:
-            job_title: Position you're interviewing for
-            company_name: Target company (optional)
+            job_title: Position you're interviewing for (optional if job_url provided)
+            company_name: Target company (optional if job_url provided)
             interview_type: Type of interview (behavioral, technical, panel, phone, video)
+            job_url: URL of the job posting to analyze (optional, will extract job details)
         
         Returns:
             Personalized interview preparation guide with questions and strategies
         """
         try:
+            # Extract job details from URL if provided
+            extracted_job_title = job_title
+            extracted_company_name = company_name
+            job_description = ""
+            
+            if job_url:
+                log.info(f"Extracting job details from URL: {job_url}")
+                try:
+                    extraction_method = _choose_extraction_method(job_url)
+                    log.info(f"Using extraction method: {extraction_method}")
+                    
+                    if extraction_method == "browser":
+                        success, extracted_data = await _try_browser_extraction(job_url)
+                        if success and extracted_data:
+                            extracted_job_title = extracted_data.get("job_title", job_title)
+                            extracted_company_name = extracted_data.get("company_name", company_name)
+                            job_description = extracted_data.get("job_description", "")
+                            log.info(f"Successfully extracted job details via browser: {extracted_job_title} at {extracted_company_name}")
+                        else:
+                            log.warning("Browser extraction failed, falling back to basic extraction")
+                            success, extracted_data = await _try_basic_extraction(job_url)
+                            if success and extracted_data:
+                                extracted_job_title = extracted_data.get("job_title", job_title)
+                                extracted_company_name = extracted_data.get("company_name", company_name)
+                                job_description = extracted_data.get("job_description", "")
+                    else:
+                        success, extracted_data = await _try_basic_extraction(job_url)
+                        if success and extracted_data:
+                            extracted_job_title = extracted_data.get("job_title", job_title)
+                            extracted_company_name = extracted_data.get("company_name", company_name)
+                            job_description = extracted_data.get("job_description", "")
+                        
+                except Exception as e:
+                    log.warning(f"URL extraction failed: {e}, using provided job details")
+            
+            # Use extracted details or fallback to provided ones
+            final_job_title = extracted_job_title or job_title
+            final_company_name = extracted_company_name or company_name
+            
+            if not final_job_title:
+                return "❌ Please provide either a job title or a job URL to generate interview preparation guide."
+            
             # Get user's CV data for personalized prep
             result = await db.execute(select(Resume).where(Resume.user_id == user.id))
             db_resume = result.scalars().first()
             
             user_context = f"User: {user.first_name} {user.last_name}"
             if db_resume:
-                resume_data = ResumeData(**db_resume.data)
+                # Import and use the fix function from resume.py
+                from app.resume import fix_resume_data_structure
+                # Fix missing ID fields in existing data before validation
+                fixed_data = fix_resume_data_structure(db_resume.data)
+                resume_data = ResumeData(**fixed_data)
                 user_context += f"\nBackground: {resume_data.personalInfo.summary or 'No summary available'}"
                 user_context += f"\nKey Skills: {', '.join(resume_data.skills[:5]) if resume_data.skills else 'No skills listed'}"
                 if resume_data.experience:
@@ -3796,6 +3404,7 @@ USER CONTEXT: {user_context}
 TARGET ROLE: {job_title}
 COMPANY: {company_name}
 INTERVIEW TYPE: {interview_type}
+JOB DESCRIPTION: {job_description}
 
 Create a detailed interview preparation guide:
 
@@ -3887,22 +3496,99 @@ Provide specific, actionable advice tailored to this role and the user's backgro
             )
             
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash-preview-04-17",
-                temperature=0.7
+                model="gemini-2.5-pro-preview-03-25",
+                temperature=0.3
             )
             
             chain = prompt | llm | StrOutputParser()
             
             guide = await chain.ainvoke({
                 "user_context": user_context,
-                "job_title": job_title,
-                "company_name": company_name or "the target company",
-                "interview_type": interview_type
+                "job_title": final_job_title,
+                "company_name": final_company_name or "the target company",
+                "interview_type": interview_type,
+                "job_description": job_description or "No specific job description provided"
             })
+            
+            # Generate structured Q&A pairs for flashcards
+            qa_prompt = ChatPromptTemplate.from_template(
+                """Generate 10 realistic interview questions and answers for this role, including CV-specific questions.
+
+USER CONTEXT: {user_context}
+TARGET ROLE: {job_title}
+COMPANY: {company_name}
+INTERVIEW TYPE: {interview_type}
+JOB DESCRIPTION: {job_description}
+
+**CRITICAL: Analyze the user's CV/background and the job description to create questions that reference their SPECIFIC experience:**
+
+Generate exactly 10 interview questions with sample answers. Return as JSON array:
+[
+  {{
+    "question": "Tell me about yourself.",
+    "answer": "Brief sample answer that the candidate could reference or build upon"
+  }},
+  ...
+]
+
+Include this mix:
+- 2 CV-specific questions (reference their actual experience, career transitions, specific technologies/companies)
+- 2 behavioral questions (STAR method opportunities)
+- 3 technical/role-specific questions
+- 2 situational questions
+- 1 company/culture fit question
+
+**CV-SPECIFIC QUESTION EXAMPLES (adapt to their actual background):**
+- "I see you were doing freelance work while working full-time at [Company]. How did you manage both responsibilities?"
+- "You used [Technology] at [Company]. Can you walk me through how you implemented it?"
+- "I notice you transitioned from [Previous Role] to [Current Role]. What motivated this change?"
+- "You worked at [Company] for [Duration]. What was your biggest achievement there?"
+- "I see you have experience with [Specific Skill/Technology]. How did you learn it and apply it?"
+- "You've worked in both [Industry A] and [Industry B]. How do those experiences complement each other?"
+
+**IMPORTANT RULES:**
+1. Reference ACTUAL companies, technologies, roles from their background
+2. Ask about career transitions, overlapping roles, technology choices
+3. Question specific timeframes, gaps, or interesting patterns in their CV
+4. Make questions sound like a real interviewer who studied their resume
+5. Include follow-up style questions that dig deeper into their experience
+
+Make all questions realistic for this specific role and company. Keep sample answers concise but helpful.
+
+Return ONLY valid JSON array - no additional text or formatting."""
+            )
+            
+            qa_chain = qa_prompt | llm | StrOutputParser()
+            
+            qa_json = await qa_chain.ainvoke({
+                "user_context": user_context,
+                "job_title": final_job_title,
+                "company_name": final_company_name or "the target company",
+                "interview_type": interview_type,
+                "job_description": job_description or "No specific job description provided"
+            })
+            
+            # Parse the Q&A JSON
+            try:
+                # Clean the JSON response - remove markdown code blocks if present
+                cleaned_json = qa_json.strip()
+                if cleaned_json.startswith('```json'):
+                    cleaned_json = cleaned_json[7:]  # Remove ```json
+                if cleaned_json.startswith('```'):
+                    cleaned_json = cleaned_json[3:]   # Remove ```
+                if cleaned_json.endswith('```'):
+                    cleaned_json = cleaned_json[:-3]  # Remove trailing ```
+                
+                qa_pairs = json.loads(cleaned_json.strip())
+            except json.JSONDecodeError:
+                # Fallback if JSON parsing fails
+                qa_pairs = []
+                log.warning(f"Failed to parse Q&A JSON: {qa_json[:200]}...")
             
             return f"""## 🎯 **Interview Preparation Guide**
 
-**Role:** {job_title} | **Company:** {company_name or 'Target Company'} | **Type:** {interview_type.title()}
+**Role:** {final_job_title} | **Company:** {final_company_name or 'Target Company'} | **Type:** {interview_type.title()}
+{f"**🔗 Source:** {job_url}" if job_url else ""}
 
 {guide}
 
@@ -3924,7 +3610,17 @@ Provide specific, actionable advice tailored to this role and the user's backgro
 **🔗 Next Steps:**
 - `enhance my resume section` - Align CV with interview talking points
 - `generate cover letter` - Practice articulating your interest
-- `get salary negotiation tips` - Prepare for compensation discussions"""
+- `get salary negotiation tips` - Prepare for compensation discussions
+
+[INTERVIEW_FLASHCARDS_AVAILABLE]
+📝 **Practice with AI-powered flashcards** - Click the brain icon to practice interview questions with voice/text responses and get detailed feedback on tone, correctness, and confidence.
+
+<!--FLASHCARD_DATA:{json.dumps(qa_pairs)}-->
+
+---
+**Job Context:** {final_job_title} at {final_company_name or 'Target Company'}
+**Interview Type:** {interview_type}
+**Preparation Content:** {guide[:500]}..."""
             
         except Exception as e:
             log.error(f"Error creating interview preparation guide: {e}", exc_info=True)
@@ -4052,8 +3748,9 @@ Provide specific, actionable negotiation advice with realistic expectations."""
             )
             
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash-preview-04-17",
-                temperature=0.7
+                model="gemini-2.5-pro-preview-03-25",
+                temperature=0.7,
+                callbacks=[tracer]
             )
             
             chain = prompt | llm | StrOutputParser()
@@ -4127,7 +3824,11 @@ Provide specific, actionable negotiation advice with realistic expectations."""
             
             user_context = f"User: {user.first_name} {user.last_name}"
             if db_resume:
-                resume_data = ResumeData(**db_resume.data)
+                # Import and use the fix function from resume.py
+                from app.resume import fix_resume_data_structure
+                # Fix missing ID fields in existing data before validation
+                fixed_data = fix_resume_data_structure(db_resume.data)
+                resume_data = ResumeData(**fixed_data)
                 user_context += f"\nCurrent Background: {resume_data.personalInfo.summary or 'No summary available'}"
                 user_context += f"\nSkills: {', '.join(resume_data.skills[:8]) if resume_data.skills else 'No skills listed'}"
                 if resume_data.experience:
@@ -4271,7 +3972,7 @@ Provide specific, time-bound, measurable actions that create a clear path to the
             )
             
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash-preview-04-17",
+                model="gemini-2.5-pro-preview-03-25",
                 temperature=0.7
             )
             
@@ -4910,7 +4611,8 @@ I can now provide location-specific salary guidance, job market insights, and ca
 **📄 Profile Sync:** Your resume and profile have been updated with the new location."""
             
         except Exception as e:
-            await db.rollback()
+            if db.is_active:
+                await db.rollback()
             log.error(f"Error updating user location: {e}")
             return f"❌ Error updating location: {str(e)}"
 
@@ -5068,6 +4770,56 @@ Your resume database record is now properly structured. Try clicking a download 
             log.error(f"Error checking resume data structure: {e}", exc_info=True)
             return f"❌ Error checking resume data structure: {str(e)}"
 
+    @tool
+    async def browse_web_with_langchain(
+        url: str,
+        query: str = ""
+    ) -> str:
+        """
+        Use the official LangChain WebBrowser tool to browse and extract information from web pages.
+        
+        This tool provides intelligent web browsing with AI-powered content extraction and summarization.
+        It's particularly useful for extracting job information from job posting URLs.
+        
+        Args:
+            url: The URL to browse and extract information from
+            query: Optional specific query about what to find on the page (e.g., "job requirements", "salary information")
+                  If empty, will provide a general summary of the page content
+        
+        Returns:
+            Extracted and summarized information from the webpage, with relevant links if available
+        """
+        try:
+            from app.langchain_webbrowser import create_webbrowser_tool
+            
+            log.info(f"Using official LangChain WebBrowser tool for URL: {url}")
+            
+            # Create the WebBrowser tool
+            webbrowser_tool = create_webbrowser_tool()
+            
+            # Prepare input for WebBrowser tool
+            # Format: "URL,query" or just "URL" for summary
+            if query:
+                browser_input = f"{url},{query}"
+                log.info(f"WebBrowser query: '{query}'")
+            else:
+                browser_input = url
+                log.info("WebBrowser mode: general summary")
+            
+            # Use the WebBrowser tool
+            result = await webbrowser_tool.arun(browser_input)
+            
+            if result:
+                log.info(f"WebBrowser tool successful for {url}")
+                return f"🌐 **Web Content from {url}:**\n\n{result}"
+            else:
+                log.warning(f"WebBrowser tool returned empty result for {url}")
+                return f"❌ Could not extract content from {url}. The page might be inaccessible or protected."
+                
+        except Exception as e:
+            log.error(f"Error using LangChain WebBrowser tool for {url}: {e}")
+            return f"❌ Error browsing {url}: {str(e)}. Please try again or use a different URL."
+
     # Add the new tools to the tools list - CV/RESUME TOOLS FIRST for priority!
     tools = [
         # ⭐ CV/RESUME TOOLS (HIGHEST PRIORITY) ⭐
@@ -5109,8 +4861,7 @@ Your resume database record is now properly structured. Try clicking a download 
         
         # 🎯 JOB SEARCH TOOLS (PRIORITY ORDER)
         search_jobs_linkedin_api,  # ⭐ PRIMARY: Direct LinkedIn API access
-        search_jobs_with_browser,  # 🌐 SECONDARY: Browser automation fallback
-        search_jobs_tool,  # 📊 TERTIARY: Basic Google Cloud API
+        
         
         # 🚀 CAREER DEVELOPMENT TOOLS
         get_interview_preparation_guide,  # Interview prep tool
@@ -5122,8 +4873,27 @@ Your resume database record is now properly structured. Try clicking a download 
         get_current_time_and_date,  # NEW: Current date/time awareness for temporal context
         get_user_location_context,  # NEW: User location and market context
         update_user_location,  # NEW: Update user location in profile
+        browse_web_with_langchain,
     ]
-    
+
+    # --- Add browser tools ---
+    # Try Playwright browser tool first (synchronous version)
+    try:
+        from app.langchain_webbrowser import create_webbrowser_tool
+        browser_tool = create_webbrowser_tool()
+        tools.append(browser_tool)
+        log.info("Added Playwright browser tool to agent")
+    except Exception as e:
+        log.warning(f"Failed to add Playwright browser tool: {e}")
+        # Fall back to simple browser tool
+        try:
+            from app.simple_browser_tool import create_simple_browser_tool
+            browser_tool = create_simple_browser_tool()
+            tools.append(browser_tool)
+            log.info("Added simple browser tool to agent as fallback")
+        except Exception as e2:
+            log.warning(f"Failed to add simple browser tool: {e2}")
+
     # Add advanced memory tools if available
     if 'memory_tools' in locals() and memory_tools:
         tools.extend(memory_tools)
@@ -5308,7 +5078,8 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
         log.error(f"Error loading enhanced chat history, falling back to basic: {e}")
         # Fallback to basic chat history loading with proper transaction handling
         try:
-            await db.rollback()  # Ensure clean transaction state
+            if db.is_active:
+                await db.rollback()  # Ensure clean transaction state
             history_records = await db.execute(
                 select(ChatMessage)
                 .where(ChatMessage.user_id == user_id)
@@ -5344,6 +5115,12 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
             
             try:
                 message_data = json.loads(data)
+
+                if message_data.get("type") == "stop_generation":
+                    log.info("Received stop_generation signal. Halting any current agent activity.")
+                    # We can add more complex cancellation logic here in the future if needed.
+                    # For now, we just ignore the message and wait for the next one.
+                    continue
                 
                 if message_data.get("type") == "clear_context":
                     current_chat_history = []
@@ -5356,6 +5133,16 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                     if new_page_id != current_loaded_page_id:
                         current_loaded_page_id = new_page_id
                         log.info(f"WebSocket context switched to page {new_page_id}")
+                        
+                        # Update last_opened_at timestamp
+                        if new_page_id:
+                            await db.execute(
+                                update(Page)
+                                .where(Page.id == new_page_id)
+                                .values(last_opened_at=func.now())
+                            )
+                            await db.commit()
+                            log.info(f"Updated last_opened_at for page {new_page_id}")
                     continue
                 elif message_data.get("type") == "regenerate":
                     log.info("🔄 Regeneration request received")
@@ -5366,12 +5153,13 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                     log.info(f"🔄 Page ID: {regenerate_page_id}")
                     log.info(f"🔄 Current chat history length: {len(current_chat_history)}")
                     
-                    # CRITICAL: Load page history if chat_history is empty - USE LANGCHAIN FORMAT
-                    if len(current_chat_history) == 0 and regenerate_page_id:
-                        log.info(f"🔄 Chat history empty, loading history for page {regenerate_page_id}")
+                    # Load page history if we're regenerating from a different page
+                    if regenerate_page_id != current_loaded_page_id:
+                        log.info(f"🔄 Loading history for page {regenerate_page_id}")
                         try:
                             page_messages = await db.execute(
                                 select(ChatMessage)
+                                .where(ChatMessage.user_id == user.id)
                                 .where(ChatMessage.page_id == regenerate_page_id)
                                 .order_by(ChatMessage.created_at)
                             )
@@ -5390,18 +5178,21 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                                         current_chat_history.append(HumanMessage(id=msg.id, content=content if isinstance(content, str) else json.dumps(content)))
                                     else:
                                         current_chat_history.append(AIMessage(id=msg.id, content=content if isinstance(content, str) else json.dumps(content)))
-                                log.info(f"🔄 Chat history updated to {len(current_chat_history)} LangChain messages")
+                                current_loaded_page_id = regenerate_page_id
+                                log.info(f"🔄 Chat history updated to {len(current_chat_history)} messages")
                             else:
                                 log.warning(f"🔄 No messages found for page {regenerate_page_id}")
                         except Exception as e:
                             log.error(f"🔄 Error loading page history: {e}")
+                            if db.is_active:
+                                await db.rollback()
                     
-                    # Remove the last AI message from history (if exists) - LANGCHAIN FORMAT
+                    # Remove the last AI message from history
                     if current_chat_history and isinstance(current_chat_history[-1], AIMessage):
                         removed_message = current_chat_history.pop()
                         log.info(f"🔄 Removed last AI message from history: '{removed_message.content[:50]}...'")
                     
-                    # Add the regenerate content as user message if not already present - LANGCHAIN FORMAT
+                    # Add the regenerate content as user message if not already present
                     if not current_chat_history or current_chat_history[-1].content != regenerate_content:
                         current_chat_history.append(HumanMessage(content=regenerate_content))
                         log.info(f"🔄 Added regenerate content to history")
@@ -5416,25 +5207,18 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                                     "input": regenerate_content,
                                     "chat_history": current_chat_history,
                                 }),
-                                timeout=180.0  # Increased to 3 minute timeout for complex requests
+                                timeout=180.0  # 3 minute timeout for complex requests
                             )
                             
                             if response and 'output' in response:
                                 agent_response = response['output']
                                 log.info(f"🔄 Master agent regenerated response: '{agent_response[:100]}...'")
                                 
-                                # Send the regenerated response (don't double JSON encode)
-                                await websocket.send_text(agent_response)
-                                
-                                # Update chat history with LangChain format
-                                ai_message_id = str(uuid.uuid4())
-                                current_chat_history.append(AIMessage(id=ai_message_id, content=agent_response))
-                                
-                                # Save to database with proper page_id - DELETE OLD AI MESSAGE FIRST
+                                # Delete the last AI message from database before saving new one
                                 try:
-                                    # CRITICAL: Delete the last AI message from database before saving new one
                                     last_ai_message = await db.execute(
                                         select(ChatMessage)
+                                        .where(ChatMessage.user_id == user.id)
                                         .where(ChatMessage.page_id == regenerate_page_id)
                                         .where(ChatMessage.is_user_message == False)
                                         .order_by(ChatMessage.created_at.desc())
@@ -5447,8 +5231,8 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                                     
                                     # Now save the new regenerated message
                                     new_message = ChatMessage(
-                                        id=ai_message_id,
-                                        user_id=user_id,
+                                        id=str(uuid.uuid4()),
+                                        user_id=user.id,
                                         message=agent_response,
                                         is_user_message=False,
                                         page_id=regenerate_page_id
@@ -5458,21 +5242,36 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                                     log.info(f"🔄 Regenerated message saved to database with page_id: {regenerate_page_id}")
                                 except Exception as save_error:
                                     log.error(f"🔄 Error saving regenerated message: {save_error}")
-                                    await db.rollback()
+                                    if db.is_active:
+                                        await db.rollback()
+                                
+                                await websocket.send_json({
+                                    "type": "message",
+                                    "message": agent_response
+                                })
                             else:
                                 log.error("🔄 Master agent returned invalid response format")
                                 await websocket.send_text("I apologize, but I encountered an issue generating a response. Please try again.")
                                 
                         except asyncio.TimeoutError:
                             log.error("🔄 Master agent timed out during regeneration")
-                            await websocket.send_text("The regeneration took too long and timed out. Please try again with a simpler request.")
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "The regeneration took too long and timed out. Please try again with a simpler request."
+                            })
                         except Exception as agent_error:
                             log.error(f"🔄 Master agent error during regeneration: {agent_error}")
-                            await websocket.send_text("I encountered an error while regenerating the response. Please try again.")
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "I encountered an error while regenerating the response. Please try again."
+                            })
                             
                     except Exception as e:
                         log.error(f"🔄 Error during regeneration: {e}", exc_info=True)
-                        await websocket.send_text("I apologize, but I encountered an error during regeneration. Please try again.")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "I apologize, but I encountered an error during regeneration. Please try again."
+                        })
                     continue
                 elif "content" in message_data:
                     # New format with page context
@@ -5510,7 +5309,8 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                                 log.info(f"WebSocket context loaded {len(current_chat_history)} messages for page {page_id}")
                             except Exception as page_error:
                                 log.error(f"Failed to load page history for WebSocket context {page_id}: {page_error}")
-                                await db.rollback()
+                                if db.is_active:
+                                    await db.rollback()
                                 current_chat_history = []
                         else:
                             # New conversation - clear context
@@ -5536,7 +5336,8 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                 log.info(f"Saved user message {user_message_id} with page_id: {page_id}")
             except Exception as save_error:
                 log.error(f"Failed to save user message: {save_error}")
-                await db.rollback()
+                if db.is_active:
+                    await db.rollback()
                 user_message_id = str(uuid.uuid4())  # Generate new ID for retry
             
             current_chat_history.append(HumanMessage(id=user_message_id, content=message_content))
@@ -5595,7 +5396,10 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                     except Exception:
                         pass
             
-            await websocket.send_text(result)
+            await websocket.send_json({
+                "type": "message",
+                "message": result
+            })
             
             # Save AI message with page context
             try:
@@ -5611,7 +5415,8 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                 log.info(f"Saved AI message {ai_message_id} with page_id: {page_id}")
             except Exception as save_error:
                 log.error(f"Failed to save AI message: {save_error}")
-                await db.rollback()
+                if db.is_active:
+                    await db.rollback()
                 ai_message_id = str(uuid.uuid4())  # Generate new ID for retry
             
             current_chat_history.append(AIMessage(id=ai_message_id, content=result))
@@ -5621,6 +5426,9 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
     except Exception as e:
         log.error(f"WebSocket error for user {user_id}: {e}")
         try:
-            await websocket.send_text(f"An error occurred: {str(e)}")
+            await websocket.send_json({
+                "type": "error",
+                "message": f"An error occurred: {str(e)}"
+            })
         except Exception:
             pass  # WebSocket might be closed 

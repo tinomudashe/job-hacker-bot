@@ -1,10 +1,36 @@
-from pydantic import BaseModel, EmailStr, Field
-from typing import List, Optional, Dict
+from pydantic import BaseModel, EmailStr, Field, field_validator
+from typing import List, Optional, Dict, Any
 from datetime import datetime
+import json
+
+class Dates(BaseModel):
+    start: Optional[str] = None
+    end: Optional[str] = None
+
+class Experience(BaseModel):
+    id: str
+    jobTitle: str
+    company: str
+    dates: Optional[Dates] = None
+    description: str
+
+class Education(BaseModel):
+    id: str
+    degree: str
+    institution: str
+    dates: Optional[Dates] = None
+    description: Optional[str] = None
+
+class Settings(BaseModel):
+    emailNotifications: bool = True
+    marketingEmails: bool = False
+    dataCollection: bool = True
 
 class UserPreferences(BaseModel):
     job_titles: List[str] = []
     locations: List[str] = []
+    settings: Settings = Field(default_factory=Settings)
+
 
 class User(BaseModel):
     id: str
@@ -25,6 +51,18 @@ class User(BaseModel):
     active: bool = True
     preferences: Optional[UserPreferences] = None
     faiss_index_path: Optional[str] = None
+    experiences: List[Experience] = []
+    education: List[Education] = []
+
+    @field_validator('preferences', mode='before')
+    @classmethod
+    def parse_preferences(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return None  # Return None for invalid JSON
+        return v
 
     class Config:
         from_attributes = True

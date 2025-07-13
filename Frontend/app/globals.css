@@ -79,7 +79,7 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
+  --background: oklch(0 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
   --card-foreground: oklch(0.985 0 0);
@@ -135,12 +135,12 @@
   @media (max-width: 640px) {
     body {
       /* Prevent zoom on input focus */
-      font-size: 16px;
+      font-size: 12px;
     }
 
-    /* Improve button touch targets */
-    button,
-    [role="button"] {
+    /* Improve button touch targets, exclude switches */
+    button:not([role="switch"]),
+    [role="button"]:not([role="switch"]) {
       min-height: 44px;
       min-width: 44px;
     }
@@ -343,28 +343,28 @@
 
 /* Prevent horizontal overflow on mobile */
 @media (max-width: 640px) {
+  /* Allow Tailwind utility classes to control font sizes */
   .prose {
-    font-size: 10px !important;
-    line-height: 1.3 !important;
+    /* Remove !important to allow Tailwind classes to override */
+    font-size: 0.8rem;
+    line-height: 1.75;
   }
 
   .prose p {
-    margin-bottom: 0.375rem !important;
-    font-size: 10px !important;
-    line-height: 1.3 !important;
+    margin-bottom: 0.375rem;
+    /* Let Tailwind utility classes control font size */
   }
 
   .prose ul,
   .prose ol {
-    margin-bottom: 0.375rem !important;
-    margin-top: 0.25rem !important;
-    font-size: 10px !important;
+    margin-bottom: 0.375rem;
+    margin-top: 0.25rem;
+    /* Let Tailwind utility classes control font size */
   }
 
   .prose li {
-    margin-bottom: 0.125rem !important;
-    font-size: 10px !important;
-    line-height: 1.3 !important;
+    margin-bottom: 0.125rem;
+    /* Let Tailwind utility classes control font size */
   }
 
   .prose h1,
@@ -373,22 +373,16 @@
   .prose h4,
   .prose h5,
   .prose h6 {
-    font-size: 11px !important;
-    line-height: 1.3 !important;
-    margin-bottom: 0.375rem !important;
-    margin-top: 0 !important;
+    margin-bottom: 0.375rem;
+    margin-top: 0;
+    /* Let Tailwind utility classes control font size */
   }
 
-  .prose strong {
-    font-size: 10px !important;
-  }
-
-  .prose em {
-    font-size: 10px !important;
-  }
-
+  /* Remove !important from all typography to allow Tailwind overrides */
+  .prose strong,
+  .prose em,
   .prose code {
-    font-size: 9px !important;
+    /* Let Tailwind utility classes control font size */
   }
 }
 
@@ -593,24 +587,20 @@ body:has([data-radix-dialog-overlay][data-state="open"]) *:focus {
   [data-radix-dialog-content] {
     margin: 0 !important;
     border-radius: 0 !important;
-    max-width: 100vw !important;
-    width: 100vw !important;
-    max-height: 100vh !important;
-    height: 100vh !important;
+    max-width: 95vw !important;
+    width: 95vw !important;
+    max-height: 95vh !important;
+    height: 95vh !important;
   }
 
   /* Mobile input zoom prevention */
   [data-radix-dialog-content] input,
   [data-radix-dialog-content] textarea,
   [data-radix-dialog-content] select {
-    font-size: 16px !important;
+    font-size: 14px !important;
   }
 
   /* Mobile button improvements */
-  [data-radix-dialog-content] button {
-    min-height: 44px !important;
-    min-width: 44px !important;
-  }
 }
 
 /* 8. CUSTOM SCROLLBAR FOR MODAL CONTENT */
@@ -664,16 +654,32 @@ body.modal-open {
 
 @media (max-width: 480px) {
   [data-radix-dialog-content] {
-    padding: 0 !important;
     margin: 0 !important;
-    border-radius: 0 !important;
-    height: 100vh !important;
-    max-height: 100vh !important;
-    width: 100vw !important;
-    max-width: 100vw !important;
-    position: fixed !important;
-    top: 0 !important;
-    left: 0 !important;
+    border-radius: 1rem !important;
+    max-width: 85vw !important;
+    max-height: 95vh !important;
+    height: 95vh !important;
+    width: 85vw !important;
+    border: none !important;
+    padding-top: max(1rem, env(safe-area-inset-top)) !important;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom)) !important;
+    padding-left: max(1rem, env(safe-area-inset-left)) !important;
+    padding-right: max(1rem, env(safe-area-inset-right)) !important;
+  }
+}
+@media (max-width: 320px) {
+  [data-radix-dialog-content] {
+    margin: 2rem !important;
+    border-radius: 1rem !important;
+    max-width: 85vw !important;
+    max-height: 95vh !important;
+    height: 95vh !important;
+    width: 85vw !important;
+    border: none !important;
+    padding-top: max(1rem, env(safe-area-inset-top)) !important;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom)) !important;
+    padding-left: max(1rem, env(safe-area-inset-left)) !important;
+    padding-right: max(1rem, env(safe-area-inset-right)) !important;
   }
 }
 
@@ -702,11 +708,11 @@ body.modal-open {
   /* Full viewport usage for PDF dialog on mobile */
   [data-radix-dialog-content] {
     margin: 0 !important;
-    border-radius: 0 !important;
-    max-width: 100vw !important;
-    max-height: 100vh !important;
-    height: 100vh !important;
-    width: 100vw !important;
+    border-radius: 1rem !important;
+    max-width: 95vw !important;
+    max-height: 95vh !important;
+    height: 95vh !important;
+    width: 95vw !important;
     border: none !important;
   }
 
@@ -743,18 +749,10 @@ body.modal-open {
   input[type="color"],
   textarea,
   select {
-    font-size: 16px !important;
+    font-size: 14px !important;
   }
 
   /* Enhanced touch targets for mobile */
-  button,
-  [role="button"],
-  input[type="button"],
-  input[type="submit"] {
-    min-height: 44px;
-    min-width: 44px;
-    touch-action: manipulation;
-  }
 
   /* Mobile-optimized text sizing */
   .mobile-responsive-text {
@@ -842,11 +840,11 @@ body.modal-open {
 
   /* Responsive font sizing for mobile */
   .text-responsive-xs {
-    font-size: clamp(10px, 2vw, 12px) !important;
+    font-size: clamp(8px, 2vw, 10px) !important;
   }
 
   .text-responsive-sm {
-    font-size: clamp(12px, 2.5vw, 14px) !important;
+    font-size: clamp(10px, 2vw, 12px) !important;
   }
 
   .text-responsive-base {
@@ -894,11 +892,6 @@ body.modal-open {
   }
 
   /* Tablet-optimized touch targets */
-  button,
-  [role="button"] {
-    min-height: 40px;
-    min-width: 40px;
-  }
 }
 
 /* High-DPI mobile screens */
@@ -924,5 +917,57 @@ body.modal-open {
       padding-left: max(1rem, env(safe-area-inset-left)) !important;
       padding-right: max(1rem, env(safe-area-inset-right)) !important;
     }
+  }
+}
+
+/* Mobile-specific input styling */
+.mobile-input-text {
+  font-size: 16px !important; /* Prevents zoom on iOS */
+}
+
+@media (min-width: 640px) {
+  .mobile-input-text {
+    font-size: 0.875rem !important; /* text-sm on desktop */
+  }
+}
+
+/* Safe area insets for mobile devices */
+.safe-area-inset-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-area-inset-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.safe-area-inset-left {
+  padding-left: env(safe-area-inset-left);
+}
+
+.safe-area-inset-right {
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Touch-friendly interactions */
+.touch-manipulation {
+  touch-action: manipulation;
+}
+
+/* Extra small breakpoint for very small screens */
+@media (min-width: 475px) {
+  .xs\:hidden {
+    display: none;
+  }
+
+  .xs\:inline {
+    display: inline;
+  }
+
+  .xs\:block {
+    display: block;
+  }
+
+  .xs\:flex {
+    display: flex;
   }
 }

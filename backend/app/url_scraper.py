@@ -7,16 +7,23 @@ from dataclasses import dataclass
 
 import httpx
 from bs4 import BeautifulSoup, Comment
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, WebDriverException
-from webdriver_manager.chrome import ChromeDriverManager
 from readability import Document
 
 logger = logging.getLogger(__name__)
+
+# Optional selenium imports - fallback gracefully if not available
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.common.exceptions import TimeoutException, WebDriverException
+    from webdriver_manager.chrome import ChromeDriverManager
+    SELENIUM_AVAILABLE = True
+except ImportError:
+    logger.warning("Selenium not available - web scraping will use HTTP-only approach")
+    SELENIUM_AVAILABLE = False
 
 @dataclass
 class JobDetails:
@@ -53,6 +60,10 @@ class URLScraper:
     
     def _setup_selenium(self):
         """Setup Selenium WebDriver for JavaScript-heavy sites."""
+        if not SELENIUM_AVAILABLE:
+            logger.warning("Selenium not available - cannot setup webdriver")
+            return None
+            
         if self.driver:
             return self.driver
             
@@ -85,9 +96,12 @@ class URLScraper:
             # First try simple HTTP request
             content = await self._fetch_with_httpx(url)
             
-            # If that fails or content is minimal, try Selenium
+            # If that fails or content is minimal, try Selenium (if available)
             if not content or len(content.strip()) < 500:
-                content = await self._fetch_with_selenium(url)
+                if SELENIUM_AVAILABLE:
+                    content = await self._fetch_with_selenium(url)
+                else:
+                    logger.info("Selenium not available - using HTTP-only content extraction")
             
             if not content:
                 raise ValueError("Could not extract content from URL")
@@ -108,7 +122,15 @@ class URLScraper:
             
             # Use readability to extract main content
             doc = Document(response.text)
-            return doc.content()
+            content = doc.content()
+            
+            # Check if content is actually a string and not empty
+            if isinstance(content, str) and content.strip():
+                return content
+            else:
+                logger.warning(f"Readability returned invalid content type for {url}: {type(content)}")
+                # Fallback to raw HTML if readability fails
+                return response.text
             
         except Exception as e:
             logger.warning(f"HTTP fetch failed for {url}: {e}")
@@ -138,9 +160,17 @@ class URLScraper:
             loop = asyncio.get_event_loop()
             content = await loop.run_in_executor(None, _selenium_fetch)
             
-            # Use readability to extract main content
+            # Use readability to extract main content with error handling
             doc = Document(content)
-            return doc.content()
+            extracted_content = doc.content()
+            
+            # Check if content is actually a string and not empty
+            if isinstance(extracted_content, str) and extracted_content.strip():
+                return extracted_content
+            else:
+                logger.warning(f"Selenium+Readability returned invalid content type for {url}: {type(extracted_content)}")
+                # Fallback to raw content if readability fails
+                return content
             
         except Exception as e:
             logger.warning(f"Selenium fetch failed for {url}: {e}")

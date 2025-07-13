@@ -1,0 +1,245 @@
+name: PR Review Agent
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "Frontend/**"
+      - "backend/**"
+
+jobs:
+  frontend-review:
+    name: Frontend Code Review
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Frontend
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: Frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript Check
+        run: npx tsc --noEmit
+
+      - name: ESLint Check
+        run: npx eslint . --ext .ts,.tsx
+
+      - name: Check for Console Logs
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            function scanForConsoleLogs(dir) {
+              const files = fs.readdirSync(dir);
+              let found = [];
+              
+              for (const file of files) {
+                const fullPath = path.join(dir, file);
+                if (fs.statSync(fullPath).isDirectory()) {
+                  if (!file.startsWith('.') && file !== 'node_modules') {
+                    found = found.concat(scanForConsoleLogs(fullPath));
+                  }
+                } else if (file.match(/\.(ts|tsx|js|jsx)$/)) {
+                  const content = fs.readFileSync(fullPath, 'utf8');
+                  const matches = content.match(/console\.(log|error|warn|debug|info)/g);
+                  if (matches) {
+                    found.push(`${fullPath}: ${matches.length} console statement(s) found`);
+                  }
+                }
+              }
+              return found;
+            }
+
+            const logs = scanForConsoleLogs('Frontend');
+            if (logs.length > 0) {
+              core.warning('Console statements found in code:');
+              logs.forEach(log => core.warning(log));
+            }
+
+      - name: Check Bundle Size Impact
+        run: |
+          npm run build
+          npx bundlesize
+
+      - name: Post Review Comments
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Read build stats
+            const stats = JSON.parse(fs.readFileSync('Frontend/.next/build-manifest.json', 'utf8'));
+
+            let comment = '## Frontend Review Summary\n\n';
+
+            // Add bundle size info
+            comment += '### Bundle Size Analysis\n';
+            comment += '| Page | Size |\n';
+            comment += '|------|------|\n';
+            Object.keys(stats.pages).forEach(page => {
+              comment += `| ${page} | Analyzing... |\n`;
+            });
+
+            // Add review notes
+            comment += '\n### Review Notes\n';
+            comment += '- ✅ TypeScript types checked\n';
+            comment += '- ✅ ESLint rules verified\n';
+            comment += '- ℹ️ Check console statements above\n';
+
+            // Post comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: comment
+            });
+
+  backend-review:
+    name: Backend Code Review
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install black flake8 mypy
+
+      - name: Run Black
+        run: black . --check
+
+      - name: Run Flake8
+        run: flake8 .
+
+      - name: Type Check with MyPy
+        run: mypy .
+
+      - name: Check for Print Statements
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            function scanForPrints(dir) {
+              const files = fs.readdirSync(dir);
+              let found = [];
+              
+              for (const file of files) {
+                const fullPath = path.join(dir, file);
+                if (fs.statSync(fullPath).isDirectory()) {
+                  if (!file.startsWith('.') && file !== 'venv' && file !== '__pycache__') {
+                    found = found.concat(scanForPrints(fullPath));
+                  }
+                } else if (file.endsWith('.py')) {
+                  const content = fs.readFileSync(fullPath, 'utf8');
+                  const matches = content.match(/print\s*\(/g);
+                  if (matches) {
+                    found.push(`${fullPath}: ${matches.length} print statement(s) found`);
+                  }
+                }
+              }
+              return found;
+            }
+
+            const prints = scanForPrints('backend');
+            if (prints.length > 0) {
+              core.warning('Print statements found in code:');
+              prints.forEach(print => core.warning(print));
+            }
+
+      - name: Post Review Comments
+        uses: actions/github-script@v6
+        with:
+          script: |
+            let comment = '## Backend Review Summary\n\n';
+
+            // Add review notes
+            comment += '### Code Quality Checks\n';
+            comment += '- ✅ Black formatting verified\n';
+            comment += '- ✅ Flake8 linting passed\n';
+            comment += '- ✅ MyPy type checking completed\n';
+            comment += '- ℹ️ Check print statements above\n';
+
+            // Add best practices section
+            comment += '\n### Best Practices\n';
+            comment += '- Ensure all new endpoints are properly documented\n';
+            comment += '- Verify error handling follows project standards\n';
+            comment += '- Check for proper logging instead of print statements\n';
+
+            // Post comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: comment
+            });
+
+  security-scan:
+    name: Security Review
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Run Snyk to check for vulnerabilities
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+      - name: Run OWASP Dependency Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: "Job-Hacker-Bot"
+          path: "."
+          format: "HTML"
+          args: >
+            --failOnCVSS 7
+            --enableRetired
+
+      - name: Post Security Review
+        uses: actions/github-script@v6
+        with:
+          script: |
+            let comment = '## Security Review Summary\n\n';
+
+            comment += '### Security Checks\n';
+            comment += '- ✅ Snyk vulnerability scan completed\n';
+            comment += '- ✅ OWASP dependency check completed\n';
+
+            comment += '\n### Security Best Practices\n';
+            comment += '- Verify no sensitive data is exposed\n';
+            comment += '- Check for proper input validation\n';
+            comment += '- Ensure authentication is properly handled\n';
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: comment
+            });
