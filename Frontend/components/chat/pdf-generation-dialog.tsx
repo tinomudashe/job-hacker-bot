@@ -151,26 +151,17 @@ export function PDFGenerationDialog({
   });
 
   const toggleSection = (section: keyof typeof expandedSections) => {
-    setExpandedSections((prev) => {
-      // Close all sections first
-      const allClosed = {
-        personalInfo: false,
-        workExperience: false,
-        education: false,
-        skills: false,
-        projects: false,
-        certifications: false,
-        languages: false,
-        additionalSections: false,
-        content: false,
-      };
-
-      // If the clicked section was already open, close it (close all)
-      // If it was closed, open only that section
-      return {
-        ...allClosed,
-        [section]: !prev[section],
-      };
+    setExpandedSections({
+      personalInfo: false,
+      workExperience: false,
+      education: false,
+      skills: false,
+      projects: false,
+      certifications: false,
+      languages: false,
+      additionalSections: false,
+      content: false,
+      [section]: true,
     });
   };
 
@@ -1135,7 +1126,7 @@ export function PDFGenerationDialog({
                     }}
                     className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 hover:scale-[1.02] ${
                       expandedSections.personalInfo
-                        ? "bg-muted text-foreground border border-border shadow-md"
+                        ? "bg-blue-50 text-blue-700 border border-blue-200 shadow-md dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700/50"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground hover:shadow-md"
                     }`}
                   >
@@ -1154,7 +1145,7 @@ export function PDFGenerationDialog({
                       }}
                       className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 hover:scale-[1.02] ${
                         expandedSections.personalInfo
-                          ? "bg-muted text-foreground border border-border shadow-md"
+                          ? "bg-blue-50 text-blue-700 border border-blue-200 shadow-md dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700/50"
                           : "text-muted-foreground hover:bg-muted hover:text-foreground hover:shadow-md"
                       }`}
                     >
@@ -1262,7 +1253,7 @@ export function PDFGenerationDialog({
                     }}
                     className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 hover:scale-[1.02] ${
                       expandedSections.content
-                        ? "bg-teal-50 text-teal-700 border border-teal-200 shadow-md dark:bg-teal-900/30 dark:text-teal-300 dark:border-teal-700/50"
+                        ? "bg-blue-50 text-blue-700 border border-blue-200 shadow-md dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700/50"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground hover:shadow-md"
                     }`}
                   >
@@ -1283,8 +1274,8 @@ export function PDFGenerationDialog({
                   onClick={() => toggleSection("personalInfo")}
                   className={`flex items-center gap-2 px-5 py-3 border-b-3 font-semibold text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-xl hover:scale-105 ${
                     expandedSections.personalInfo
-                      ? "border-foreground text-foreground bg-muted shadow-lg"
-                      : "border-transparent text-muted-foreground hover:text-foreground hover:border-foreground hover:bg-muted hover:shadow-lg"
+                      ? "border-blue-500 text-blue-600 bg-blue-50 shadow-lg dark:border-blue-400 dark:text-blue-400 dark:bg-blue-500/20"
+                      : "border-transparent text-gray-600 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50/50 hover:shadow-lg dark:text-gray-400 dark:hover:text-blue-400 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
                   }`}
                 >
                   <Briefcase className="h-4 w-4 flex-shrink-0" />
@@ -1299,8 +1290,8 @@ export function PDFGenerationDialog({
                     onClick={() => toggleSection("personalInfo")}
                     className={`flex items-center gap-2 px-5 py-3 border-b-3 font-semibold text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-xl hover:scale-105 ${
                       expandedSections.personalInfo
-                        ? "border-foreground text-foreground bg-muted shadow-lg"
-                        : "border-transparent text-muted-foreground hover:text-foreground hover:border-foreground hover:bg-muted hover:shadow-lg"
+                        ? "border-blue-500 text-blue-600 bg-blue-50 shadow-lg dark:border-blue-400 dark:text-blue-400 dark:bg-blue-500/20"
+                        : "border-transparent text-gray-600 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50/50 hover:shadow-lg dark:text-gray-400 dark:hover:text-blue-400 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
                     }`}
                   >
                     <User className="h-4 w-4 flex-shrink-0" />
@@ -1384,8 +1375,8 @@ export function PDFGenerationDialog({
                   onClick={() => toggleSection("content")}
                   className={`flex items-center gap-2 px-5 py-3 border-b-3 font-semibold text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-xl hover:scale-105 ${
                     expandedSections.content
-                      ? "border-teal-500 text-teal-700 bg-teal-50 shadow-lg dark:bg-teal-900/30 dark:text-teal-300 dark:border-teal-400"
-                      : "border-transparent text-muted-foreground hover:text-teal-700 hover:border-teal-500 hover:bg-teal-50 hover:shadow-lg dark:hover:text-teal-300 dark:hover:bg-teal-900/30 dark:hover:border-teal-400"
+                      ? "border-blue-500 text-blue-600 bg-blue-50 shadow-lg dark:border-blue-400 dark:text-blue-400 dark:bg-blue-500/20"
+                      : "border-transparent text-gray-600 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50/50 hover:shadow-lg dark:text-gray-400 dark:hover:text-blue-400 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
                   }`}
                 >
                   <Edit3 className="h-4 w-4 flex-shrink-0" />
