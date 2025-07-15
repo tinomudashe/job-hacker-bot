@@ -3,6 +3,8 @@
 import { ChatContainer } from "@/components/chat/chat-container";
 import { Header } from "@/components/header";
 import { LoginPrompt } from "@/components/login-prompt";
+import { SubscriptionPrompt } from "@/components/subscription-prompt";
+import { useSubscription } from "@/lib/hooks/use-subscription";
 import { useWebSocket } from "@/lib/hooks/use-websocket";
 import { SignedIn, SignedOut, useAuth, useUser } from "@clerk/nextjs";
 import * as React from "react";
@@ -29,6 +31,7 @@ export default function Home() {
   } = useWebSocket(currentPageId);
   const { user } = useUser();
   const { getToken, isLoaded, isSignedIn } = useAuth();
+  const { subscription, loading: subscriptionLoading } = useSubscription();
 
   // Function to fetch the most recent conversation (only on initial load)
   const fetchMostRecentPage = React.useCallback(async () => {
@@ -176,7 +179,7 @@ export default function Home() {
         />
         <main className="flex-1 overflow-hidden pt-14 sm:pt-16 md:pt-20">
           <SignedIn>
-            {isLoadingRecentPage ? (
+            {isLoadingRecentPage || subscriptionLoading ? (
               <div className="flex items-center justify-center h-full">
                 <div className="flex flex-col items-center gap-4">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -185,7 +188,8 @@ export default function Home() {
                   </p>
                 </div>
               </div>
-            ) : (
+            ) : subscription?.status === "active" ||
+              subscription?.status === "trialing" ? (
               <ChatContainer
                 user={user}
                 messages={messages}
@@ -199,6 +203,8 @@ export default function Home() {
                 isConnected={isConnected}
                 error={error || undefined}
               />
+            ) : (
+              <SubscriptionPrompt />
             )}
           </SignedIn>
           <SignedOut>
