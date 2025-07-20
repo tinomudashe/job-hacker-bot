@@ -3,7 +3,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { cn } from "@/lib/utils";
 import {
   SignedIn,
   SignedOut,
@@ -24,6 +23,7 @@ import {
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import * as React from "react";
+import { cn } from "../../lib/utils";
 // EDIT: Import the new cover letter templates alongside the resume templates.
 import { getApiUrl } from "@/lib/utils";
 import { CreativeCoverLetterTemplate } from "./templates/CreativeCoverLetterTemplate";
