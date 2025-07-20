@@ -103,6 +103,30 @@ async def verify_token(token: str) -> ClerkUser:
         )
 
 
+async def get_clerk_user(user_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Fetches a full user object from the Clerk API.
+    """
+    if not CLERK_SECRET_KEY or not CLERK_API_URL:
+        logger.error("Clerk Secret Key or API URL is not configured. Cannot fetch user.")
+        return None
+
+    headers = {"Authorization": f"Bearer {CLERK_SECRET_KEY}"}
+    url = f"{CLERK_API_URL}/v1/users/{user_id}"
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Failed to fetch user data from Clerk API for user {user_id}: {e.response.status_code} - {e.response.text}")
+        return None
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while fetching user data for {user_id}: {e}", exc_info=True)
+        return None
+
+
 async def get_primary_email_address(user_id: str) -> Optional[str]:
     """
     Fetches a user's primary email address directly from the Clerk API.

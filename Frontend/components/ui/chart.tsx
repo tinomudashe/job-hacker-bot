@@ -18,7 +18,7 @@ const ChartContainer = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement> & {
     config: ChartConfig;
-    children: React.ReactNode;
+    children: React.ReactElement;
   }
 >(({ config, className, children, ...props }, ref) => (
   <div
@@ -44,7 +44,7 @@ const ChartTooltip = RechartsPrimitive.Tooltip;
 
 const ChartTooltipContent = React.forwardRef<
   HTMLDivElement,
-  React.ComponentProps<typeof RechartsPrimitive.TooltipContent>
+  RechartsPrimitive.TooltipProps<any, any> & { className?: string }
 >(({ label, payload, className, ...props }, ref) => (
   <div
     ref={ref}

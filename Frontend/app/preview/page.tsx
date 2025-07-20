@@ -15,6 +15,7 @@ import {
   AlertCircle,
   ArrowLeft,
   Download,
+  ExternalLink,
   Eye,
   EyeOff,
   FileText,
@@ -24,6 +25,7 @@ import {
 import { useSearchParams } from "next/navigation";
 import * as React from "react";
 // EDIT: Import the new cover letter templates alongside the resume templates.
+import { getApiUrl } from "@/lib/utils";
 import { CreativeCoverLetterTemplate } from "./templates/CreativeCoverLetterTemplate";
 import { CreativeResumeTemplate } from "./templates/CreativeResumeTemplate";
 import { ModernCoverLetterTemplate } from "./templates/ModernCoverLetterTemplate";
@@ -86,7 +88,7 @@ const CoverLetterTemplate: React.FC<{
   data: PreviewData;
   hasMounted: boolean;
 }> = ({ data, hasMounted }) => {
-  const { personal_info, company_name, job_title, content } = data;
+  const { personalInfo, company_name, job_title, content } = data;
 
   return (
     <div className="p-8 md:p-12 bg-transparent text-gray-800 font-serif text-base leading-relaxed dark:text-gray-200">
@@ -94,17 +96,17 @@ const CoverLetterTemplate: React.FC<{
         {/* Sender's Info (Top Right) */}
         <div className="text-right mb-12">
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
-            {personal_info?.name}
+            {personalInfo?.name}
           </h1>
           <p className="text-gray-600 dark:text-gray-400">
-            {personal_info?.location}
+            {personalInfo?.location}
           </p>
           <p className="text-gray-600 dark:text-gray-400">
-            {personal_info?.email} | {personal_info?.phone}
+            {personalInfo?.email} | {personalInfo?.phone}
           </p>
-          {personal_info?.linkedin && (
+          {personalInfo?.linkedin && (
             <a
-              href={personal_info.linkedin}
+              href={personalInfo.linkedin}
               target="_blank"
               rel="noopener noreferrer"
               className="text-blue-600 hover:underline dark:text-blue-400"
@@ -291,7 +293,7 @@ export default function PreviewPage() {
     }
 
     try {
-      const response = await fetch("http://localhost:8000/api/resume", {
+      const response = await fetch(getApiUrl("/api/resume"), {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -357,7 +359,7 @@ export default function PreviewPage() {
       content: content,
       company_name: company_name,
       job_title: job_title,
-      personal_info: personal_info
+      personalInfo: personal_info
         ? {
             name: personal_info.fullName || "",
             email: personal_info.email || "",
@@ -385,7 +387,7 @@ export default function PreviewPage() {
         return;
       }
       const response = await fetch(
-        "http://localhost:8000/api/documents/cover-letters/latest",
+        getApiUrl("/api/documents/cover-letters/latest"),
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (!response.ok) {
@@ -419,7 +421,7 @@ export default function PreviewPage() {
         return;
       }
       const response = await fetch(
-        `http://localhost:8000/api/documents/cover-letters/${contentId}`,
+        getApiUrl(`/api/documents/cover-letters/${contentId}`),
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (!response.ok) {

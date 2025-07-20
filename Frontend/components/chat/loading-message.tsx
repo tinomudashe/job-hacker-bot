@@ -12,7 +12,10 @@ interface LoadingMessageProps {
     | "downloading"
     | "calling tool"
     | "reasoning"
-    | "calling api";
+    | "calling api"
+    | "browser_automation"
+    | "job_search"
+    | "linkedin_api";
   customMessage?: string;
   onCancel?: () => void;
 }

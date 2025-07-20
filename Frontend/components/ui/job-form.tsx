@@ -1,7 +1,6 @@
 "use client";
 
-import * as React from "react";
-import { DynamicForm } from "./dynamic-form";
+import { DynamicForm, FormField } from "./dynamic-form";
 
 interface JobFormProps {
   onSubmit: (data: any) => void;
@@ -9,7 +8,7 @@ interface JobFormProps {
 }
 
 export function JobForm({ onSubmit, defaultValues }: JobFormProps) {
-  const formFields = [
+  const formFields: FormField[] = [
     {
       name: "fullName",
       label: "Full Name",
@@ -116,4 +115,4 @@ export function JobForm({ onSubmit, defaultValues }: JobFormProps) {
       />
     </div>
   );
-} 
+}
