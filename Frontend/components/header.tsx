@@ -2,7 +2,13 @@
 
 import { Button } from "@/components/ui/button";
 import { useSubscription } from "@/lib/hooks/use-subscription";
-import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
+import {
+  SignedIn,
+  SignedOut,
+  SignInButton,
+  useAuth,
+  UserButton,
+} from "@clerk/nextjs";
 import { Menu, MessageSquare, Plus, Settings, X } from "lucide-react";
 import { usePathname } from "next/navigation";
 import * as React from "react";
@@ -29,6 +35,7 @@ export function Header({
   onSelectPage,
   isLoginPage = false,
 }: HeaderProps) {
+  const { getToken } = useAuth();
   const [showPagesDialog, setShowPagesDialog] = React.useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = React.useState(false);
   const [showMobileMenu, setShowMobileMenu] = React.useState(false);

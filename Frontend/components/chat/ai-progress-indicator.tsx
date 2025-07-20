@@ -26,7 +26,10 @@ interface AIProgressIndicatorProps {
     | "downloading"
     | "calling tool"
     | "reasoning"
-    | "calling api";
+    | "calling api"
+    | "browser_automation"
+    | "job_search"
+    | "linkedin_api";
   className?: string;
   onCancel?: () => void;
 }
@@ -174,8 +177,9 @@ const iconComponents = {
   generating: FileText,
   processing: Zap,
   downloading: Download,
-  browser: Globe,
+  browser_automation: Globe,
   job_search: Briefcase,
+  linkedin_api: Briefcase,
   // Fix: Add missing keys to prevent TypeScript error.
   "calling tool": Zap,
   reasoning: Brain,

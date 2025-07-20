@@ -73,7 +73,7 @@ router = APIRouter()
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-GOOGLE_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
 
 # --- Date Parsing Helper ---

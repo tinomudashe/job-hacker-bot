@@ -1,0 +1,59 @@
+# Git
+.git
+.gitignore
+
+# Python virtual environment
+.venv
+venv
+env
+
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE and editor directories
+.vscode/
+.idea/
+
+# Local databases
+*.sqlite3
+*.db
+*.sql
+
+# Local development files
+.env*
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Testing artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+nosetests.xml
+coverage.xml
+
+# Node.js dependencies
+node_modules/
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# Large media or upload directories
+uploads/
+**/uploads/*
+
+# Docker files that shouldn't be in the context
+Dockerfile*
+docker-compose*.yml
+
+# Documentation and other non-essential files
+*.md
+*.txt
+!requirements.txt
+*.pdf
+*backup.py
+*.bak

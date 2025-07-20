@@ -151,12 +151,16 @@ async def get_current_user(
         result = await db.execute(select(User).where(User.external_id == clerk_user.sub))
         user = result.scalar_one_or_none()
         
-        if not user:
-            # Create new user if they don't exist
+        # This block ensures the user profile is always synchronized with Clerk.
+        # It handles both new user creation and updates for existing users.
+        if user is None:
+            # If the user does not exist in the local database, create a new record.
+            # This ensures that a user's profile is populated on their first login.
+            logger.info(f"User with external_id {clerk_user.sub} not found. Creating new user.")
             user = User(
                 external_id=clerk_user.sub,
                 email=clerk_user.email,
-                name=f"{clerk_user.first_name or ''} {clerk_user.last_name or ''}".strip(),
+                name=f"{clerk_user.first_name or ''} {clerk_user.last_name or ''}".strip() or "New User",
                 first_name=clerk_user.first_name,
                 last_name=clerk_user.last_name,
                 picture=clerk_user.picture,
@@ -165,6 +169,39 @@ async def get_current_user(
             db.add(user)
             await db.commit()
             await db.refresh(user)
+        else:
+            # If the user already exists, check for null or empty fields in the local
+            # database and populate them with data from Clerk's token. This ensures
+            # that we enrich the user's profile without overwriting existing data.
+            update_needed = False
+            if not user.email and clerk_user.email:
+                user.email = clerk_user.email
+                update_needed = True
+            
+            # Populate name only if it's empty or the default "New User"
+            new_name = f"{clerk_user.first_name or ''} {clerk_user.last_name or ''}".strip()
+            if not user.name or user.name == "New User":
+                if new_name:
+                    user.name = new_name
+                    update_needed = True
+
+            if not user.first_name and clerk_user.first_name:
+                user.first_name = clerk_user.first_name
+                update_needed = True
+
+            if not user.last_name and clerk_user.last_name:
+                user.last_name = clerk_user.last_name
+                update_needed = True
+
+            if not user.picture and clerk_user.picture:
+                user.picture = clerk_user.picture
+                update_needed = True
+            
+            # If any fields were updated, commit the changes to the database.
+            if update_needed:
+                logger.info(f"User profile for {user.external_id} enriched from Clerk.")
+                await db.commit()
+                await db.refresh(user)
             
         logger.info(f"Successfully authenticated user: {user.external_id}")
         return user

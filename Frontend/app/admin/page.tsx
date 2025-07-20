@@ -193,7 +193,7 @@ export default function AdminDashboardPage() {
   };
 
   const handleClearFilters = () => {
-    const clearedFilters = {
+    const clearedFilters: LogFilters = {
       level: "ALL",
       email: "",
       startDate: "",
@@ -297,7 +297,7 @@ export default function AdminDashboardPage() {
                 />
                 <ChartTooltip
                   cursor={false}
-                  content={<ChartTooltipContent indicator="dot" />}
+                  content={<ChartTooltipContent />}
                 />
                 <Legend />
                 <Line
