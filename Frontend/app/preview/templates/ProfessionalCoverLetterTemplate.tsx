@@ -9,7 +9,7 @@ export const ProfessionalCoverLetterTemplate: React.FC<{
   data: PreviewData;
   hasMounted: boolean;
 }> = ({ data, hasMounted }) => {
-  const { personal_info, company_name, job_title, content } = data;
+  const { personalInfo, company_name, job_title, content } = data;
 
   // EDIT: Check if the content already contains a closing.
   const hasClosing =
@@ -22,25 +22,25 @@ export const ProfessionalCoverLetterTemplate: React.FC<{
         {/* Sender's Info (Top Left) */}
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {personal_info?.name}
+            {personalInfo?.name}
           </h1>
           <p className="text-gray-600 dark:text-gray-400">
-            {personal_info?.location}
+            {personalInfo?.location}
           </p>
           <p className="text-gray-600 dark:text-gray-400">
-            {personal_info?.email}
+            {personalInfo?.email}
           </p>
           <p className="text-gray-600 dark:text-gray-400">
-            {personal_info?.phone}
+            {personalInfo?.phone}
           </p>
-          {personal_info?.linkedin && (
+          {personalInfo?.linkedin && (
             <a
-              href={personal_info.linkedin}
+              href={personalInfo.linkedin}
               target="_blank"
               rel="noopener noreferrer"
               className="text-blue-700 hover:underline dark:text-blue-400"
             >
-              {personal_info.linkedin}
+              {personalInfo.linkedin}
             </a>
           )}
         </div>
@@ -82,7 +82,7 @@ export const ProfessionalCoverLetterTemplate: React.FC<{
           <div className="mt-8">
             <p className="text-gray-700 dark:text-gray-300">Sincerely,</p>
             <p className="mt-4 font-semibold text-gray-900 dark:text-gray-100">
-              {personal_info?.name}
+              {personalInfo?.name}
             </p>
           </div>
         )}

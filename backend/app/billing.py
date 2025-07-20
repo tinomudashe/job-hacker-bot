@@ -10,6 +10,7 @@ from datetime import datetime
 from app.db import get_db
 from app.models_db import User, Subscription
 from app.dependencies import get_current_active_user
+from app.clerk import get_clerk_user # Make sure this is imported
 from app.email_service import (
     send_payment_failed_email, send_subscription_canceled_email
 )
@@ -62,15 +63,23 @@ async def get_subscription_status(
         stripe_sub = stripe.Subscription.retrieve(subscription.stripe_subscription_id)
         
         period_end_timestamp = None
-        if stripe_sub.status == 'trialing':
+        # First, check the subscription's live status from Stripe.
+        # If it's a trial, we must use the trial_end date.
+        if getattr(stripe_sub, 'status', None) == 'trialing':
+            # Safely get the trial_end timestamp.
             period_end_timestamp = getattr(stripe_sub, 'trial_end', None)
         else:
+            # For all other statuses (like 'active'), safely get the renewal date.
+            # This use of getattr() prevents the KeyError crash if the key is missing.
             period_end_timestamp = getattr(stripe_sub, 'current_period_end', None)
 
         period_end = datetime.utcfromtimestamp(period_end_timestamp) if period_end_timestamp else None
 
+        # Standardize the plan name to "Pro" for consistency in the UI.
+        display_plan = "Pro" if subscription.plan and "pro" in subscription.plan.lower() else "Free"
+
         return {
-            "plan": subscription.plan,
+            "plan": display_plan,
             "status": stripe_sub.status,
             "period_end": period_end.isoformat() if period_end else None
         }
@@ -137,10 +146,42 @@ async def create_checkout_session(
 
     customer_id = subscription.stripe_customer_id
     if not customer_id:
+        user_email = db_user.email
+        user_name = db_user.name
+
+        # This block ensures we have an email and name before proceeding.
+        # It serves as a final safeguard to prevent invalid requests to Stripe.
+        if not user_email and db_user.external_id:
+            logger.info(f"User {db_user.id} is missing an email. Attempting to fetch from Clerk.")
+            clerk_user = await get_clerk_user(db_user.external_id)
+            if clerk_user:
+                primary_email_id = clerk_user.get("primary_email_address_id")
+                for email_info in clerk_user.get("email_addresses", []):
+                    if email_info.get("id") == primary_email_id:
+                        user_email = email_info.get("email_address")
+                        db_user.email = user_email
+                        break
+
+                first_name = clerk_user.get("first_name", "")
+                last_name = clerk_user.get("last_name", "")
+                user_name = f"{first_name} {last_name}".strip() or "New User"
+                db_user.name = user_name
+                
+                await db.commit()
+                await db.refresh(db_user)
+                logger.info(f"Successfully updated user {db_user.id} with info from Clerk.")
+
+        # Final, definitive check before calling Stripe.
+        if not user_email:
+            logger.error(f"Failed to create Stripe customer for user {db_user.id}: No email address found after all checks.")
+            raise HTTPException(
+                status_code=400,
+                detail="A valid email address is required to create a subscription. Please update your profile.",
+            )
         try:
             customer = stripe.Customer.create(
-                email=str(db_user.email),
-                name=str(db_user.name),
+                email=user_email,
+                name=user_name,
                 metadata={"user_id": str(db_user.id)}
             )
             customer_id = customer.id

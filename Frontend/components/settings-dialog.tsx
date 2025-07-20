@@ -19,7 +19,6 @@ import { useSubscription } from "@/lib/hooks/use-subscription";
 import { useAuth, useUser } from "@clerk/nextjs";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { format } from "date-fns";
-import { formatInTimeZone } from "date-fns-tz";
 import {
   AlertCircle,
   AlertTriangle,
@@ -478,6 +477,12 @@ export function SettingsDialog({
   const handleExportData = async () => {
     setIsLoading(true);
     try {
+      // Show an initial "request sent" message
+      toast.info("Request for data export sent.", {
+        description:
+          "We will reach out to you to verify your information before making the export available.",
+      });
+
       const token = await getToken();
 
       const response = await fetch("/api/user/export", {
@@ -488,25 +493,19 @@ export function SettingsDialog({
       });
 
       if (!response.ok) {
+        // If the API call fails, show an error message
+        toast.error("Failed to process data export request.");
         throw new Error(`Failed to export data: ${response.statusText}`);
       }
 
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `user-data-export-${
-        new Date().toISOString().split("T")[0]
-      }.zip`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-
-      toast.success("Data export downloaded successfully");
+      // Instead of downloading, we just confirm the request was received
+      // The actual export will be handled offline after verification
+      console.log("Data export request successfully submitted.");
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : "Failed to export data";
+        error instanceof Error
+          ? error.message
+          : "An unexpected error occurred.";
       toast.error(errorMessage);
     } finally {
       setIsLoading(false);
@@ -927,29 +926,13 @@ export function SettingsDialog({
                                     Pro Plan
                                   </h3>
                                   <p className="text-sm text-muted-foreground">
-                                    {subscription.status === "trialing"
-                                      ? `Trial ends on ${
-                                          subscription.period_end
-                                            ? formatInTimeZone(
-                                                new Date(
-                                                  subscription.period_end
-                                                ),
-                                                "UTC",
-                                                "MMMM d, yyyy"
-                                              )
-                                            : ""
-                                        }`
-                                      : `Renews on ${
-                                          subscription.period_end
-                                            ? formatInTimeZone(
-                                                new Date(
-                                                  subscription.period_end
-                                                ),
-                                                "UTC",
-                                                "MMMM d, yyyy"
-                                              )
-                                            : ""
-                                        }`}
+                                    Renews on{" "}
+                                    {subscription.period_end
+                                      ? format(
+                                          new Date(subscription.period_end),
+                                          "MMMM d, yyyy"
+                                        )
+                                      : "N/A"}
                                   </p>
                                 </div>
                                 <Badge
@@ -1179,15 +1162,21 @@ export function SettingsDialog({
                           Privacy Information
                         </h4>
                         <div className="text-xs sm:text-sm text-muted-foreground space-y-1 sm:space-y-2">
-                          <p>• Your data is encrypted in transit and at rest</p>
+                          <p>
+                            • Your data is encrypted in transit and at rest.
+                          </p>
                           <p>
                             • We never share your personal information with
-                            third parties
+                            third parties.
                           </p>
-                          <p>• You can request data deletion at any time</p>
+                          <p>• You can request data deletion at any time.</p>
                           <p>
                             • Chat history is stored securely and only
-                            accessible by you
+                            accessible by you.
+                          </p>
+                          <p>
+                            • By using the app, you agree to our Terms and
+                            Conditions.
                           </p>
                         </div>
                         <div className="flex flex-col sm:flex-row gap-2">
@@ -1195,15 +1184,14 @@ export function SettingsDialog({
                             variant="outline"
                             size="sm"
                             className="h-9 text-xs touch-manipulation"
+                            onClick={() =>
+                              window.open(
+                                "/JobHackerBot_Terms_Conditions.pdf",
+                                "_blank"
+                              )
+                            }
                           >
-                            Privacy Policy
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-9 text-xs touch-manipulation"
-                          >
-                            Terms of Service
+                            Terms and Conditions
                           </Button>
                         </div>
                       </div>

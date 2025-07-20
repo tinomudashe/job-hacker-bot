@@ -735,145 +735,95 @@ export function ChatMessage({
     flashcardData?: Array<{ question: string; answer: string }>;
   } => {
     console.log("🧠 Extracting job details for flashcards", {
-      hasContentDetection: !!(
-        contentDetection.jobTitle || contentDetection.companyName
-      ),
-      contentDetectionJobTitle: contentDetection.jobTitle,
-      contentDetectionCompanyName: contentDetection.companyName,
       messagePreview: plainTextContent.substring(0, 300) + "...",
     });
 
-    if (contentDetection.jobTitle || contentDetection.companyName) {
-      return {
-        jobTitle: contentDetection.jobTitle,
-        companyName: contentDetection.companyName,
-        interviewContent: plainTextContent,
-      };
-    }
-
-    // Extract from the structured context at the end of the message
-    // More robust patterns to handle different formats
-    const jobContextPatterns = [
-      /\*\*Job Context:\*\* (.+?) at (.+?)(?:\n|$)/i,
-      /Job Context:\s*(.+?) at (.+?)(?:\n|$)/i,
-      /role:\s*(.+?)\s*\|\s*company:\s*(.+?)(?:\n|$)/i,
-      /position.*?at\s+(.+?)(?:\n|$)/i,
-    ];
-
-    const interviewTypePatterns = [
-      /\*\*Interview Type:\*\* (.+?)(?:\n|$)/i,
-      /Interview Type:\s*(.+?)(?:\n|$)/i,
-      /Type:\s*(.+?)(?:\n|$)/i,
-    ];
-
-    const preparationContentPatterns = [
-      /\*\*Preparation Content:\*\* ([\s\S]+?)(?:\.\.\.|$)/i,
-      /Preparation Content:\s*([\s\S]+?)(?:\.\.\.|$)/i,
-      /interview preparation guide[\s\S]*?:\s*([\s\S]+?)(?:\.\.\.|$)/i,
-    ];
-
+    // Set descriptive defaults
     let jobTitle = "Interview Position";
-    let companyName = "";
+    let companyName = "the specified company";
     let interviewContent = plainTextContent;
-
-    // Try all job context patterns
-    for (const pattern of jobContextPatterns) {
-      const match = plainTextContent.match(pattern);
-      if (match) {
-        if (match.length >= 3) {
-          jobTitle = match[1]?.trim() || jobTitle;
-          companyName = match[2]?.trim() || companyName;
-        } else if (match.length >= 2) {
-          // Handle cases where company is in match[1]
-          companyName = match[1]?.trim() || companyName;
-        }
-        console.log("✅ Matched job context pattern:", {
-          pattern: pattern.source,
-          jobTitle,
-          companyName,
-        });
-        break;
-      }
-    }
-
-    // Try interview type patterns
-    for (const pattern of interviewTypePatterns) {
-      const match = plainTextContent.match(pattern);
-      if (match) {
-        console.log("✅ Matched interview type pattern:", match[1]);
-        break;
-      }
-    }
-
-    // Try preparation content patterns
-    for (const pattern of preparationContentPatterns) {
-      const match = plainTextContent.match(pattern);
-      if (match) {
-        interviewContent = match[1]?.trim() || interviewContent;
-        console.log(
-          "✅ Matched preparation content pattern:",
-          interviewContent.substring(0, 100) + "..."
-        );
-        break;
-      }
-    }
-
-    // Fallback: try to extract from the main content
-    if (jobTitle === "Interview Position" && companyName === "") {
-      // Look for "role at company" pattern in the main message
-      const roleCompanyMatch = plainTextContent.match(
-        /(?:for|as)\s+(.+?)\s+(?:position|role)\s+at\s+(.+?)(?:\s|\.|\n|$)/i
-      );
-      if (roleCompanyMatch) {
-        jobTitle = roleCompanyMatch[1]?.trim() || jobTitle;
-        companyName = roleCompanyMatch[2]?.trim() || companyName;
-        console.log("✅ Fallback extraction successful:", {
-          jobTitle,
-          companyName,
-        });
-      }
-    }
-
-    // Extract flashcard data from HTML comment
     let flashcardData: Array<{ question: string; answer: string }> = [];
+
+    // 1. New, more reliable method: Parse structured intro and HTML comment
+    // This regex is flexible and doesn't rely on the start of the string.
+    const introMatch = plainTextContent.match(
+      /interview preparation guide for the \*\*(.+?)\*\* position at \*\*(.+?)\*\*/i
+    );
     const flashcardMatch = plainTextContent.match(
       /<!--FLASHCARD_DATA:([\s\S]+?)-->/
     );
-    if (flashcardMatch) {
-      try {
-        const flashcardJson = flashcardMatch[1];
-        const parsedData = JSON.parse(flashcardJson);
 
-        // Validate the parsed data is an array of Q&A objects
-        if (Array.isArray(parsedData) && parsedData.length > 0) {
-          const isValidFormat = parsedData.every(
-            (item) =>
-              typeof item === "object" &&
-              typeof item.question === "string" &&
-              typeof item.answer === "string" &&
-              item.question.trim().length > 0
-          );
+    if (introMatch && introMatch[1] && introMatch[2]) {
+      jobTitle = introMatch[1].trim();
+      companyName = introMatch[2].trim();
+      console.log("✅ Extracted job details from new structured intro:", {
+        jobTitle,
+        companyName,
+      });
 
-          if (isValidFormat) {
+      if (flashcardMatch && flashcardMatch[1]) {
+        try {
+          const flashcardJson = flashcardMatch[1];
+          // Sanitize before parsing to handle potential newlines from the model
+          const sanitizedJson = flashcardJson.replace(/(\r\n|\n|\r)/gm, "");
+          const parsedData = JSON.parse(sanitizedJson);
+          if (Array.isArray(parsedData) && parsedData.length > 0) {
             flashcardData = parsedData;
             console.log(
-              "✅ Extracted flashcard data:",
+              "✅ Extracted pre-generated flashcard data:",
               flashcardData.length,
               "questions"
             );
-          } else {
-            console.warn("Invalid flashcard data format");
           }
+        } catch (error) {
+          console.warn(
+            "⚠️ Failed to parse pre-generated flashcard data:",
+            error
+          );
         }
-      } catch (error) {
-        console.warn("Failed to parse flashcard data:", error);
+      }
+
+      // The rest of the content is the guide itself
+      const guideStart = plainTextContent.indexOf("###");
+      if (guideStart !== -1) {
+        interviewContent = plainTextContent.substring(guideStart);
+      }
+    } else {
+      // 2. Fallback to old, less reliable regex methods for older messages
+      console.log(
+        "⚠️ Could not find new structured intro, trying fallback methods."
+      );
+
+      const jobContextPatterns = [
+        // Pattern with markdown: for the **Job Title** role at **Company**
+        /(?:for|as)(?: the)?\s+\*\*(.+?)\*\*\s+(?:position|role)\s+at\s+\*\*(.+?)\*\*/i,
+        // Pattern without markdown
+        /(?:for|as)(?: the)?\s+(.+?)\s+(?:position|role)\s+at\s+(.+?)(?:\s|\.|\n|$)/i,
+        // Other patterns from the original implementation
+        /\*\*Job Context:\*\* (.+?) at (.+?)(?:\n|$)/i,
+        /Job Context:\s*(.+?) at (.+?)(?:\n|$)/i,
+        /role:\s*(.+?)\s*\|\s*company:\s*(.+?)(?:\n|$)/i,
+      ];
+
+      for (const pattern of jobContextPatterns) {
+        const match = plainTextContent.match(pattern);
+        if (match && match[1] && match[2]) {
+          jobTitle = match[1].replace(/\*\*/g, "").trim(); // Remove markdown stars
+          companyName = match[2].replace(/\*\*/g, "").trim();
+          console.log("✅ Matched job context pattern (fallback):", {
+            pattern: pattern.source,
+            jobTitle,
+            companyName,
+          });
+          break; // Stop after first match
+        }
       }
     }
 
     const result = {
       jobTitle,
       companyName,
-      interviewContent: interviewContent.substring(0, 1000), // Limit content size
+      interviewContent: interviewContent, // Pass the full content for context
       flashcardData: flashcardData.length > 0 ? flashcardData : undefined,
     };
 
@@ -1763,11 +1713,9 @@ export function ChatMessage({
                     {/* Message Text (if exists) */}
                     {(() => {
                       const msg = (messageContent as any).message;
-                      const hasAdditionalMessage = msg.includes("**Message:**");
+                      const hasAdditionalMessage = msg.includes("Message:");
                       if (hasAdditionalMessage) {
-                        const messageText = msg
-                          .split("**Message:**")[1]
-                          ?.trim();
+                        const messageText = msg.split("Message:")[1]?.trim();
                         if (messageText) {
                           return (
                             <div

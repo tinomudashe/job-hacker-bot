@@ -10,6 +10,9 @@ interface LoadingMessageProps {
     | "generating"
     | "processing"
     | "downloading"
+    | "calling tool"
+    | "reasoning"
+    | "calling api"
     | "browser_automation"
     | "job_search"
     | "linkedin_api";

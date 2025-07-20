@@ -39,6 +39,8 @@ class UserUpdate(BaseModel):
     skills: Optional[str] = None
 
 
+class MarketingSubscriptionUpdate(BaseModel):
+    subscribed: bool
 
 class DocumentResponse(BaseModel):
     id: str
@@ -139,6 +141,28 @@ async def update_me(
             await db.rollback()
         raise HTTPException(status_code=500, detail="Failed to update user profile")
 
+@router.put("/me/marketing-subscription", response_model=UserSchema)
+async def update_marketing_subscription(
+    subscription_update: MarketingSubscriptionUpdate,
+    db: AsyncSession = Depends(get_db),
+    db_user: User = Depends(get_current_active_user)
+):
+    """Update user's marketing email subscription status."""
+    logger.info(f"Updating marketing subscription for user: {db_user.id}")
+    
+    db_user.subscribed_to_marketing = subscription_update.subscribed
+    
+    try:
+        await db.commit()
+        await db.refresh(db_user)
+        return db_user
+    except Exception as e:
+        logger.error(f"Error updating marketing subscription: {e}")
+        if db.is_active:
+            await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to update subscription")
+
+
 @router.post("/me/preferences", response_model=UserSchema)
 async def update_user_preferences(
     new_settings: SettingsUpdate,
@@ -225,6 +249,17 @@ async def delete_me(
         if db.is_active:
             await db.rollback()
         raise HTTPException(status_code=500, detail="Failed to delete user account")
+
+@router.post("/user/export")
+async def request_user_data_export(
+    db_user: User = Depends(get_current_active_user),
+):
+    """Endpoint to handle user data export requests."""
+    logger.info(f"Data export requested for user: {db_user.id}")
+    # In a real application, this would trigger a background task
+    # to compile the user's data and send it to them via email.
+    # For now, we just acknowledge the request.
+    return {"message": "Data export request received. We will contact you shortly to verify your information."}
 
 class UserProfileOut(UserSchema):
     document_summaries: List[str] = []

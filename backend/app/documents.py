@@ -354,7 +354,8 @@ async def upload_cv_with_extraction(
         # Now, process CV data and update profile in a separate step
         # This separation helps isolate transaction scopes and debug greenlet issues
         try:
-            cv_data = await cv_processor.aprocess_cv(text)
+            # FIX: Call the correct method 'extract_cv_information' and pass the file_path.
+            cv_data = await cv_processor.extract_cv_information(file_path)
             
             # Auto-update profile if enabled
             profile_updated = False
@@ -628,8 +629,26 @@ async def reprocess_cv_extraction(
         raise HTTPException(status_code=400, detail="Document has no content to process")
 
     try:
-        cv_data = await cv_processor.aprocess_cv(doc.content)
+        # Reconstruct the file path. This assumes the file exists at the path stored in the DB.
+        # A more robust solution would check if the file exists.
+        file_path = Path(doc.path) if doc.path else None
+        if not file_path or not file_path.exists():
+            # If path is not stored or file deleted, create a temporary file to process
+            user_dir = UPLOAD_DIR / db_user.id
+            user_dir.mkdir(exist_ok=True)
+            # Use doc.id to avoid filename collisions
+            temp_file_path = user_dir / f"temp_{doc.id}.tmp"
+            with open(temp_file_path, "w", encoding="utf-8") as f:
+                f.write(doc.content)
+            file_path = temp_file_path
         
+        # FIX: Call the correct method 'extract_cv_information'.
+        cv_data = await cv_processor.extract_cv_information(file_path)
+        
+        # Clean up temporary file if it was created
+        if 'temp_file_path' in locals() and temp_file_path.exists():
+            os.remove(temp_file_path)
+
         profile_updated = False
         updated_fields = []
         if auto_update_profile:

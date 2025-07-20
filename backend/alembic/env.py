@@ -7,12 +7,42 @@ from alembic import context
 
 import sys
 import os
+from dotenv import load_dotenv
+from urllib.parse import quote_plus
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from app.models_db import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+# Load environment variables from .env
+load_dotenv()
+
+# Set the database URL from environment variables
+# This ensures Alembic uses the same database as the application
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT")
+DB_NAME = os.getenv("DB_NAME")
+
+# URL-encode the password to handle special characters, and construct the URL
+if all([DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME]):
+    encoded_password = quote_plus(DB_PASSWORD)
+    database_url = f"postgresql://{DB_USER}:{encoded_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    
+    # Escape the '%' character for the config parser by replacing it with '%%'
+    escaped_database_url = database_url.replace("%", "%%")
+    config.set_main_option("sqlalchemy.url", escaped_database_url)
+else:
+    # Raise a clear error if the environment variables are not fully set.
+    raise ValueError(
+        "Database connection details are not fully configured. "
+        "Please ensure DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, and DB_NAME are set in your .env file."
+    )
+
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

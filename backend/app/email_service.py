@@ -33,6 +33,7 @@ if EMAIL_SERVICE_AVAILABLE:
         USE_CREDENTIALS=True,
         VALIDATE_CERTS=True
     )
+    # Instantiate the mail-sending client
     fm = FastMail(conf)
 else:
     conf = None
@@ -40,25 +41,35 @@ else:
 
 # --- Generic Email Sending Function ---
 
-async def send_email(recipients: List[EmailStr], subject: str, body: str):
+async def send_email(fm_instance: FastMail, to: List[EmailStr], subject: str, html_content: str):
     """
-    Sends an email to a list of recipients.
+    Sends an email to one or more recipients using a provided FastMail instance.
+
+    Args:
+        fm_instance: The configured FastMail instance.
+        to: A list of recipient email addresses.
+        subject: The subject of the email.
+        html_content: The HTML body of the email.
     """
-    if not EMAIL_SERVICE_AVAILABLE:
-        logger.warning(f"Email service unavailable. Would have sent email to {recipients} with subject: '{subject}'")
+    if not fm_instance or not fm_instance.config.MAIL_USERNAME:
+        logger.error("FastMail instance is not configured. Cannot send email.")
         return
-    
+
     message = MessageSchema(
         subject=subject,
-        recipients=recipients,
-        body=body,
-        subtype=MessageType.html
+        recipients=to,
+        body=html_content,
+        subtype="html"
     )
+    
     try:
-        await fm.send_message(message)
-        logger.info(f"Email sent to {recipients} with subject: '{subject}'")
+        logger.info(f"Attempting to send email to: {to} with subject: '{subject}'")
+        await fm_instance.send_message(message)
+        logger.info(f"Email sent successfully to: {to}")
     except Exception as e:
-        logger.error(f"Failed to send email to {recipients}. Error: {e}")
+        logger.error(f"FAILED to send email to {to}. Error: {e}", exc_info=True)
+        # In a production scenario, you might want to add more robust error handling
+        # or a retry mechanism here.
 
 # --- Specific Email Template Functions ---
 
@@ -83,7 +94,7 @@ async def send_payment_failed_email(recipient: EmailStr):
         </body>
     </html>
     """
-    await send_email([recipient], subject, body)
+    await send_email(fm, [recipient], subject, body)
 
 
 async def send_subscription_canceled_email(recipient: EmailStr):
@@ -107,4 +118,4 @@ async def send_subscription_canceled_email(recipient: EmailStr):
         </body>
     </html>
     """
-    await send_email([recipient], subject, body) 
+    await send_email(fm, [recipient], subject, body) 

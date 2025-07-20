@@ -72,7 +72,7 @@ class AsyncSafeEnhancedMemoryManager:
         
         # Memory configuration
         self.max_context_messages = 20
-        self.summary_trigger_length = 30
+        self.summary_trigger_length = 5
         self.max_summary_length = 500
         
         # Cache for performance

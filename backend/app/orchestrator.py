@@ -73,7 +73,7 @@ router = APIRouter()
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-GOOGLE_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
 
 # --- Date Parsing Helper ---
@@ -2502,7 +2502,9 @@ You can download your CV/Resume in multiple professional styles. The download di
             # INTELLIGENT FIX: Check for file attachment context in the user's message
             attachment_patterns = [
                 r'File Attached:\s*(.+?)(?:\n|$)',
-                r'CV/Resume uploaded successfully![\s\S]*?File:\s*(.+?)(?:\n|$)'
+                r'CV/Resume uploaded successfully![\s\S]*?File:\s*(.+?)(?:\n|$)',
+                # This new pattern looks for filenames mentioned directly in the query
+                r'([\w.-]+\.(?:pdf|docx|doc|txt))\b'
             ]
             
             extracted_filename = None
@@ -2541,7 +2543,7 @@ You can download your CV/Resume in multiple professional styles. The download di
                 summarization_prompt = ChatPromptTemplate.from_template(
                     "You are a helpful assistant. Summarize the key points of the following document content in a few clear, concise paragraphs. Address the user directly and be informative.\n\n---\n\n{document_content}"
                 )
-                llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0.2)
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.2)
                 chain = summarization_prompt | llm | StrOutputParser()
                 
                 # Limit content size for summarization to avoid token limits
@@ -2821,7 +2823,7 @@ ENHANCED CONTENT:"""
                         The JSON object should have keys: 'personalInfo', 'experience', 'education', 'skills'."""
                     )
                     
-                    extraction_llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0.1)
+                    extraction_llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.1)
                     extraction_chain = extraction_prompt | extraction_llm | JsonOutputParser()
                     
                     try:
@@ -2897,60 +2899,61 @@ ENHANCED CONTENT:"""
     ) -> str:
         """⭐ PRIMARY CV REFINEMENT TOOL ⭐"""
         async with resume_modification_lock:
-            try:
-                log.info(f"CV refinement requested for role: {target_role}")
-                
-                # 1. Get the user's current resume data.
-                db_resume, base_resume_data = await get_or_create_resume()
-                
-                # 2. Create the generation chain to output structured JSON.
-                parser = PydanticOutputParser(pydantic_object=ResumeData)
-                
-                prompt = ChatPromptTemplate.from_template(
-                    """You are an expert career coach and resume writer. Your task is to refine a user's resume and return it as a structured JSON object.
+            async with async_session_maker() as session:
+                try:
+                    log.info(f"CV refinement requested for role: {target_role}")
                     
-                    USER'S CURRENT RESUME DATA:
-                    {context}
+                    # 1. Get the user's current resume data.
+                    db_resume, base_resume_data = await get_or_create_resume(session)
+                    
+                    # 2. Create the generation chain to output structured JSON.
+                    parser = PydanticOutputParser(pydantic_object=ResumeData)
+                    
+                    prompt = ChatPromptTemplate.from_template(
+                        """You are an expert career coach and resume writer. Your task is to refine a user's resume and return it as a structured JSON object.
+                        
+                        USER'S CURRENT RESUME DATA:
+                        {context}
 
-                    TARGET ROLE: {target_role}
-                    COMPANY: {company_name}
-                    JOB DESCRIPTION: {job_description}
+                        TARGET ROLE: {target_role}
+                        COMPANY: {company_name}
+                        JOB DESCRIPTION: {job_description}
 
-                    **CRITICAL, NON-NEGOTIABLE DIRECTIVE:**
-                    - **You MUST ONLY use the information provided in the 'USER'S CURRENT RESUME DATA' section.**
-                    - **You are STRICTLY FORBIDDEN from inventing, creating, or hallucinating any new information.**
-                    - Your ONLY task is to REFORMAT, REPHRASE, and TAILOR the *existing* information to better match the target role.
-                    - If a section is empty in the user's data, it should remain empty.
-                    - Return ONLY a valid JSON object matching the provided schema. Do not add any extra text or formatting.
+                        **CRITICAL, NON-NEGOTIABLE DIRECTIVE:**
+                        - **You MUST ONLY use the information provided in the 'USER'S CURRENT RESUME DATA' section.**
+                        - **You are STRICTLY FORBIDDEN from inventing, creating, or hallucinating any new information.**
+                        - Your ONLY task is to REFORMAT, REPHRASE, and TAILOR the *existing* information to better match the target role.
+                        - If a section is empty in the user's data, it should remain empty.
+                        - Return ONLY a valid JSON object matching the provided schema. Do not add any extra text or formatting.
 
-                    {format_instructions}
-                    """
-                )
-                
-                llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.3)
-                chain = prompt | llm | parser
-                
-                # 3. Invoke the chain to generate the refined structured resume.
-                refined_resume_data = await chain.ainvoke({
-                    "context": base_resume_data.json(),
-                    "target_role": target_role,
-                    "company_name": company_name or "target companies",
-                    "job_description": job_description or f"General {target_role} position requirements",
-                    "format_instructions": parser.get_format_instructions(),
-                })
-                
-                # 4. Update the user's single master resume record with the new structured data.
-                db_resume.data = refined_resume_data.dict()
-                attributes.flag_modified(db_resume, "data")
-                await session.commit()
-                
-                # 5. Return a simple confirmation message with the trigger.
-                return (f"I've successfully refined your CV for the **{target_role}** role. "
-                        "A download button will appear on this message. [DOWNLOADABLE_RESUME]")
-                
-            except Exception as e:
-                log.error(f"Error in CV refinement: {e}", exc_info=True)
-                return f"❌ Sorry, an error occurred while refining your CV. Please try again."
+                        {format_instructions}
+                        """
+                    )
+                    
+                    llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.3)
+                    chain = prompt | llm | parser
+                    
+                    # 3. Invoke the chain to generate the refined structured resume.
+                    refined_resume_data = await chain.ainvoke({
+                        "context": base_resume_data.json(),
+                        "target_role": target_role,
+                        "company_name": company_name or "target companies",
+                        "job_description": job_description or f"General {target_role} position requirements",
+                        "format_instructions": parser.get_format_instructions(),
+                    })
+                    
+                    # 4. Update the user's single master resume record with the new structured data.
+                    db_resume.data = refined_resume_data.dict()
+                    attributes.flag_modified(db_resume, "data")
+                    await session.commit()
+                    
+                    # 5. Return a simple confirmation message with the trigger.
+                    return (f"I've successfully refined your CV for the **{target_role}** role. "
+                            "A download button will appear on this message. [DOWNLOADABLE_RESUME]")
+                    
+                except Exception as e:
+                    log.error(f"Error in CV refinement: {e}", exc_info=True)
+                    return f"❌ Sorry, an error occurred while refining your CV. Please try again."
 
     
     @tool
@@ -3382,17 +3385,38 @@ Provide specific, technical advice that ensures maximum ATS compatibility."""
             result = await db.execute(select(Resume).where(Resume.user_id == user.id))
             db_resume = result.scalars().first()
             
-            user_context = f"User: {user.first_name} {user.last_name}"
+            user_context_parts = [f"User: {user.first_name} {user.last_name}"]
             if db_resume:
-                # Import and use the fix function from resume.py
                 from app.resume import fix_resume_data_structure
-                # Fix missing ID fields in existing data before validation
                 fixed_data = fix_resume_data_structure(db_resume.data)
                 resume_data = ResumeData(**fixed_data)
-                user_context += f"\nBackground: {resume_data.personalInfo.summary or 'No summary available'}"
-                user_context += f"\nKey Skills: {', '.join(resume_data.skills[:5]) if resume_data.skills else 'No skills listed'}"
+                
+                # Build a comprehensive user context
+                if resume_data.personalInfo and resume_data.personalInfo.summary:
+                    user_context_parts.append(f"\n## Professional Summary\n{resume_data.personalInfo.summary}")
+
                 if resume_data.experience:
-                    user_context += f"\nRecent Role: {resume_data.experience[0].jobTitle} at {resume_data.experience[0].company}"
+                    user_context_parts.append("\n## Work Experience")
+                    for exp in resume_data.experience:
+                        exp_str = f"- **{exp.jobTitle}** at **{exp.company}** ({exp.dates})\n  {exp.description}"
+                        user_context_parts.append(exp_str)
+
+                if resume_data.education:
+                    user_context_parts.append("\n## Education")
+                    for edu in resume_data.education:
+                        edu_str = f"- **{edu.degree}** from **{edu.institution}** ({edu.dates})"
+                        user_context_parts.append(edu_str)
+
+                if resume_data.skills:
+                    user_context_parts.append(f"\n## Skills\n{', '.join(resume_data.skills)}")
+
+                if resume_data.projects:
+                    user_context_parts.append("\n## Projects")
+                    for proj in resume_data.projects:
+                        proj_str = f"- **{proj.name}**: {proj.description}"
+                        user_context_parts.append(proj_str)
+            
+            user_context = "\n".join(user_context_parts)
             
             from langchain_core.prompts import ChatPromptTemplate
             from langchain_core.output_parsers import StrOutputParser
@@ -3553,78 +3577,33 @@ Include this mix:
 4. Make questions sound like a real interviewer who studied their resume
 5. Include follow-up style questions that dig deeper into their experience
 
-Make all questions realistic for this specific role and company. Keep sample answers concise but helpful.
-
-Return ONLY valid JSON array - no additional text or formatting."""
+"""
             )
             
             qa_chain = qa_prompt | llm | StrOutputParser()
             
-            qa_json = await qa_chain.ainvoke({
+            qa_json_str = await qa_chain.ainvoke({
                 "user_context": user_context,
                 "job_title": final_job_title,
                 "company_name": final_company_name or "the target company",
                 "interview_type": interview_type,
                 "job_description": job_description or "No specific job description provided"
             })
+
+            # Format the final response
+            final_response = (
+                f"Of course! Here is your interview preparation guide for the "
+                f"**{final_job_title}** position at **{final_company_name}**.\n\n"
+                f"[INTERVIEW_FLASHCARDS_AVAILABLE]\n"
+                f"<!--FLASHCARD_DATA:{qa_json_str}-->\n\n"
+                f"{guide}"
+            )
             
-            # Parse the Q&A JSON
-            try:
-                # Clean the JSON response - remove markdown code blocks if present
-                cleaned_json = qa_json.strip()
-                if cleaned_json.startswith('```json'):
-                    cleaned_json = cleaned_json[7:]  # Remove ```json
-                if cleaned_json.startswith('```'):
-                    cleaned_json = cleaned_json[3:]   # Remove ```
-                if cleaned_json.endswith('```'):
-                    cleaned_json = cleaned_json[:-3]  # Remove trailing ```
-                
-                qa_pairs = json.loads(cleaned_json.strip())
-            except json.JSONDecodeError:
-                # Fallback if JSON parsing fails
-                qa_pairs = []
-                log.warning(f"Failed to parse Q&A JSON: {qa_json[:200]}...")
-            
-            return f"""## 🎯 **Interview Preparation Guide**
+            return final_response
 
-**Role:** {final_job_title} | **Company:** {final_company_name or 'Target Company'} | **Type:** {interview_type.title()}
-{f"**🔗 Source:** {job_url}" if job_url else ""}
-
-{guide}
-
----
-
-**📅 Preparation Timeline:**
-- **1 Week Before**: Complete company research and prepare STAR stories
-- **3 Days Before**: Practice answers and finalize questions to ask
-- **1 Day Before**: Review notes, prepare materials, test technology
-- **Day Of**: Final review, arrive early, stay confident
-
-**🎯 Success Metrics:**
-- ✅ Can articulate your value proposition clearly
-- ✅ Have 3-5 compelling STAR stories ready
-- ✅ Know key company facts and recent developments  
-- ✅ Have thoughtful questions prepared
-- ✅ Feel confident about your qualifications
-
-**🔗 Next Steps:**
-- `enhance my resume section` - Align CV with interview talking points
-- `generate cover letter` - Practice articulating your interest
-- `get salary negotiation tips` - Prepare for compensation discussions
-
-[INTERVIEW_FLASHCARDS_AVAILABLE]
-📝 **Practice with AI-powered flashcards** - Click the brain icon to practice interview questions with voice/text responses and get detailed feedback on tone, correctness, and confidence.
-
-<!--FLASHCARD_DATA:{json.dumps(qa_pairs)}-->
-
----
-**Job Context:** {final_job_title} at {final_company_name or 'Target Company'}
-**Interview Type:** {interview_type}
-**Preparation Content:** {guide[:500]}..."""
-            
         except Exception as e:
-            log.error(f"Error creating interview preparation guide: {e}", exc_info=True)
-            return f"❌ Sorry, I encountered an error while creating your interview guide: {str(e)}. Please try again."
+            log.error(f"Error generating interview guide: {e}", exc_info=True)
+            return "❌ I'm sorry, but I encountered an error while trying to generate the interview preparation guide. Please try again."
 
     @tool
     async def get_salary_negotiation_advice(

@@ -2,11 +2,19 @@
 
 import { Button } from "@/components/ui/button";
 import { useSubscription } from "@/lib/hooks/use-subscription";
-import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
+import {
+  SignedIn,
+  SignedOut,
+  SignInButton,
+  useAuth,
+  UserButton,
+} from "@clerk/nextjs";
 import { Menu, MessageSquare, Plus, Settings, X } from "lucide-react";
+import { usePathname } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
 import { ConversationDialog } from "./conversation-dialog";
+import { PricingDialog } from "./pricing-dialog";
 import { SettingsDialog } from "./settings-dialog";
 import { LogoWithText } from "./ui/logo";
 import { SubscriptionBadge } from "./ui/subscription-badge";
@@ -27,6 +35,7 @@ export function Header({
   onSelectPage,
   isLoginPage = false,
 }: HeaderProps) {
+  const { getToken } = useAuth();
   const [showPagesDialog, setShowPagesDialog] = React.useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = React.useState(false);
   const [showMobileMenu, setShowMobileMenu] = React.useState(false);
@@ -37,6 +46,8 @@ export function Header({
   const [confirmationAction, setConfirmationAction] = React.useState<
     () => void
   >(() => {});
+  const pathname = usePathname();
+  const [showPricingDialog, setShowPricingDialog] = React.useState(false);
 
   React.useEffect(() => {
     setIsMounted(true);
@@ -131,24 +142,35 @@ export function Header({
                   <div className="h-6 w-px bg-border/50 mx-1" />
                 </>
               )}
-              <div className="flex-shrink-0">
+              {/* This div is the key to fixing the layout */}
+              <div className="flex items-center gap-1.5 lg:gap-2">
                 <ThemeToggle />
+                <SignedIn>
+                  <div className="ml-2">
+                    <UserButton />
+                  </div>
+                </SignedIn>
+                <SignedOut>
+                  {pathname === "/" && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-3 lg:h-9 lg:px-4 rounded-lg lg:rounded-xl hover:bg-white/10"
+                      onClick={() => setShowPricingDialog(true)}
+                    >
+                      Pricing
+                    </Button>
+                  )}
+                  <SignInButton mode="modal">
+                    <Button
+                      size="sm"
+                      className="h-8 px-3 lg:h-9 lg:px-4 rounded-lg lg:rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105"
+                    >
+                      Sign In
+                    </Button>
+                  </SignInButton>
+                </SignedOut>
               </div>
-              <SignedIn>
-                <div className="ml-2">
-                  <UserButton />
-                </div>
-              </SignedIn>
-              <SignedOut>
-                <SignInButton mode="modal">
-                  <Button
-                    size="sm"
-                    className="h-8 px-3 lg:h-9 lg:px-4 rounded-lg lg:rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105 ml-2"
-                  >
-                    Sign In
-                  </Button>
-                </SignInButton>
-              </SignedOut>
             </div>
 
             {/* Mobile Actions */}
@@ -160,14 +182,26 @@ export function Header({
                 <UserButton />
               </SignedIn>
               <SignedOut>
-                <SignInButton mode="modal">
-                  <Button
-                    size="sm"
-                    className="h-8 px-3 sm:h-9 sm:px-4 rounded-lg sm:rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105"
-                  >
-                    Sign In
-                  </Button>
-                </SignInButton>
+                <div className="flex items-center gap-1.5">
+                  {pathname === "/" && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-3 sm:h-9 sm:px-4 rounded-lg sm:rounded-xl hover:bg-white/10"
+                      onClick={() => setShowPricingDialog(true)}
+                    >
+                      Pricing
+                    </Button>
+                  )}
+                  <SignInButton mode="modal">
+                    <Button
+                      size="sm"
+                      className="h-8 px-3 sm:h-9 sm:px-4 rounded-lg sm:rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105"
+                    >
+                      Sign In
+                    </Button>
+                  </SignInButton>
+                </div>
               </SignedOut>
               {!isLoginPage && (
                 <Button
@@ -250,7 +284,10 @@ export function Header({
           onClick={() => setShowMobileMenu(false)}
         />
       )}
-
+      <PricingDialog
+        isOpen={showPricingDialog}
+        onClose={() => setShowPricingDialog(false)}
+      />
       {isMounted && (
         <>
           <ConversationDialog

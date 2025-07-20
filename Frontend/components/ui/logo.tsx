@@ -89,7 +89,7 @@ export function LogoWithText({
         </h1>
         {showSubtext && (
           <p className="text-xs text-muted-foreground/80 -mt-0.5 hidden sm:block font-medium tracking-wide">
-            AI-Powered Assistant
+            Your career co-pilot
           </p>
         )}
       </div>
