@@ -865,28 +865,28 @@ export function PDFGenerationDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[95vw] sm:max-w-6xl max-h-[92vh] sm:max-h-[95vh] w-[95vw] h-[92vh] sm:w-[95vw] sm:h-[95vh] flex flex-col !bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 !border !border-gray-200 dark:!border-white/8 shadow-2xl rounded-2xl sm:rounded-3xl overflow-hidden p-0">
-        {/* Header */}
+      <DialogContent
+        hideCloseButton
+        className="max-w-[95vw] sm:max-w-6xl max-h-[92vh] sm:max-h-[95vh] w-[95vw] h-[92vh] sm:w-[95vw] sm:h-[95vh] flex flex-col !bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 !border !border-gray-200 dark:!border-white/8 shadow-2xl rounded-2xl sm:rounded-3xl overflow-hidden p-0"
+      >
+        {/* --- UI FIX: Header structure corrected for proper responsive button visibility --- */}
         <div className="flex-shrink-0 !bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 !border-b !border-gray-200 dark:!border-white/8 p-3 sm:p-5 relative z-10">
-          {/* Mobile Layout */}
-          <div className="flex sm:hidden items-center justify-between gap-3">
-            {/* Left: Document Type */}
+          {/* Mobile Header */}
+          <div className="sm:hidden flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 flex-1 min-w-0">
               <div className="w-10 h-10 rounded-xl !bg-blue-100 !border !border-blue-200 shadow-lg flex items-center justify-center backdrop-blur-sm flex-shrink-0 dark:!bg-blue-500/20 dark:!border-blue-500/40">
                 <FileText className="h-5 w-5 !text-blue-600 dark:!text-blue-400" />
               </div>
               <div className="min-w-0 flex-1">
                 <DialogTitle className="text-lg font-bold text-gray-900 dark:text-gray-100 leading-tight">
-                  {contentType === "cover_letter" ? "Cover Letter" : "Resume"}{" "}
-                  Generator
+                  {contentType === "cover_letter" ? "Cover Letter" : "Resume"}
                 </DialogTitle>
                 <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5 leading-tight">
-                  Create your professional document
+                  Generator
                 </p>
               </div>
             </div>
-
-            {/* Right: Close Button */}
+            {/* This is the close button for MOBILE ONLY */}
             <Button
               variant="ghost"
               size="icon"
@@ -894,12 +894,12 @@ export function PDFGenerationDialog({
               className="h-9 w-9 rounded-lg transition-all duration-300 hover:scale-105 !bg-gray-100 !border !border-gray-200 hover:!bg-gray-200 dark:!bg-background/60 dark:!border-white/8 dark:backdrop-blur-xl dark:backdrop-saturate-150 dark:hover:!bg-background/80 flex-shrink-0"
             >
               <X className="h-4 w-4" />
+              <span className="sr-only">Close</span>
             </Button>
           </div>
 
           {/* Mobile Actions Row */}
           <div className="flex sm:hidden items-center justify-center gap-2 mt-3 pt-3 !border-t !border-gray-200 dark:!border-white/8">
-            {/* EDIT: Add Save button that works for both content types */}
             <Button
               onClick={
                 contentType === "resume"
@@ -909,7 +909,8 @@ export function PDFGenerationDialog({
               disabled={isSaving || !isContentValid}
               size="sm"
               variant="outline"
-              className="flex items-center gap-2 text-sm px-4 h-9 rounded-lg disabled:opacity-50 font-semibold transition-all duration-300 flex-1"
+              // --- UI FIX: Explicitly prevent this button from growing. ---
+              className="flex-grow-0 flex items-center gap-2 text-sm px-4 h-9 rounded-lg disabled:opacity-50 font-semibold transition-all duration-300"
             >
               {isSaving ? (
                 <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
@@ -922,25 +923,16 @@ export function PDFGenerationDialog({
               onClick={handlePreview}
               disabled={isSaving || !isContentValid}
               size="sm"
-              className="flex items-center gap-2 !bg-primary hover:!bg-primary/90 text-primary-foreground text-sm px-4 h-9 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 hover:scale-105 disabled:hover:scale-100 flex-1"
+              // --- UI FIX: This button will now correctly grow to fill the remaining space. ---
+              className="flex-1 flex items-center gap-2 !bg-primary hover:!bg-primary/90 text-primary-foreground text-sm px-4 h-9 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 hover:scale-105 disabled:hover:scale-100"
             >
               <ExternalLink className="h-4 w-4" />
-              <span>Preview & Download</span>
+              <span>Preview</span>
             </Button>
           </div>
 
-          {/* Mobile Content Status */}
-          {!isContentValid && (
-            <div className="flex sm:hidden justify-center mt-2">
-              <p className="text-xs text-gray-500 dark:text-gray-400 text-center font-medium">
-                Add content to enable actions
-              </p>
-            </div>
-          )}
-
-          {/* Desktop Layout */}
+          {/* Desktop Header */}
           <div className="hidden sm:flex items-center justify-between gap-4">
-            {/* Left: Document Type */}
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 rounded-2xl !bg-blue-100 !border !border-blue-200 shadow-lg flex items-center justify-center backdrop-blur-sm dark:!bg-blue-500/20 dark:!border-blue-500/40">
                 <FileText className="h-6 w-6 !text-blue-600 dark:!text-blue-400" />
@@ -955,57 +947,48 @@ export function PDFGenerationDialog({
                 </p>
               </div>
             </div>
-
-            {/* Right: Actions */}
-            <div className="flex flex-col items-end gap-2">
-              <div className="flex items-center gap-3">
-                {/* EDIT: Add Save button that works for both content types */}
-                <Button
-                  onClick={
-                    contentType === "resume"
-                      ? handleSaveResume
-                      : handleSaveCoverLetter
-                  }
-                  disabled={isSaving || !isContentValid}
-                  size="sm"
-                  variant="outline"
-                  className="flex items-center gap-2 text-sm px-5 h-10 rounded-xl disabled:opacity-50 font-semibold transition-all duration-300 hover:scale-105"
-                >
-                  {isSaving ? (
-                    <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <Save className="h-4 w-4" />
-                  )}
-                  <span>{isSaving ? "Saving..." : "Save"}</span>
-                </Button>
-                <Button
-                  onClick={handlePreview}
-                  disabled={isSaving || !isContentValid}
-                  size="sm"
-                  className="flex items-center gap-2 !bg-primary hover:!bg-primary/90 text-primary-foreground text-sm px-5 h-10 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 hover:scale-105 disabled:hover:scale-100"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  <span>Preview & Download</span>
-                </Button>
-
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => onOpenChange(false)}
-                  className="h-10 w-10 rounded-xl transition-all duration-300 hover:scale-105 !bg-gray-100 !border !border-gray-200 hover:!bg-gray-200 dark:!bg-background/60 dark:!border-white/8 dark:backdrop-blur-xl dark:backdrop-saturate-150 dark:hover:!bg-background/80 ml-2"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-
-              {!isContentValid && (
-                <p className="text-xs text-gray-500 dark:text-gray-400 text-right font-medium">
-                  Add content to enable actions
-                </p>
-              )}
+            <div className="flex items-center gap-3">
+              <Button
+                onClick={
+                  contentType === "resume"
+                    ? handleSaveResume
+                    : handleSaveCoverLetter
+                }
+                disabled={isSaving || !isContentValid}
+                size="sm"
+                variant="outline"
+                className="flex items-center gap-2 text-sm px-5 h-10 rounded-xl disabled:opacity-50 font-semibold transition-all duration-300 hover:scale-105"
+              >
+                {isSaving ? (
+                  <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                <span>{isSaving ? "Saving..." : "Save"}</span>
+              </Button>
+              <Button
+                onClick={handlePreview}
+                disabled={isSaving || !isContentValid}
+                size="sm"
+                className="flex items-center gap-2 !bg-primary hover:!bg-primary/90 text-primary-foreground text-sm px-5 h-10 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 hover:scale-105 disabled:hover:scale-100"
+              >
+                <ExternalLink className="h-4 w-4" />
+                <span>Preview & Download</span>
+              </Button>
+              {/* This is the close button for DESKTOP ONLY */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onOpenChange(false)}
+                className="h-10 w-10 rounded-xl transition-all duration-300 hover:scale-105 !bg-gray-100 !border !border-gray-200 hover:!bg-gray-200 dark:!bg-background/60 dark:!border-white/8 dark:backdrop-blur-xl dark:backdrop-saturate-150 dark:hover:!bg-background/80 ml-2"
+              >
+                <X className="h-4 w-4" />
+                <span className="sr-only">Close</span>
+              </Button>
             </div>
           </div>
         </div>
+        {/* --- END UI FIX --- */}
 
         {/* Navigation */}
         <div className="flex-shrink-0 !border-b !border-gray-200 dark:!border-white/8 !bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150">

@@ -1,8 +1,8 @@
 "use client";
 
-import { ThemeProvider } from "next-themes";
-import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
+import { ThemeProvider } from "next-themes";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
@@ -24,4 +24,4 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <main>{children}</main>
     </ThemeProvider>
   );
-} 
+}

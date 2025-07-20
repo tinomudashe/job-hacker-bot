@@ -622,7 +622,7 @@ export default function PreviewPage() {
                 <FileText className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
               </div>
               <div className="min-w-0 flex-1">
-                <h1 className="text-sm sm:text-base md:text-xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent truncate">
+                <h1 className="hidden lg:inline text-sm sm:text-base md:text-xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent truncate">
                   {previewData.content_type === "cover_letter"
                     ? "Cover Letter"
                     : "Resume"}{" "}
@@ -634,6 +634,54 @@ export default function PreviewPage() {
                     : "Document Preview"}
                 </p>
               </div>
+            </div>
+
+            <div className="lg:hidden relative style-selector-container">
+              <Button
+                onClick={() => setShowStyleSelector(!showStyleSelector)}
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 lg:h-10 lg:w-10 rounded-xl hover:bg-white/10 transition-all duration-200 hover:scale-105"
+                title="Change Style"
+              >
+                <Palette className="h-4 w-4 lg:h-5 lg:w-5" />
+              </Button>
+              {showStyleSelector && (
+                <div className="absolute right-0 left-1/2  top-full mt-4 w-50 bg-background/95 backdrop-blur-xl border border-border/50 rounded-2xl shadow-2xl z-20 p-3">
+                  <div className="space-y-2">
+                    <h3 className="text-sm font-semibold text-foreground mb-3">
+                      Choose Style
+                    </h3>
+                    {PDF_STYLES.map((style) => (
+                      <button
+                        key={style.key}
+                        onClick={() => {
+                          setCurrentStyle(style.key);
+                          setShowStyleSelector(false);
+                        }}
+                        className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all ${
+                          currentStyle === style.key
+                            ? "border-primary bg-primary/5"
+                            : "border-border hover:border-primary/50 hover:bg-accent/50"
+                        }`}
+                      >
+                        <div className="w-4 h-4 rounded-full flex-shrink-0 bg-gradient-to-br from-blue-500 to-purple-600" />
+                        <div className="text-left">
+                          <div className="text-sm font-medium text-foreground">
+                            {style.name}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {style.description}
+                          </div>
+                        </div>
+                        {currentStyle === style.key && (
+                          <div className="ml-auto w-2 h-2 bg-primary rounded-full" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="hidden md:flex items-center gap-1.5 lg:gap-2 flex-shrink-0">
@@ -722,7 +770,7 @@ export default function PreviewPage() {
               <Button
                 onClick={handleDownload}
                 size="sm"
-                className="h-8 px-3 sm:h-9 sm:px-4 rounded-lg sm:rounded-xl bg-blue-600 hover:bg-blue-700"
+                className="h-5 px-3 sm:h-5 sm:px-2 rounded-lg sm:rounded-xl bg-blue-600 hover:bg-blue-700"
               >
                 <Download className="h-4 w-4 mr-1" />
                 <span className="text-xs">PDF</span>

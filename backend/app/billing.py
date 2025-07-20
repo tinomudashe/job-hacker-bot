@@ -62,15 +62,23 @@ async def get_subscription_status(
         stripe_sub = stripe.Subscription.retrieve(subscription.stripe_subscription_id)
         
         period_end_timestamp = None
-        if stripe_sub.status == 'trialing':
+        # First, check the subscription's live status from Stripe.
+        # If it's a trial, we must use the trial_end date.
+        if getattr(stripe_sub, 'status', None) == 'trialing':
+            # Safely get the trial_end timestamp.
             period_end_timestamp = getattr(stripe_sub, 'trial_end', None)
         else:
+            # For all other statuses (like 'active'), safely get the renewal date.
+            # This use of getattr() prevents the KeyError crash if the key is missing.
             period_end_timestamp = getattr(stripe_sub, 'current_period_end', None)
 
         period_end = datetime.utcfromtimestamp(period_end_timestamp) if period_end_timestamp else None
 
+        # Standardize the plan name to "Pro" for consistency in the UI.
+        display_plan = "Pro" if subscription.plan and "pro" in subscription.plan.lower() else "Free"
+
         return {
-            "plan": subscription.plan,
+            "plan": display_plan,
             "status": stripe_sub.status,
             "period_end": period_end.isoformat() if period_end else None
         }

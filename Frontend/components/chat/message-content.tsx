@@ -76,34 +76,39 @@ const getFileIcon = (filename: string) => {
   return <File className={iconClass} />;
 };
 
-// Content type detector
+// **REVISED** Content type detector to handle the specific message format
 const detectContentType = (text: string) => {
-  // All possible attachment patterns (covers current and legacy formats)
-  const patterns = {
-    // Current clean formats
+  // Pattern to handle 'File Attached: [file]\n\nMessage: [msg]'
+  const specificPattern =
+    /^(?:File Attached|📎 Attached file):\s*(.*?)(?:\n\nMessage:\s*(.*))?$/is;
+  const specificMatch = text.match(specificPattern);
+
+  if (specificMatch) {
+    return {
+      type: "file",
+      filename: specificMatch[1].trim(),
+      userMessage: specificMatch[2] ? specificMatch[2].trim() : "",
+      fullMatch: text,
+    };
+  }
+
+  // Fallback for other existing formats
+  const fallbackPatterns = {
     fileAttached: /\*\*File Attached:\*\* (.+?)(?:\n|$)/,
     cvUploaded:
       /\*\*CV\/Resume uploaded successfully!\*\*[\s\S]*?\*\*File:\*\* (.+?)(?:\n|$)/,
-
-    // Legacy formats with emojis
     emojiFileAttached: /📎 \*\*File Attached:\*\* (.+?)(?:\n|$)/,
-    emojiCvUploaded:
-      /📄 \*\*CV\/Resume uploaded successfully!\*\*[\s\S]*?\*\*File:\*\* (.+?)(?:\n|$)/,
-
-    // Old legacy formats
-    attachedFile: /📎 Attached file:\s*(.+?)(?:\n|$)/i,
-    plainAttachedFile: /Attached file:\s*(.+?)(?:\n|$)/i,
   };
 
-  // Check each pattern
-  for (const [type, pattern] of Object.entries(patterns)) {
+  for (const [type, pattern] of Object.entries(fallbackPatterns)) {
     const match = text.match(pattern);
     if (match) {
+      const userMessage = text.replace(match[0], "").trim();
       return {
-        type: type.includes("cv") || type.includes("Cv") ? "cv" : "file",
+        type: type.includes("cv") ? "cv" : "file",
         filename: match[1].trim(),
+        userMessage: userMessage,
         fullMatch: match[0],
-        isLegacy: type.includes("emoji") || type.includes("attached"),
       };
     }
   }
@@ -111,27 +116,34 @@ const detectContentType = (text: string) => {
   return null;
 };
 
-// Attachment renderer component
+// **REVISED** Attachment renderer component to be simpler
 const AttachmentRenderer = ({
   filename,
-  text,
+  userMessage,
+  text, // Keep for legacy CV upload details
   isUser,
 }: {
   filename: string;
+  userMessage?: string;
   text: string;
   isUser?: boolean;
 }) => {
-  // Extract user message if present
-  const userMessage = text
-    .replace(/\*\*File Attached:\*\*.*(?:\n|$)/i, "")
-    .replace(/📎 \*\*File Attached:\*\*.*(?:\n|$)/i, "")
-    .replace(/📎 Attached file:.*(?:\n|$)/i, "")
-    .replace(/Attached file:.*(?:\n|$)/i, "")
-    .replace(/\*\*CV\/Resume uploaded successfully!\*\*[\s\S]*/i, "")
-    .trim();
-
   return (
     <div className="space-y-3">
+      {/* Render the user's message first if it exists */}
+      {userMessage && (
+        <div className="text-sm text-foreground">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              a: (props: any) => <LinkComponent {...props} isUser={isUser} />,
+            }}
+          >
+            {userMessage}
+          </ReactMarkdown>
+        </div>
+      )}
+
       {/* File attachment display */}
       <div
         className={cn(
@@ -151,20 +163,6 @@ const AttachmentRenderer = ({
           </p>
         </div>
       </div>
-
-      {/* User message if present */}
-      {userMessage && (
-        <div className="text-sm text-foreground">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              a: (props: any) => <LinkComponent {...props} isUser={isUser} />,
-            }}
-          >
-            {userMessage}
-          </ReactMarkdown>
-        </div>
-      )}
 
       {/* CV upload success details */}
       {text.includes("CV/Resume uploaded successfully") && (
@@ -195,6 +193,7 @@ export function MessageContent({ content, isUser }: MessageContentProps) {
     return (
       <AttachmentRenderer
         filename={attachmentInfo.filename}
+        userMessage={attachmentInfo.userMessage}
         text={text}
         isUser={isUser}
       />
