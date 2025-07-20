@@ -23,9 +23,8 @@ import {
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import * as React from "react";
-import { cn } from "../../lib/utils";
 // EDIT: Import the new cover letter templates alongside the resume templates.
-import { getApiUrl } from "@/lib/utils";
+import { cn, getApiUrl } from "@/lib/utils";
 import { CreativeCoverLetterTemplate } from "./templates/CreativeCoverLetterTemplate";
 import { CreativeResumeTemplate } from "./templates/CreativeResumeTemplate";
 import { ModernCoverLetterTemplate } from "./templates/ModernCoverLetterTemplate";

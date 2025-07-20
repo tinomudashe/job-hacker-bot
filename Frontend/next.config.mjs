@@ -1,9 +1,10 @@
 /** @type {import('next').NextConfig} */
+import path from "path";
+
 const nextConfig = {
   // Safari compatibility optimizations
   experimental: {
     optimizeServerReact: false, // Better Safari compatibility
-    serverComponentsHmrCache: false, // Prevents Safari caching issues
   },
 
   // Compiler optimizations for Safari
@@ -17,6 +18,9 @@ const nextConfig = {
 
   // Webpack optimizations for Safari
   webpack: (config, { dev, isServer }) => {
+    // Add alias to resolve @/ paths
+    config.resolve.alias["@"] = path.resolve("./");
+
     // Safari-specific optimizations
     if (!dev && !isServer) {
       // Optimize for Safari's JavaScript engine
