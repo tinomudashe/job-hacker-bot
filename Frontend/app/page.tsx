@@ -1,12 +1,12 @@
 "use client";
 
+import { SubscriptionPrompt } from "@/components/subscription-prompt";
+import { useSubscription } from "@/lib/hooks/use-subscription";
+import { useWebSocket } from "@/lib/hooks/use-websocket";
 import { SignedIn, SignedOut, useAuth, useUser } from "@clerk/nextjs";
 import { ChatContainer } from "components/chat/chat-container";
 import { Header } from "components/header";
 import { LoginPrompt } from "components/login-prompt";
-import { SubscriptionPrompt } from "components/subscription-prompt";
-import { useSubscription } from "lib/hooks/use-subscription";
-import { useWebSocket } from "lib/hooks/use-websocket";
 import * as React from "react";
 
 export default function Home() {

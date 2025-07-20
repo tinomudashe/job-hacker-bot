@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/ui/logo";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { cn } from "@/lib/utils";
 import { useUser } from "@clerk/nextjs";
 import {
   Home,
@@ -14,7 +15,6 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
-import { cn } from "../../lib/utils";
 
 // --- Admin Sidebar Navigation Component ---
 const AdminSidebarNav = () => {
