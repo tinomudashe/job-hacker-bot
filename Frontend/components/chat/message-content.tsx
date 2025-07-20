@@ -80,7 +80,7 @@ const getFileIcon = (filename: string) => {
 const detectContentType = (text: string) => {
   // Pattern to handle 'File Attached: [file]\n\nMessage: [msg]'
   const specificPattern =
-    /^(?:File Attached|📎 Attached file):\s*(.*?)(?:\n\nMessage:\s*(.*))?$/is;
+    /^(?:File Attached|📎 Attached file):\s*([\s\S]*?)(?:\n\nMessage:\s*([\s\S]*))?$/i;
   const specificMatch = text.match(specificPattern);
 
   if (specificMatch) {
