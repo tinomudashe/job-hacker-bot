@@ -3,6 +3,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { getApiUrl } from "@/lib/utils";
 import {
   SignedIn,
   SignedOut,
