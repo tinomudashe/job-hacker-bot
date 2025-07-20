@@ -17,6 +17,7 @@ from sqlalchemy.orm import relationship, declarative_base, Mapped, mapped_column
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.dialects.postgresql import UUID
 from typing import List, Optional
+from pgvector.sqlalchemy import Vector
 
 # Define the base class for declarative models with AsyncAttrs for proper async support
 Base = declarative_base(cls=AsyncAttrs)
@@ -62,22 +63,24 @@ class User(Base):
     hashed_password = Column(String, nullable=True)
     preferences = Column(Text)
     faiss_index_path = Column(String, nullable=True)
+    subscribed_to_marketing = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    applications = relationship("Application", back_populates="user", cascade="all, delete-orphan")
-    documents = relationship("Document", back_populates="user", cascade="all, delete-orphan")
-    chat_messages = relationship("ChatMessage", back_populates="user", cascade="all, delete-orphan")
-    subscription = relationship("Subscription", back_populates="user", uselist=False, cascade="all, delete-orphan")
-    generated_cvs = relationship("GeneratedCV", back_populates="user", cascade="all, delete-orphan")
-    generated_cover_letters = relationship("GeneratedCoverLetter", back_populates="user", cascade="all, delete-orphan")
-    resume = relationship("Resume", back_populates="user", uselist=False, cascade="all, delete-orphan")
-    pages = relationship("Page", back_populates="user", cascade="all, delete-orphan")
-    user_preferences = relationship("UserPreference", back_populates="user", cascade="all, delete-orphan")
-    user_behaviors = relationship("UserBehavior", back_populates="user", cascade="all, delete-orphan")
+    applications = relationship("Application", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
+    documents = relationship("Document", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
+    chat_messages = relationship("ChatMessage", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
+    subscription = relationship("Subscription", back_populates="user", uselist=False, cascade="all, delete-orphan", passive_deletes=True)
+    generated_cvs = relationship("GeneratedCV", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
+    generated_cover_letters = relationship("GeneratedCoverLetter", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
+    resume = relationship("Resume", back_populates="user", uselist=False, cascade="all, delete-orphan", passive_deletes=True)
+    pages = relationship("Page", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
+    user_preferences = relationship("UserPreference", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
+    user_behaviors = relationship("UserBehavior", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
 
 class Document(Base):
     __tablename__ = "documents"
     id = Column(String, primary_key=True, default=generate_uuid)
-    user_id = Column(String, ForeignKey("users.id"))
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"))
     type = Column(String)
     name = Column(String)
     content = Column(Text, nullable=True)
@@ -90,7 +93,7 @@ class Document(Base):
 class Application(Base):
     __tablename__ = "applications"
     id = Column(String, primary_key=True, default=generate_uuid)
-    user_id = Column(String, ForeignKey("users.id"))
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"))
     job_title = Column(String)
     company_name = Column(String)
     job_url = Column(String)
@@ -113,7 +116,7 @@ class Notification(Base):
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
     id = Column(String, primary_key=True, default=generate_uuid)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     page_id = Column(String, ForeignKey("pages.id"), nullable=True, index=True)
     message = Column(Text, nullable=False)
     is_user_message = Column(Boolean, nullable=False, index=True)
@@ -133,18 +136,19 @@ class ChatMessage(Base):
 class Subscription(Base):
     __tablename__ = "subscriptions"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     stripe_customer_id = Column(String, unique=True, index=True, nullable=True)
     stripe_subscription_id = Column(String, unique=True, index=True, nullable=True)
     plan = Column(String, default="free", nullable=False)  # e.g., 'free', 'premium'
     status = Column(String, default="active", nullable=False) # e.g., 'active', 'past_due', 'canceled'
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     user = relationship("User", back_populates="subscription")
 
 class GeneratedCV(Base):
     __tablename__ = 'generated_cvs'
     id = Column(String, primary_key=True, default=generate_uuid)
-    user_id = Column(String, ForeignKey('users.id'), nullable=False)
+    user_id = Column(String, ForeignKey('users.id', ondelete="CASCADE"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     content_html = Column(Text, nullable=False)
 
@@ -153,7 +157,7 @@ class GeneratedCV(Base):
 class GeneratedCoverLetter(Base):
     __tablename__ = 'generated_cover_letters'
     id = Column(String, primary_key=True, default=generate_uuid)
-    user_id = Column(String, ForeignKey('users.id'), nullable=False)
+    user_id = Column(String, ForeignKey('users.id', ondelete="CASCADE"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     content = Column(Text, nullable=False)
 
@@ -162,7 +166,7 @@ class GeneratedCoverLetter(Base):
 class Resume(Base):
     __tablename__ = 'resumes'
     id = Column(String, primary_key=True, default=generate_uuid)
-    user_id = Column(String, ForeignKey('users.id'), nullable=False, unique=True)
+    user_id = Column(String, ForeignKey('users.id', ondelete="CASCADE"), nullable=False, unique=True)
     data = Column(JSON, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
@@ -172,7 +176,7 @@ class Resume(Base):
 class UserPreference(Base):
     __tablename__ = 'user_preferences'
     id = Column(String, primary_key=True, default=generate_uuid)
-    user_id = Column(String, ForeignKey('users.id'), nullable=False)
+    user_id = Column(String, ForeignKey('users.id', ondelete="CASCADE"), nullable=False)
     preference_key = Column(String, nullable=False)
     preference_value = Column(Text, nullable=False)  # JSON string
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -183,10 +187,44 @@ class UserPreference(Base):
 class UserBehavior(Base):
     __tablename__ = 'user_behaviors'
     id = Column(String, primary_key=True, default=generate_uuid)
-    user_id = Column(String, ForeignKey('users.id'), nullable=False)
+    user_id = Column(String, ForeignKey('users.id', ondelete="CASCADE"), nullable=False)
     action_type = Column(String, nullable=False)  # e.g., 'job_search', 'cover_letter_generation', 'document_upload'
+    log_level = Column(String, default="INFO", nullable=False) # INFO, WARNING, ERROR
     context = Column(JSON, nullable=True)  # JSON column with action context
     success = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    user = relationship("User", back_populates="user_behaviors") 
+    user = relationship("User", back_populates="user_behaviors")
+
+class MarketingEmailTemplate(Base):
+    __tablename__ = 'marketing_email_templates'
+    id = Column(String, primary_key=True, default=generate_uuid)
+    name = Column(String, nullable=False, unique=True)
+    subject = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now()) 
+
+class LangchainPgCollection(Base):
+    __tablename__ = "langchain_pg_collection"
+    uuid = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String)
+    cmetadata = Column(JSON)
+
+class LangchainPgEmbedding(Base):
+    __tablename__ = "langchain_pg_embedding"
+    uuid = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    collection_id = Column(UUID(as_uuid=True), ForeignKey("langchain_pg_collection.uuid", ondelete="CASCADE"))
+    embedding = Column(Vector(1536))  # Adjust the dimension (e.g., 1536 for OpenAI, 768 for Google's text-embedding-004)
+    document = Column(String, nullable=True)
+    cmetadata = Column(JSON, nullable=True)
+    custom_id = Column(String, nullable=True)
+
+    collection = relationship("LangchainPgCollection", back_populates="embeddings")
+
+LangchainPgCollection.embeddings = relationship(
+    "LangchainPgEmbedding",
+    back_populates="collection",
+    cascade="all, delete-orphan",
+    passive_deletes=True,
+) 

@@ -2,15 +2,73 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { DismissAllToasts } from "@/components/ui/dismiss-all-toasts";
 import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
+import dynamic from "next/dynamic";
 import { Inter } from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
 
+// This is the only new import being added.
+const CookieConsentBanner = dynamic(
+  () =>
+    import("@/components/cookie-consent-banner").then(
+      (mod) => mod.CookieConsentBanner
+    ),
+  { ssr: false }
+);
+
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "AI Job Application Assistant",
-  description: "Your AI-powered job application assistant",
+  metadataBase: new URL("https://jobhackerbot.com"),
+  title: {
+    default: "Job Hacker Bot | Your AI-Powered Job Application Assistant",
+    template: `%s | Job Hacker Bot`,
+  },
+  description:
+    "Streamline your job search with an AI-powered assistant that helps you find jobs, tailor your resume, generate cover letters, and ace interviews.",
+  applicationName: "Job Hacker Bot",
+  keywords: [
+    "AI job assistant",
+    "resume builder",
+    "cover letter generator",
+    "job search",
+    "interview preparation",
+    "career advice",
+    "Next.js",
+    "React",
+    "Tailwind CSS",
+  ],
+  openGraph: {
+    title: "Job Hacker Bot | Your AI-Powered Job Application Assistant",
+    description:
+      "Streamline your job search with an AI-powered assistant that helps you find jobs, tailor your resume, generate cover letters, and ace interviews.",
+    url: "https://jobhackerbot.com",
+    siteName: "Job Hacker Bot",
+    images: [
+      {
+        url: "/og-image.png", // Must be a relative path
+        width: 1200,
+        height: 630,
+        alt: "Job Hacker Bot a futuristic, AI-powered job application assistant",
+      },
+    ],
+    locale: "en_US",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Job Hacker Bot | Your AI-Powered Job Application Assistant",
+    description:
+      "Streamline your job search with an AI-powered assistant that helps you find jobs, tailor your resume, generate cover letters, and ace interviews.",
+    images: [
+      {
+        url: "/og-image.png", // Must be a relative path
+        width: 1200,
+        height: 630,
+        alt: "Job Hacker Bot a futuristic, AI-powered job application assistant",
+      },
+    ],
+  },
 };
 
 export const viewport = {
@@ -84,6 +142,8 @@ export default function RootLayout({
               }}
             />
             <DismissAllToasts />
+            {/* This is the only new line of code being added. */}
+            <CookieConsentBanner />
           </ThemeProvider>
         </body>
       </html>

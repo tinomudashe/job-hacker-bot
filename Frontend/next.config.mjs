@@ -1,18 +1,20 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   // Safari compatibility optimizations
   experimental: {
     optimizeServerReact: false, // Better Safari compatibility
     serverComponentsHmrCache: false, // Prevents Safari caching issues
   },
-  
+
   // Compiler optimizations for Safari
   compiler: {
     styledComponents: false, // Disable if not using styled-components
-    removeConsole: process.env.NODE_ENV === "production" ? { exclude: ["error", "warn"] } : false,
+    removeConsole:
+      process.env.NODE_ENV === "production"
+        ? { exclude: ["error", "warn"] }
+        : false,
   },
-  
+
   // Webpack optimizations for Safari
   webpack: (config, { dev, isServer }) => {
     // Safari-specific optimizations
@@ -26,19 +28,19 @@ const nextConfig: NextConfig = {
             ...config.optimization.splitChunks?.cacheGroups,
             // Create separate chunk for polyfills (Safari needs more)
             polyfills: {
-              name: 'polyfills',
+              name: "polyfills",
               test: /[\\/]node_modules[\\/](core-js|regenerator-runtime)/,
               priority: 10,
-              chunks: 'all',
+              chunks: "all",
             },
           },
         },
       };
     }
-    
+
     return config;
   },
-  
+
   // Headers for Safari compatibility
   async headers() {
     return [
@@ -56,7 +58,8 @@ const nextConfig: NextConfig = {
           // Safari-specific headers
           {
             key: "X-WebKit-CSP",
-            value: "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https:",
+            value:
+              "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https:",
           },
         ],
       },

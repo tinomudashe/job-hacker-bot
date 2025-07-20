@@ -26,6 +26,8 @@ from app.stt import router as stt_router
 from app.pages import router as pages_router
 from app.pdf_generator import router as pdf_router
 from app.cover_letter_documents import router as cover_letter_documents_router
+from app.marketing import router as marketing_router
+from app.admin import router as admin_router
 
 app = FastAPI()
 
@@ -66,6 +68,8 @@ app.include_router(pages_router, prefix="/api", tags=["pages"])
 app.include_router(pdf_router, prefix="/api", tags=["pdf"])
 app.include_router(cover_letter_documents_router, prefix="/api", tags=["cover-letter-documents"])
 app.include_router(messages_router, prefix="/api/chat", tags=["chat"])
+app.include_router(marketing_router, tags=["marketing"])
+app.include_router(admin_router, tags=["admin"])
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Job Application Automation API"} 

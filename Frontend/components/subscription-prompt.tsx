@@ -13,7 +13,7 @@ export const SubscriptionPrompt = () => {
             <Crown className="h-8 w-8 text-blue-600 dark:text-blue-400" />
           </div>
         </div>
-        <h2 className="text-2xl font-bold mb-2">Unlock Pro Features</h2>
+        <h2 className="text-2xl font-bold mb-2">Unlock Features</h2>
         <p className="text-muted-foreground mb-6">
           Your subscription is not active. Please subscribe to continue using
           the app.
@@ -23,7 +23,7 @@ export const SubscriptionPrompt = () => {
           disabled={loading}
           className="w-full h-11 text-base font-medium"
         >
-          Subscribe to Pro
+          Activate Your Subscription
         </Button>
       </div>
     </div>

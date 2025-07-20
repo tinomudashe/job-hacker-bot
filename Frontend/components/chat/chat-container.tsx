@@ -140,63 +140,6 @@ function getProgressType(
 }
 
 function getCustomProgressMessage(messages: any[]): string | undefined {
-  if (messages.length === 0) return undefined;
-
-  const lastUserMessage =
-    [...messages]
-      .reverse()
-      .find((m) => m.isUser)
-      ?.content?.toLowerCase() || "";
-  const lastFewMessages = [...messages]
-    .slice(-3)
-    .map((m) =>
-      typeof m.content === "string" ? m.content : JSON.stringify(m.content)
-    )
-    .join(" ")
-    .toLowerCase();
-
-  // Browser automation specific messages
-  if (
-    lastFewMessages.includes("browser automation") ||
-    lastFewMessages.includes("browser use cloud") ||
-    (lastUserMessage.includes("job") &&
-      (lastUserMessage.includes("gdynia") ||
-        lastUserMessage.includes("poland")))
-  ) {
-    if (lastUserMessage.includes("software")) {
-      return "🌐 Using cloud browser automation to find software engineering jobs in Gdynia...";
-    } else if (lastUserMessage.includes("poland")) {
-      return "🌐 Comprehensive browser search across job boards in Poland...";
-    } else {
-      return "🌐 Advanced browser automation extracting detailed job information...";
-    }
-  }
-
-  // Job search messages
-  if (
-    lastUserMessage.includes("software engineer") ||
-    lastUserMessage.includes("developer")
-  ) {
-    return "🔍 Scanning for software engineering opportunities...";
-  }
-  if (
-    lastUserMessage.includes("poland") ||
-    lastUserMessage.includes("gdynia")
-  ) {
-    return "📍 Searching job market in Poland...";
-  }
-  if (lastUserMessage.includes("job")) {
-    return "💼 Finding the perfect job matches...";
-  }
-
-  // CV/Resume generation
-  if (lastUserMessage.includes("cv") || lastUserMessage.includes("resume")) {
-    return "📝 Crafting your professional profile...";
-  }
-  if (lastUserMessage.includes("cover letter")) {
-    return "✍️ Writing your compelling cover letter...";
-  }
-
   return undefined;
 }
 

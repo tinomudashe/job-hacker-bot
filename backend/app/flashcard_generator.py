@@ -125,8 +125,8 @@ async def transcribe_audio(audio_file: UploadFile) -> str:
         
         audio = speech.RecognitionAudio(content=content)
         config = speech.RecognitionConfig(
-            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-            sample_rate_hertz=16000, # This might need adjustment based on audio source
+            encoding=speech.RecognitionConfig.AudioEncoding.WEBM_OPUS,
+            sample_rate_hertz=48000, # This might need adjustment based on audio source
             language_code="en-US",
         )
 

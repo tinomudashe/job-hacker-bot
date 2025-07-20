@@ -42,3 +42,6 @@ scikit-learn>=1.3.0
 # Graph RAG Dependencies
 langchain-graph-retriever>=0.1.0
 langchain-chroma>=0.1.0
+
+# Email Sending
+fastapi-mail>=1.4.1
