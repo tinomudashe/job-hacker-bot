@@ -24,7 +24,7 @@ import {
 import { useSearchParams } from "next/navigation";
 import * as React from "react";
 // EDIT: Import the new cover letter templates alongside the resume templates.
-import { cn, getApiUrl } from "@/lib/utils";
+import { cn } from "../../lib/utils";
 import { CreativeCoverLetterTemplate } from "./templates/CreativeCoverLetterTemplate";
 import { CreativeResumeTemplate } from "./templates/CreativeResumeTemplate";
 import { ModernCoverLetterTemplate } from "./templates/ModernCoverLetterTemplate";
