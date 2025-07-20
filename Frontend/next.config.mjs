@@ -1,6 +1,4 @@
 /** @type {import('next').NextConfig} */
-import path from "path";
-
 const nextConfig = {
   // Safari compatibility optimizations
   experimental: {
@@ -14,35 +12,6 @@ const nextConfig = {
       process.env.NODE_ENV === "production"
         ? { exclude: ["error", "warn"] }
         : false,
-  },
-
-  // Webpack optimizations for Safari
-  webpack: (config, { dev, isServer }) => {
-    // Add alias to resolve @/ paths
-    config.resolve.alias["@"] = path.resolve("./");
-
-    // Safari-specific optimizations
-    if (!dev && !isServer) {
-      // Optimize for Safari's JavaScript engine
-      config.optimization = {
-        ...config.optimization,
-        splitChunks: {
-          ...config.optimization.splitChunks,
-          cacheGroups: {
-            ...config.optimization.splitChunks?.cacheGroups,
-            // Create separate chunk for polyfills (Safari needs more)
-            polyfills: {
-              name: "polyfills",
-              test: /[\\/]node_modules[\\/](core-js|regenerator-runtime)/,
-              priority: 10,
-              chunks: "all",
-            },
-          },
-        },
-      };
-    }
-
-    return config;
   },
 
   // Headers for Safari compatibility
