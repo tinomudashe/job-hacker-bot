@@ -1,13 +1,13 @@
 "use client";
 
-import { ChatContainer } from "@/components/chat/chat-container";
-import { Header } from "@/components/header";
-import { LoginPrompt } from "@/components/login-prompt";
-import { SubscriptionPrompt } from "@/components/subscription-prompt";
 import { SignedIn, SignedOut, useAuth, useUser } from "@clerk/nextjs";
+import { ChatContainer } from "components/chat/chat-container";
+import { Header } from "components/header";
+import { LoginPrompt } from "components/login-prompt";
+import { SubscriptionPrompt } from "components/subscription-prompt";
+import { useSubscription } from "lib/hooks/use-subscription";
+import { useWebSocket } from "lib/hooks/use-websocket";
 import * as React from "react";
-import { useSubscription } from "../lib/hooks/use-subscription";
-import { useWebSocket } from "../lib/hooks/use-websocket";
 
 export default function Home() {
   // Start with empty state - will be populated by fetchMostRecentPage if needed
