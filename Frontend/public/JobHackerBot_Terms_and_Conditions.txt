@@ -1,0 +1,83 @@
+
+JobHackerBot – Terms and Conditions
+Last Updated: July 15, 2025
+
+1. General
+Welcome to JobHackerBot. By accessing or using our platform, you agree to be bound by these Terms and Conditions, as well as our Privacy Policy.
+
+JobHackerBot provides tools and services to assist users with:
+- Building resumes and CVs
+- Searching for jobs online
+- Receiving career advice
+- Engaging with a chatbot powered by a large language model (LLM)
+
+2. Platform Information
+
+2.1 Use of AI Services
+JobHackerBot uses AI-powered technology to assist users. While we aim for accuracy and helpfulness, you acknowledge:
+- AI-generated responses may occasionally be inaccurate or inappropriate.
+- You should use your discretion and consult a human advisor for critical decisions.
+
+2.2 Data Handling and Privacy
+- Your data is encrypted both in transit and at rest.
+- We do not share your personal data with third parties.
+- You can request deletion of your data at any time.
+- Chat history is securely stored and accessible only by you.
+- We comply with the General Data Protection Regulation (EU) 2016/679 (GDPR).
+
+3. Purchases and Payments
+
+If JobHackerBot offers paid services, the following terms apply:
+
+3.1 Refund Policy
+- Refunds will be processed within 24 hours of a confirmed service cancellation.
+- There may be a waiting period of 3–10 business days (depending on your payment provider) for the refunded amount to reflect in your account.
+- Refunds are only applicable to eligible services as described at the time of purchase.
+- To initiate a refund request, please contact our support team with your order details and reason for cancellation.
+
+3.2 Payment Terms
+- All fees are displayed in the selected currency and are subject to applicable taxes.
+- By purchasing a service, you agree to provide accurate billing information and authorize us to charge the applicable fees.
+
+4. Platform Content
+
+4.1 Intellectual Property
+All content provided by JobHackerBot—including AI-generated materials—remains the intellectual property of JobHackerBot unless explicitly stated otherwise.
+
+4.2 User Conduct
+You agree not to:
+- Use the platform for unlawful or harmful purposes
+- Misuse or exploit platform features in any way
+
+5. Disputes
+
+5.1 Governing Law
+These Terms are governed by and construed in accordance with the laws of Poland.
+
+5.2 Jurisdiction
+Any disputes will be subject to the exclusive jurisdiction of the courts of Poland.
+
+6. Other Considerations
+
+6.1 Risk Acknowledgment
+By using AI-based features, you acknowledge and accept the inherent risks associated with automated decision-making and content generation.
+
+6.2 Limitation of Liability
+To the maximum extent permitted by law, JobHackerBot shall not be held liable for:
+- Indirect, incidental, or consequential damages
+- Any losses resulting from reliance on AI-generated content
+
+6.3 Account Termination
+We reserve the right to suspend or terminate your access if you violate these Terms.
+
+7. Final Details
+We may update these Terms from time to time. Continued use of the platform after changes means you accept the updated Terms.
+
+Cookies
+JobHackerBot uses cookies and similar technologies to:
+- Enhance your user experience
+- Analyze platform usage
+- Provide personalized content and services
+
+By using the platform, you consent to our use of cookies as described in our Cookies Policy.
+You may adjust your cookie preferences through your browser settings at any time.

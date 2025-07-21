@@ -164,7 +164,7 @@ jspm_packages/
 *.rar
 
 # Personal files and documents
-*.pdf
+
 *.doc
 *.docx
 *.ppt
@@ -173,17 +173,8 @@ jspm_packages/
 *.xls
 
 # Media files
-*.mp4
-*.mov
-*.avi
-*.mkv
-*.wav
-*.mp3
-*.jpg
-*.jpeg
-*.png
-*.gif
-*.ico
+
+
 
 # Jupyter Notebooks
 .ipynb_checkpoints

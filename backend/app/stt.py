@@ -3,11 +3,9 @@ import logging
 from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from dotenv import load_dotenv
 
 # Setup logger
 logger = logging.getLogger(__name__)
-load_dotenv()
 
 # Optional import for Google Cloud Speech - graceful fallback if not available
 try:
@@ -27,7 +25,7 @@ from app.models_db import User
 router = APIRouter()
 
 # --- Securely load API Key and initialize client at startup ---
-google_api_key = os.getenv("GOOGLE_SEARCH_API_KEY")
+google_api_key = os.getenv("GOOGLE_API_KEY")
 stt_client = None
 
 if SPEECH_AVAILABLE and google_api_key:
