@@ -5,7 +5,7 @@ import { useAuth } from "@clerk/nextjs";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000";
+const WS_URL = process.env.NEXT_PUBLIC_API_URL || "ws://localhost:8000";
 
 interface Message {
   id: string;
