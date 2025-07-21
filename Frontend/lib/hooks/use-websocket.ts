@@ -88,11 +88,10 @@ export const useWebSocket = (currentPageId?: string) => {
     }
 
     // Connect to WebSocket (history is handled by page change effect)
-    // FIX: Use URL constructor to safely build the WebSocket URL.
-    // This prevents double slashes if NEXT_PUBLIC_API_URL has a trailing slash.
-    const url = new URL("/api/ws/orchestrator", WS_URL);
-    url.searchParams.set("token", token);
-    const wsUrl = url.href;
+    // FIX: Construct WebSocket URL safely, removing any trailing slash from WS_URL
+    // to prevent double slashes, and avoiding URL encoding issues with the token.
+    const cleanWsUrl = WS_URL.endsWith("/") ? WS_URL.slice(0, -1) : WS_URL;
+    const wsUrl = `${cleanWsUrl}/api/ws/orchestrator?token=${token}`;
     const newSocket = new WebSocket(wsUrl);
     socketRef.current = newSocket;
 
