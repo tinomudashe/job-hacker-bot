@@ -16,7 +16,7 @@ interface Message {
 }
 
 export const useWebSocket = (currentPageId?: string) => {
-  const { getToken, isLoaded } = useAuth();
+  const { getToken, isLoaded, isSignedIn } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isHistoryLoading, setIsHistoryLoading] = useState(true);
@@ -88,7 +88,11 @@ export const useWebSocket = (currentPageId?: string) => {
     }
 
     // Connect to WebSocket (history is handled by page change effect)
-    const wsUrl = `${WS_URL}/api/ws/orchestrator?token=${token}`;
+    // FIX: Use URL constructor to safely build the WebSocket URL.
+    // This prevents double slashes if NEXT_PUBLIC_API_URL has a trailing slash.
+    const url = new URL("/api/ws/orchestrator", WS_URL);
+    url.searchParams.set("token", token);
+    const wsUrl = url.href;
     const newSocket = new WebSocket(wsUrl);
     socketRef.current = newSocket;
 
@@ -247,7 +251,7 @@ export const useWebSocket = (currentPageId?: string) => {
   }, [currentPageId, isLoaded, fetchMessagesForPage]);
 
   useEffect(() => {
-    if (isLoaded) {
+    if (isLoaded && isSignedIn) {
       connect();
     }
     return () => {
@@ -255,7 +259,7 @@ export const useWebSocket = (currentPageId?: string) => {
         socketRef.current.close();
       }
     };
-  }, [isLoaded, connect]);
+  }, [isLoaded, isSignedIn, connect]);
 
   const sendMessage = useCallback(
     async (content: string) => {
