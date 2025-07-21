@@ -32,9 +32,13 @@ from app.admin import router as admin_router
 app = FastAPI()
 
 # Configure CORS
+origins = [
+    "https://jobhackerbot.com",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
