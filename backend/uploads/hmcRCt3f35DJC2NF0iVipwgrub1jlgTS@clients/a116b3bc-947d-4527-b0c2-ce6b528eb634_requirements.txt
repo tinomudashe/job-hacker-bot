@@ -1,7 +1,0 @@
-asyncio
-python-dotenv
-pydantic
-gradio>=4.0
-langchain-google-genai
-browser-use
-rich
