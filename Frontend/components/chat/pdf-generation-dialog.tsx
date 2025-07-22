@@ -751,10 +751,10 @@ export function PDFGenerationDialog({
         projects: projects
           .filter((p) => p.name)
           .map((p) => ({
-            ...p,
-            technologies: p.technologies
-              ? p.technologies.split(",").map((t) => t.trim())
-              : [],
+            title: p.name,
+            description: p.description,
+            technologies: p.technologies,
+            url: p.url,
           })),
         certifications: certifications.filter((c) => c.name),
         languages: languages.filter((l) => l.name),

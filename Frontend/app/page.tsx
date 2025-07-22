@@ -35,39 +35,34 @@ export default function Home() {
 
   // Function to fetch the most recent conversation (only on initial load)
   const fetchMostRecentPage = React.useCallback(async () => {
-    console.log(
-      "📋 [page.tsx] fetchMostRecentPage called - isLoaded:",
-      isLoaded,
-      "hasInitialized:",
-      hasInitialized
-    );
     if (!isLoaded || hasInitialized) {
-      console.log("📋 [page.tsx] fetchMostRecentPage SKIPPED");
       return;
     }
-    console.log(
-      "📋 [page.tsx] fetchMostRecentPage RUNNING - will fetch recent conversation..."
-    );
 
     try {
       const token = await getToken();
-      if (!token) return;
+      if (!token) {
+        setIsLoadingRecentPage(false);
+        setHasInitialized(true);
+        return;
+      }
 
-      // If we have a cached ID, validate it first
       const cachedId = localStorage.getItem("lastConversationId");
       if (cachedId) {
         try {
+          // FIX: The validation fetch call was incorrect. The Next.js proxy will
+          // automatically forward this request to the backend.
           const validateResponse = await fetch(`/api/pages/${cachedId}`, {
             headers: { Authorization: `Bearer ${token}` },
           });
+
           if (validateResponse.ok) {
-            // Cached conversation is valid, keep it
             setCurrentPageId(cachedId);
             setIsLoadingRecentPage(false);
             setHasInitialized(true);
             return;
           } else {
-            // Cached conversation is invalid, clear it and fetch recent
+            // If the cached ID is invalid, remove it from localStorage.
             localStorage.removeItem("lastConversationId");
           }
         } catch (error) {
@@ -76,30 +71,27 @@ export default function Home() {
         }
       }
 
-      // Fetch the most recent conversation
+      // If no valid cached ID is found, fetch the most recent page.
       const response = await fetch("/api/pages/recent", {
         headers: { Authorization: `Bearer ${token}` },
       });
 
       if (response.ok) {
         const recentPage = await response.json();
-        setCurrentPageId(recentPage.id);
-        // Cache the conversation ID for future page loads
-        localStorage.setItem("lastConversationId", recentPage.id);
-      } else if (response.status === 404) {
-        // No conversations found, start with empty state
-        setCurrentPageId("");
-        localStorage.removeItem("lastConversationId");
+        if (recentPage && recentPage.id) {
+          setCurrentPageId(recentPage.id);
+          localStorage.setItem("lastConversationId", recentPage.id);
+        }
+      } else if (response.status !== 404) {
+        console.warn(`Failed to fetch recent page, status: ${response.status}`);
       }
     } catch (error) {
-      console.warn("Failed to fetch most recent page:", error);
-      setCurrentPageId("");
-      localStorage.removeItem("lastConversationId");
+      console.error("Failed to fetch most recent page:", error);
     } finally {
       setIsLoadingRecentPage(false);
       setHasInitialized(true);
     }
-  }, [isLoaded, getToken, hasInitialized]);
+  }, [getToken, hasInitialized, isLoaded]);
 
   // Load the most recent conversation on page load (only once)
   React.useEffect(() => {
