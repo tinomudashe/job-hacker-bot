@@ -9,7 +9,7 @@ from graph_retriever.strategies import Eager
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.models_db import Document, User
-from app.enhanced_memory import AsyncSafeEnhancedMemoryManager
+from app.enhanced_memory import EnhancedMemoryManager
 from datetime import datetime
 import json
 import re
@@ -43,8 +43,8 @@ class EnhancedGraphRAG:
             documents = doc_result.scalars().all()
             
             # Initialize memory manager for learning context
-            memory_manager = AsyncSafeEnhancedMemoryManager(self.db, user)
-            user_profile = await memory_manager._get_user_learning_profile_safe()
+            memory_manager = EnhancedMemoryManager(self.db, user)
+            user_profile = await memory_manager.get_user_learning_profile()
             
             # Create enhanced documents with graph metadata
             enhanced_docs = await self._create_enhanced_documents(documents, user, user_profile)
@@ -408,7 +408,7 @@ class EnhancedGraphRAG:
             user_result = await self.db.execute(select(User).where(User.id == self.user_id))
             user = user_result.scalar_one()
             
-            memory_manager = AsyncSafeEnhancedMemoryManager(self.db, user)
+            memory_manager = EnhancedMemoryManager(self.db, user)
             
             await memory_manager.save_user_behavior_safe(
                 action_type="graph_rag_search",

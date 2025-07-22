@@ -5115,8 +5115,14 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                     # Handle explicit page switching from frontend
                     new_page_id = message_data.get("page_id")
                     if new_page_id != current_loaded_page_id:
+                        # --- FIX: Use EnhancedMemoryManager to get context ---
+                        context = await memory_manager.get_conversation_context(new_page_id)
+                        current_chat_history = [
+                            HumanMessage(content=msg["content"]) if msg["role"] == "user" 
+                            else AIMessage(content=msg["content"]) 
+                            for msg in context.recent_messages
+                        ]
                         current_loaded_page_id = new_page_id
-                        log.info(f"WebSocket context switched to page {new_page_id}")
                         
                         # Update last_opened_at timestamp
                         if new_page_id:
@@ -5139,37 +5145,14 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                     
                     # Load page history if we're regenerating from a different page
                     if regenerate_page_id != current_loaded_page_id:
-                        log.info(f"🔄 Loading history for page {regenerate_page_id}")
-                        try:
-                            page_messages = await db.execute(
-                                select(ChatMessage)
-                                .where(ChatMessage.user_id == user.id)
-                                .where(ChatMessage.page_id == regenerate_page_id)
-                                .order_by(ChatMessage.created_at)
-                            )
-                            page_messages_list = page_messages.scalars().all()
-                            
-                            if page_messages_list:
-                                log.info(f"🔄 Loaded {len(page_messages_list)} messages from database")
-                                current_chat_history.clear()
-                                for msg in page_messages_list:
-                                    try:
-                                        content = json.loads(msg.message) if isinstance(msg.message, str) else msg.message
-                                    except (json.JSONDecodeError, TypeError):
-                                        content = msg.message
-                                    
-                                    if msg.is_user_message:
-                                        current_chat_history.append(HumanMessage(id=msg.id, content=content if isinstance(content, str) else json.dumps(content)))
-                                    else:
-                                        current_chat_history.append(AIMessage(id=msg.id, content=content if isinstance(content, str) else json.dumps(content)))
-                                current_loaded_page_id = regenerate_page_id
-                                log.info(f"🔄 Chat history updated to {len(current_chat_history)} messages")
-                            else:
-                                log.warning(f"🔄 No messages found for page {regenerate_page_id}")
-                        except Exception as e:
-                            log.error(f"🔄 Error loading page history: {e}")
-                            if db.is_active:
-                                await db.rollback()
+                        log.info(f"🔄 Loading history for page {regenerate_page_id} for regeneration")
+                        context = await memory_manager.get_conversation_context(regenerate_page_id)
+                        current_chat_history = [
+                            HumanMessage(content=msg["content"]) if msg["role"] == "user" 
+                            else AIMessage(content=msg["content"]) 
+                            for msg in context.recent_messages
+                        ]
+                        current_loaded_page_id = regenerate_page_id
                     
                     # Remove the last AI message from history
                     if current_chat_history and isinstance(current_chat_history[-1], AIMessage):
