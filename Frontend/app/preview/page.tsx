@@ -468,7 +468,7 @@ export default function PreviewPage() {
 
   const handleGoBack = () => {
     if (document.referrer) window.history.back();
-    else window.location.href = "http://localhost:3000";
+    else window.location.href = "https://jobhackerbot.com";
   };
 
   const handleDownload = () => {

@@ -21,7 +21,7 @@ if not os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
     possible_paths = [
         './app/job-bot-credentials.json',
         'app/job-bot-credentials.json',
-        '/Users/tinomudashe/job-application/backend/app/job-bot-credentials.json'
+        '
     ]
     for path in possible_paths:
         if os.path.exists(path):
@@ -316,7 +316,7 @@ NEVER NEVER skip the tool call
 - ✅ **LinkedIn API is fastest** - Use search_jobs_linkedin_api for instant results
 - ✅ The tools handle everything and return actual job results
 - ✅ Present the results in a clear, organized format
-- ✅ Use the user's preferred name "Tino" in all responses
+
 
 ## Cover Letter Generation Guidelines:
 🔥 **CRITICAL**: NEVER ask users to provide their background information manually - you have full access to their profile data!
