@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Union
 from pydantic import BaseModel, EmailStr, HttpUrl, Field
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,55 +41,66 @@ def fix_resume_data_structure(data: Dict) -> Dict:
 # --- Pydantic Models to match Frontend ---
 
 class PersonalInfo(BaseModel):
-    name: str = ""
-    email: Optional[EmailStr] = None
-    phone: str = ""
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
     linkedin: Optional[str] = None
-    location: str = ""
-    summary: str = ""
+    location: Optional[str] = None
+    summary: Optional[str] = None
 
 class Dates(BaseModel):
     start: Optional[str] = None
     end: Optional[str] = None
 
 class Experience(BaseModel):
-    id: str
-    jobTitle: str = ""
-    company: str = ""
-    dates: Optional[Dates] = None
-    description: str = ""
+    id: Optional[str] = None
+    jobTitle: Optional[str] = Field(None, alias="jobTitle")
+    company: Optional[str] = None
+    dates: Optional[Union[Dates, str]] = None
+    description: Optional[str] = None
 
 class Education(BaseModel):
-    id: str
-    degree: str = ""
-    institution: str = ""
-    dates: Optional[Dates] = None
-    description: Optional[str] = ""
+    id: Optional[str] = None
+    degree: Optional[str] = None
+    institution: Optional[str] = None
+    dates: Optional[Union[Dates, str]] = None
+    description: Optional[str] = None
 
 class Project(BaseModel):
-    name: str
+    id: Optional[str] = None
+    title: Optional[str] = None
     description: Optional[str] = None
-    technologies: Optional[List[str]] = None
-    url: Optional[HttpUrl] = None
+    technologies: Optional[str] = None
+    url: Optional[str] = None
+    github: Optional[str] = None
+    dates: Optional[str] = None
 
-class Certificate(BaseModel):
-    name: str
-    issuing_organization: Optional[str] = None
-    date_issued: Optional[str] = None
+class Certification(BaseModel):
+    id: Optional[str] = None
+    name: Optional[str] = None
+    issuer: Optional[str] = None
+    date: Optional[str] = None
+    description: Optional[str] = None
+    url: Optional[str] = None
+    credentialId: Optional[str] = Field(None, alias="credentialId")
 
 class Language(BaseModel):
-    name: str
+    id: Optional[str] = None
+    language: Optional[str] = None
     proficiency: Optional[str] = None
 
 class ResumeData(BaseModel):
-    personalInfo: PersonalInfo
-    experience: List[Experience]
-    education: List[Education]
-    skills: List[str]
-    projects: List[Project] = []
-    certifications: List[Certificate] = []
-    languages: List[Language] = []
-    interests: List[Dict] = []
+    # EDIT: Ensure all fields have default values to prevent validation errors.
+    # This makes the model more resilient to missing data, especially from older
+    # resume records that may not have all the newer fields.
+    personalInfo: PersonalInfo = Field(default_factory=PersonalInfo)
+    experience: List[Experience] = Field(default_factory=list)
+    education: List[Education] = Field(default_factory=list)
+    skills: List[str] = Field(default_factory=list)
+    projects: List[Project] = Field(default_factory=list)
+    certifications: List[Certification] = Field(default_factory=list)
+    languages: List[Language] = Field(default_factory=list)
+    interests: List[str] = Field(default_factory=list)
 
 # EDIT: This is the new, comprehensive request model for the save endpoint.
 class FullResumeUpdateRequest(BaseModel):
@@ -98,7 +109,7 @@ class FullResumeUpdateRequest(BaseModel):
     education: List[Education]
     skills: List[str]
     projects: Optional[List[Project]] = None
-    certifications: Optional[List[Certificate]] = None
+    certifications: Optional[List[Certification]] = None
     languages: Optional[List[Language]] = None
 
 # --- API Endpoints ---
