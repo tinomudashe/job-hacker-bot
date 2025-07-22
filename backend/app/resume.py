@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import desc, select
 from sqlalchemy.orm import attributes, joinedload
 import uuid
+import re
 
 from app.db import get_db
 from app.models_db import User, Resume, GeneratedCoverLetter
@@ -18,23 +19,68 @@ router = APIRouter()
 
 def fix_resume_data_structure(data: Dict) -> Dict:
     """
-    Ensures resume data has proper structure with required ID fields.
-    Adds missing IDs to experience and education entries.
+    Ensures resume data has proper structure and corrects common data inconsistencies.
+    - Scrubs personalInfo to remove any fields not defined in the Pydantic model.
+    - Adds missing IDs to experience, education, projects, certifications, and languages.
+    - Renames 'name' key to 'title' in project entries.
+    - Converts string-based certifications into structured objects.
+    - Ensures 'skills' and 'interests' are lists of strings, filtering out None values.
     """
     if not isinstance(data, dict):
         return data
-    
-    # Fix experience entries
-    if 'experience' in data and isinstance(data['experience'], list):
-        for exp in data['experience']:
-            if isinstance(exp, dict) and 'id' not in exp:
-                exp['id'] = str(uuid.uuid4())
-    
-    # Fix education entries  
-    if 'education' in data and isinstance(data['education'], list):
-        for edu in data['education']:
-            if isinstance(edu, dict) and 'id' not in edu:
-                edu['id'] = str(uuid.uuid4())
+
+    # FIX: Defensively clean the personalInfo object.
+    # This removes any keys that are not explicitly part of the PersonalInfo model,
+    # preventing validation errors from unexpected fields being added by other tools.
+    if 'personalInfo' in data and isinstance(data.get('personalInfo'), dict):
+        allowed_keys = PersonalInfo.model_fields.keys()
+        info_data = data['personalInfo']
+        data['personalInfo'] = {k: v for k, v in info_data.items() if k in allowed_keys}
+
+    # Fix lists of objects: add IDs, fix project titles
+    for section in ['experience', 'education', 'projects', 'languages']:
+        if section in data and isinstance(data.get(section), list):
+            for item in data[section]:
+                if isinstance(item, dict):
+                    if 'id' not in item:
+                        item['id'] = str(uuid.uuid4())
+                    # Rename 'name' to 'title' in projects for compatibility
+                    if section == 'projects' and 'name' in item and 'title' not in item:
+                        item['title'] = item.pop('name')
+
+    # Convert string-based certifications into structured objects
+    if 'certifications' in data and isinstance(data.get('certifications'), list):
+        new_certifications = []
+        for cert in data['certifications']:
+            if isinstance(cert, str):
+                name, issuer, date = cert, "", ""
+                parts = cert.split('–', 1)
+                if len(parts) == 2:
+                    name = parts[0].strip()
+                    issuer_date_part = parts[1].strip()
+                    date_match = re.search(r'\((.*?)\)$', issuer_date_part)
+                    if date_match:
+                        date = date_match.group(1).strip()
+                        issuer = issuer_date_part[:date_match.start()].strip()
+                    else:
+                        issuer = issuer_date_part
+                
+                new_certifications.append({
+                    'id': str(uuid.uuid4()),
+                    'name': name,
+                    'issuer': issuer,
+                    'date': date
+                })
+            elif isinstance(cert, dict):
+                if 'id' not in cert:
+                    cert['id'] = str(uuid.uuid4())
+                new_certifications.append(cert)
+        data['certifications'] = new_certifications
+
+    # Clean up simple string lists like 'skills' and 'interests'
+    for key in ['skills', 'interests']:
+        if key in data and isinstance(data.get(key), list):
+            data[key] = [str(item) for item in data[key] if item is not None]
     
     return data
 
