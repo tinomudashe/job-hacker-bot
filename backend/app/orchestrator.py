@@ -796,11 +796,16 @@ async def orchestrator_websocket(
             summary=""
         )
         
+        # FIX: Ensure all required fields for ResumeData are provided, even if empty.
+        # This prevents Pydantic validation errors for new users.
         new_resume_data = ResumeData(
             personalInfo=default_personal_info, 
             experience=[], 
             education=[], 
-            skills=[]
+            skills=[],
+            projects=[],
+            certifications=[],
+            languages=[]
         )
         new_db_resume = Resume(user_id=user_id, data=new_resume_data.dict())
         db.add(new_db_resume)
