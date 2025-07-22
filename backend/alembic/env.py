@@ -20,28 +20,33 @@ config = context.config
 # Load environment variables from .env
 load_dotenv()
 
-# Set the database URL from environment variables
-# This ensures Alembic uses the same database as the application
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT")
-DB_NAME = os.getenv("DB_NAME")
+# --- Database URL Configuration ---
+# Prioritize DATABASE_URL if it's set. This is common in cloud environments.
+database_url = os.getenv("DATABASE_URL")
 
-# URL-encode the password to handle special characters, and construct the URL
-if all([DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME]):
-    encoded_password = quote_plus(DB_PASSWORD)
-    database_url = f"postgresql://{DB_USER}:{encoded_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-    
-    # Escape the '%' character for the config parser by replacing it with '%%'
-    escaped_database_url = database_url.replace("%", "%%")
-    config.set_main_option("sqlalchemy.url", escaped_database_url)
-else:
-    # Raise a clear error if the environment variables are not fully set.
-    raise ValueError(
-        "Database connection details are not fully configured. "
-        "Please ensure DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, and DB_NAME are set in your .env file."
-    )
+# Fallback to individual components if DATABASE_URL is not set.
+if not database_url:
+    DB_USER = os.getenv("DB_USER")
+    DB_PASSWORD = os.getenv("DB_PASSWORD")
+    DB_HOST = os.getenv("DB_HOST")
+    DB_PORT = os.getenv("DB_PORT")
+    DB_NAME = os.getenv("DB_NAME")
+
+    if all([DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME]):
+        from urllib.parse import quote_plus
+        encoded_password = quote_plus(DB_PASSWORD)
+        database_url = f"postgresql://{DB_USER}:{encoded_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    else:
+        raise ValueError(
+            "Database connection details are not fully configured. "
+            "Please set either DATABASE_URL or all of DB_USER, DB_PASSWORD, "
+            "DB_HOST, DB_PORT, and DB_NAME in your environment."
+        )
+
+# Escape the '%' character for the config parser by replacing it with '%%'
+# This is necessary because the config parser interprets '%' as a special character.
+escaped_database_url = database_url.replace("%", "%%")
+config.set_main_option("sqlalchemy.url", escaped_database_url)
 
 
 # Interpret the config file for Python logging.
