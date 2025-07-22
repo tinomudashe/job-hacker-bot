@@ -24,6 +24,9 @@ RUN npm ci
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install Playwright browser dependencies
+RUN playwright install --with-deps chromium
+
 # ---
 
 # Stage 2: Final runtime stage
