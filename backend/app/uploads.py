@@ -20,6 +20,14 @@ async def upload_file(
     Upload a file for the authenticated user.
     """
     try:
+        # EDIT: Read the file content into memory. This is crucial for storing it
+        # in the database, which allows the agent to access it later for context.
+        content = await file.read()
+        
+        # FIX: The file pointer needs to be reset after the initial read, otherwise
+        # the subsequent copy operation will fail because the pointer is at the end.
+        await file.seek(0)
+
         file_path = Path("uploads") / file.filename
         with file_path.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
@@ -28,6 +36,9 @@ async def upload_file(
             user_id=current_user.id,
             name=file.filename,
             type=file.content_type,
+            # EDIT: Store the actual file content in the 'content' field.
+            # This makes the document's text available for the agent's tools.
+            content=content.decode("utf-8", errors="ignore"),
             vector_store_path=str(file_path)
         )
         db.add(db_document)
