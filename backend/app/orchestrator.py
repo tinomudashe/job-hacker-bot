@@ -21,7 +21,7 @@ if not os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
     possible_paths = [
         './app/job-bot-credentials.json',
         'app/job-bot-credentials.json',
-        '
+        
     ]
     for path in possible_paths:
         if os.path.exists(path):
