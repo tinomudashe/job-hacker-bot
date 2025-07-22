@@ -99,6 +99,7 @@ async def create_portal_session(
 ):
     """
     Creates a Stripe Customer Portal session for the user to manage their subscription.
+    This now includes a dynamic portal configuration to avoid live mode errors.
     """
     subscription = await get_subscription(db, str(db_user.id))
     if not subscription or not subscription.stripe_customer_id:
@@ -107,9 +108,27 @@ async def create_portal_session(
 
     try:
         logger.info(f"Creating portal session for user {db_user.id} with customer ID {subscription.stripe_customer_id}")
+
+        # FIX: Create a portal configuration on-the-fly.
+        # This is the safest way to ensure the portal works in both test and live modes
+        # without needing a default configuration set in the Stripe dashboard.
+        portal_configuration = stripe.billing_portal.Configuration.create(
+            business_profile={
+                "headline": "JobHackerBot - Manage Your Subscription",
+                "privacy_policy_url": f"{app_url}/privacy",
+                "terms_of_service_url": f"{app_url}/terms",
+            },
+            features={
+                "customer_update": {"allowed_updates": ["email", "tax_id"], "enabled": True},
+                "invoice_history": {"enabled": True},
+                "payment_method_update": {"enabled": True},
+            },
+        )
+
         portal_session = stripe.billing_portal.Session.create(
             customer=subscription.stripe_customer_id,
             return_url=f"{app_url}/settings", # URL to return to after portal session
+            configuration=portal_configuration.id, # Use the newly created configuration
         )
         return {"url": portal_session.url}
     except Exception as e:
