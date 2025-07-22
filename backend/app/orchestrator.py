@@ -5279,6 +5279,39 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                     message_content = message_data["content"]
                     page_id = message_data.get("page_id")
                     
+                    # FIX: If it's the first message of a new chat, page_id will be missing.
+                    # We need to create the page first to get an ID before saving any messages.
+                    if not page_id:
+                        try:
+                            # Create a title from the first message
+                            title = message_content.split('\n')[0]
+                            title = title.split('. ')[0]
+                            title = title.split('? ')[0]
+                            title = title.split('! ')[0]
+                            title = title[:50] + '...' if len(title) > 50 else title
+                            
+                            new_page = Page(user_id=user_id, title=title)
+                            db.add(new_page)
+                            await db.commit()
+                            await db.refresh(new_page)
+                            page_id = new_page.id
+                            log.info(f"✅ Created new page {page_id} for new conversation.")
+                            
+                            # Send the new page_id back to the frontend immediately
+                            await websocket.send_json({
+                                "type": "page_created",
+                                "page_id": page_id,
+                                "title": title,
+                                "created_at": new_page.created_at.isoformat()
+                            })
+                            
+                        except Exception as page_creation_error:
+                            log.error(f"❌ Failed to create new page: {page_creation_error}")
+                            if db.is_active:
+                                await db.rollback()
+                            # Stop processing if we can't create a page
+                            continue
+
                     # Only load page history if WebSocket context isn't already set for this page
                     # Frontend is responsible for loading messages via API, WebSocket just tracks context
                     if page_id != current_loaded_page_id:
