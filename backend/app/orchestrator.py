@@ -639,34 +639,17 @@ async def orchestrator_websocket(
     
     log.info(f"WebSocket orchestrator connected for user: {user_id}")
     
-    # --- Initialize Advanced Memory Manager ---
+    # --- FIX: Initialize EnhancedMemoryManager directly ---
+    # The advanced memory systems are now stable and can be used as the primary memory source.
     try:
-        from app.advanced_memory import AdvancedMemoryManager, create_memory_tools
-        advanced_memory_manager = AdvancedMemoryManager(user)
-        memory_tools = create_memory_tools(advanced_memory_manager)
-        log.info("Advanced memory manager initialized successfully")
-        
-        # Fallback to simple memory for basic operations
-        from app.simple_memory import SimpleMemoryManager
-        simple_memory_manager = SimpleMemoryManager(db, user)
-        
-        memory_manager = simple_memory_manager  # Keep for existing code compatibility
-        
+        memory_manager = EnhancedMemoryManager(db, user)
+        log.info("✅ EnhancedMemoryManager initialized successfully.")
     except Exception as e:
-        log.warning(f"Could not initialize advanced memory manager: {e}")
-        # Fallback to simple memory only
-        try:
-            from app.simple_memory import SimpleMemoryManager
-            memory_manager = SimpleMemoryManager(db, user)
-            advanced_memory_manager = None
-            memory_tools = []
-            log.info("Fallback to simple memory manager successful")
-        except Exception as e2:
-            log.error(f"Could not initialize any memory manager: {e2}")
-            memory_manager = None
-            advanced_memory_manager = None
-            memory_tools = []
-    
+        log.error(f"❌ CRITICAL: Could not initialize EnhancedMemoryManager: {e}")
+        # If memory fails, we cannot proceed safely.
+        await websocket.close(code=1011, reason="Internal memory system error.")
+        return
+
     # --- Fetch User Documents & Vector Store ---
     doc_result = await db.execute(select(Document.name).where(Document.user_id == user_id))
     user_documents = doc_result.scalars().all()

@@ -118,4 +118,57 @@ async def send_subscription_canceled_email(recipient: EmailStr):
         </body>
     </html>
     """
+    await send_email(fm, [recipient], subject, body)
+
+
+async def send_welcome_email(recipient: EmailStr, name: str = "User"):
+    """
+    Sends a welcome email to a new subscriber.
+    """
+    if not EMAIL_SERVICE_AVAILABLE:
+        logger.warning(f"Email service unavailable. Would have sent welcome email to {recipient}")
+        return
+
+    subject = "🎉 Welcome to Job Hacker Bot Pro!"
+    body = f"""
+    <html>
+        <body style="font-family: Arial, sans-serif; margin: 0; padding: 20px; color: #333;">
+            <div style="max-width: 600px; margin: auto; border: 1px solid #ddd; border-radius: 12px; overflow: hidden;">
+                <div style="padding: 20px; background-color: #f9f9f9;">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <div style="
+                            width: 48px;
+                            height: 48px;
+                            border-radius: 12px;
+                            background: linear-gradient(to bottom right, #3b82f6, #6366f1, #8b5cf6);
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            font-size: 24px;
+                            font-weight: bold;
+                            color: white;
+                            flex-shrink: 0;
+                        ">
+                            <span style="line-height: 1; letter-spacing: -0.08em;">
+                                j<span style="font-size: 0.85em; vertical-align: 0.15em; margin-left: -0.1em;">H</span>
+                            </span>
+                        </div>
+                        <div>
+                            <h1 style="margin: 0; font-size: 20px; color: #111;">Job Hacker Bot</h1>
+                            <p style="margin: 0; font-size: 14px; color: #555;">Your career co-pilot</p>
+                        </div>
+                    </div>
+                </div>
+                <div style="padding: 20px;">
+                    <h2 style="font-size: 18px; color: #333;">Welcome, {name}!</h2>
+                    <p>Thank you for subscribing to Job Hacker Bot Pro. Your account is now active, and you have access to all premium features.</p>
+                    <p>You can now generate unlimited resumes and cover letters, get expert career advice, and much more.</p>
+                    <p>To manage your subscription, visit your account settings page.</p>
+                    <p>Happy job hunting!</p>
+                    <p>Thank you,<br>The Job Hacker Bot Team</p>
+                </div>
+            </div>
+        </body>
+    </html>
+    """
     await send_email(fm, [recipient], subject, body) 

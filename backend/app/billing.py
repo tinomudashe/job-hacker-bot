@@ -12,7 +12,7 @@ from app.models_db import User, Subscription
 from app.dependencies import get_current_active_user
 from app.clerk import get_clerk_user # Make sure this is imported
 from app.email_service import (
-    send_payment_failed_email, send_subscription_canceled_email
+    send_payment_failed_email, send_subscription_canceled_email, send_welcome_email
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -305,31 +305,74 @@ async def stripe_webhook(
             subscription.stripe_subscription_id = stripe_subscription_id
             logger.info(f"User {user.id} subscribed to {plan} with status {new_status}.")
 
+            # Send welcome email on successful subscription
+            if new_status in ['active', 'trialing']:
+                if user.email:
+                    background_tasks.add_task(send_welcome_email, user.email, user.name or "User")
+                    logger.info(f"Queued welcome email for user {user.id}")
+
     elif event_type in [
         'customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted'
     ]:
         stripe_subscription_id = data.get('id')
+        stripe_customer_id = data.get('customer')  # Get customer ID from the event
+
         async with db.begin():
+            # Find the subscription record by the Stripe customer ID, as this is constant.
             sub_result = await db.execute(select(Subscription).where(
-                Subscription.stripe_subscription_id == stripe_subscription_id
+                Subscription.stripe_customer_id == stripe_customer_id
             ))
             subscription = sub_result.scalar_one_or_none()
+
+            # If no subscription record exists, we need to create one.
+            if not subscription:
+                try:
+                    # Find the user by their Stripe customer ID. We assume a customer is
+                    # created when they first attempt to check out.
+                    user_result = await db.execute(select(User).join(Subscription).where(
+                        Subscription.stripe_customer_id == stripe_customer_id
+                    ))
+                    user = user_result.scalar_one_or_none()
+
+                    if not user:
+                         # Fallback: If user not found via subscription, try retrieving customer email from Stripe
+                        customer = stripe.Customer.retrieve(stripe_customer_id)
+                        user_email = customer.email
+                        user_result = await db.execute(select(User).where(User.email == user_email))
+                        user = user_result.scalar_one_or_none()
+
+                    if user:
+                        # Create a new subscription record for this user
+                        subscription = Subscription(user_id=str(user.id), stripe_customer_id=stripe_customer_id)
+                        db.add(subscription)
+                        await db.flush()  # Ensure it's in the session before updating
+                        logger.info(f"Webhook created a new subscription record for user {user.id}")
+                    else:
+                        logger.error(f"Webhook could not find a user for customer ID {stripe_customer_id}")
+                        return {"status": "error", "message": "User not found for customer ID"}
+
+                except Exception as e:
+                    logger.error(f"Error handling new subscription for customer {stripe_customer_id}: {e}")
+                    return {"status": "error", "message": "Failed to process new subscription"}
+
+            # Now that we have a subscription record, update it.
             if subscription:
                 new_status = data.get('status')
-                # Default to the existing plan; we are not using a 'free' plan.
-                new_plan = subscription.plan 
-
-                price_data = data.get('items', {}).get('data', [{}])[0].get('price', {})
-                if price_data.get('id') == price_id:
-                    # Upgrade 'pro-trial' to 'pro' once the trial ends and the sub is active.
-                    if subscription.plan == 'pro-trial' and new_status == 'active':
-                        new_plan = 'pro'
-                
-                subscription.plan = new_plan
                 subscription.status = new_status
+                subscription.stripe_subscription_id = stripe_subscription_id
+
+                # Update the plan based on the price ID
+                price_data = data.get('items', {}).get('data', [{}])[0].get('price', {})
+                if price_data.get('id') == premium_price_id:
+                    subscription.plan = 'premium'
+                else:
+                    # Handle other plans or set to a default if needed
+                    subscription.plan = 'free' if new_status == 'canceled' else subscription.plan
+
+
                 logger.info(
-                    f"Subscription {stripe_subscription_id} updated. "
-                    f"New plan: {new_plan}, New status: {new_status}"
+                    f"Subscription {stripe_subscription_id} for user {subscription.user_id} updated. "
+                    f"New plan: {subscription.plan}, New status: {new_status}"
                 )
 
                 if new_status == 'canceled':

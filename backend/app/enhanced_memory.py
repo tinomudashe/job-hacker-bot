@@ -49,111 +49,101 @@ class UserLearningProfile:
     feedback_history: List[Dict[str, Any]]
     success_metrics: Dict[str, int]
 
-class AsyncSafeEnhancedMemoryManager:
-    """Async-safe enhanced memory manager with proper error handling"""
+class EnhancedMemoryManager:
+    """
+    Enhanced memory manager with conversation summarization and user learning.
+    This version is refactored to be fully asynchronous and avoid concurrency issues.
+    """
     
-    def __init__(self, db: AsyncSession, user: User, *, skills: Optional[str] = None):
+    def __init__(self, db: AsyncSession, user: User):
         self.db = db
         self.user = user
         self.user_id = user.id
-        # Pre-fetched skills list to avoid any lazy-load inside async context
-        if skills is not None:
-            self._skills = [s.strip() for s in skills.split(',')] if skills else []
-        else:
-            # Fallback (should be eager-loaded already); guard with try/except just in case
-            try:
-                self._skills = [s.strip() for s in (self.user.skills or '').split(',')] if getattr(self.user, 'skills', None) else []
-            except Exception:
-                self._skills = []
         
-        # Temporarily disable LLM and embeddings to avoid greenlet issues
-        # self.llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-preview-04-17", temperature=0.1)
-        # self.embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+        # FIX: Re-enable the LLM and embeddings for advanced memory functions.
+        self.llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.1)
+        self.embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
         
         # Memory configuration
         self.max_context_messages = 20
-        self.summary_trigger_length = 5
+        self.summary_trigger_length = 15  # Increased trigger length for summarization
         self.max_summary_length = 500
         
-        # Cache for performance
+        # In-memory cache for the user's learning profile for the duration of the session.
         self.user_profile_cache = None
-        self.conversation_cache = None
 
-    async def get_enhanced_conversation_context(
+    async def get_conversation_context(
         self, 
         page_id: Optional[str] = None,
         include_user_learning: bool = True
     ) -> ConversationContext:
-        """Get enhanced conversation context with safe async operations (simplified version)"""
-        
+        """
+        Retrieves, processes, and summarizes conversation history to provide
+        rich context for the agent.
+        """
         try:
-            # For now, return a basic empty context to avoid database greenlet issues
-            logger.info("Creating basic conversation context (database queries disabled for safety)")
+            # 1. Fetch all messages for the given page from the database
+            query = select(ChatMessage).where(
+                ChatMessage.user_id == self.user_id,
+                ChatMessage.page_id == page_id
+            ).order_by(ChatMessage.created_at)
             
-            context = self._create_empty_context()
+            result = await self.db.execute(query)
+            messages = result.scalars().all()
             
+            # 2. Process the messages to create a conversation context
+            context = await self._process_conversation_messages(messages)
+            
+            # 3. (Optional) Enhance context with user's learned profile
             if include_user_learning:
-                try:
-                    # Get basic user learning profile (no database queries)
-                    user_profile = await self._get_user_learning_profile_safe()
-                    if user_profile:
-                        context.user_preferences.update(user_profile.preferences)
-                except Exception as e:
-                    logger.warning(f"Could not load user learning profile: {e}")
+                user_profile = await self.get_user_learning_profile()
+                if user_profile:
+                    context.user_preferences.update(user_profile.preferences)
             
             return context
             
         except Exception as e:
-            logger.error(f"Error getting conversation context: {e}")
+            logger.error(f"Error getting conversation context for page {page_id}: {e}")
             return self._create_empty_context()
 
-    def _create_empty_context(self) -> ConversationContext:
-        """Create empty context as fallback"""
-        return ConversationContext(
-            summary="New conversation started.",
-            key_topics=[],
-            user_preferences={},
-            recent_messages=[],
-            conversation_length=0,
-            last_updated=datetime.utcnow()
-        )
-
-    async def _process_conversation_messages_safe(
+    async def _process_conversation_messages(
         self, 
         messages: List[ChatMessage]
     ) -> ConversationContext:
-        """Process messages with safe async operations"""
-        
+        """
+        Processes a list of ChatMessage objects to generate a summary and extract
+        key topics and recent messages.
+        """
         conversation_length = len(messages)
         
-        # Get recent messages (full context)
+        # Format recent messages for the agent's short-term memory
         recent_messages = []
         for msg in messages[-self.max_context_messages:]:
             try:
-                content = json.loads(msg.message) if isinstance(msg.message, str) else msg.message
+                content = json.loads(msg.message)
             except (json.JSONDecodeError, TypeError):
                 content = str(msg.message)
             
             recent_messages.append({
                 "role": "user" if msg.is_user_message else "assistant",
                 "content": content,
-                "timestamp": msg.created_at.isoformat() if msg.created_at else datetime.utcnow().isoformat(),
+                "timestamp": msg.created_at.isoformat(),
                 "id": msg.id
             })
         
-        # Generate summary if conversation is long
+        # Generate a summary if the conversation is long enough
         summary = ""
         key_topics = []
-        
         if conversation_length > self.summary_trigger_length:
             try:
+                # Summarize older messages, leaving recent ones for immediate context
                 older_messages = messages[:-self.max_context_messages]
                 if older_messages:
-                    summary = await self._generate_conversation_summary_safe(older_messages)
-                    key_topics = await self._extract_key_topics_safe(messages)
+                    summary = await self._generate_conversation_summary(older_messages)
+                    key_topics = await self._extract_key_topics(messages)
             except Exception as e:
-                logger.warning(f"Could not generate summary: {e}")
-                summary = f"Long conversation with {conversation_length} messages"
+                logger.warning(f"Could not generate conversation summary: {e}")
+                summary = f"A long conversation with {conversation_length} messages."
         
         return ConversationContext(
             summary=summary,
@@ -164,102 +154,77 @@ class AsyncSafeEnhancedMemoryManager:
             last_updated=datetime.utcnow()
         )
 
-    async def _generate_conversation_summary_safe(
-        self, 
-        messages: List[ChatMessage]
-    ) -> str:
-        """Generate conversation summary with safe async operations (simplified version)"""
-        
-        try:
-            # For now, use a simple text-based summary to avoid LLM greenlet issues
-            logger.info("Generating simple conversation summary (LLM disabled for safety)")
-            
-            # Count message types and extract basic info
-            user_messages = sum(1 for msg in messages if msg.is_user_message)
-            assistant_messages = len(messages) - user_messages
-            
-            # Simple summary without LLM calls
-            summary = f"Conversation with {user_messages} user messages and {assistant_messages} assistant responses"
-            
-            return summary
-            
-        except Exception as e:
-            logger.error(f"Error generating conversation summary: {e}")
-            return f"Unable to generate summary for {len(messages)} messages"
+    async def _generate_conversation_summary(self, messages: List[ChatMessage]) -> str:
+        """
+        Uses an LLM to generate a concise summary of a list of messages.
+        """
+        if not messages:
+            return ""
 
-    async def _extract_key_topics_safe(self, messages: List[ChatMessage]) -> List[str]:
-        """Extract key topics with safe async operations (simplified version)"""
+        prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content="You are an expert at summarizing conversations. Create a concise summary of the following chat history."),
+            HumanMessage(content="\n".join([f"{'User' if msg.is_user_message else 'Assistant'}: {msg.message}" for msg in messages]))
+        ])
+        chain = prompt | self.llm
         
-        try:
-            # Use simple keyword extraction to avoid LLM greenlet issues
-            logger.info("Extracting topics using simple keyword matching (LLM disabled for safety)")
-            
-            # Prepare recent conversation content
-            recent_content = []
-            for msg in messages[-10:]:  # Last 10 messages for efficiency
-                try:
-                    content = json.loads(msg.message) if isinstance(msg.message, str) else msg.message
-                except (json.JSONDecodeError, TypeError):
-                    content = str(msg.message)
-                recent_content.append(str(content)[:200])  # Limit content length
-            
-            conversation = " ".join(recent_content)
-            
-            # Use simple keyword extraction instead of LLM
-            return self._extract_simple_keywords(conversation)
-                
-        except Exception as e:
-            logger.error(f"Error extracting topics: {e}")
-            return []
+        summary_result = await chain.ainvoke({})
+        return summary_result.content[:self.max_summary_length]
 
-    def _extract_simple_keywords(self, text: str) -> List[str]:
-        """Simple keyword extraction as fallback"""
-        job_keywords = ["engineer", "developer", "analyst", "manager", "designer", 
-                       "python", "javascript", "remote", "senior", "junior"]
-        found_keywords = []
-        text_lower = text.lower()
+    async def _extract_key_topics(self, messages: List[ChatMessage]) -> List[str]:
+        """
+        Uses an LLM to extract key topics from a conversation.
+        """
+        conversation_text = " ".join([msg.message for msg in messages[-10:]])
         
-        for keyword in job_keywords:
-            if keyword in text_lower and keyword not in found_keywords:
-                found_keywords.append(keyword)
+        prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content="Extract the 5 most important keywords or topics from this conversation. Respond with a comma-separated list."),
+            HumanMessage(content=conversation_text)
+        ])
+        chain = prompt | self.llm
         
-        return found_keywords[:5]
+        topics_result = await chain.ainvoke({})
+        return [topic.strip() for topic in topics_result.content.split(",")]
 
-    async def _get_user_learning_profile_safe(self) -> Optional[UserLearningProfile]:
-        """Get user learning profile with safe async operations (database-free fallback)"""
-        
+    async def get_user_learning_profile(self) -> Optional[UserLearningProfile]:
+        """
+        Builds a profile of the user based on their preferences and past behaviors
+        stored in the database.
+        """
         if self.user_profile_cache:
             return self.user_profile_cache
         
         try:
-            # Create a basic profile without database queries to avoid greenlet issues
-            logger.info("Creating basic user profile (database queries disabled for safety)")
+            # Fetch preferences and behaviors in parallel
+            prefs_task = self.db.execute(select(UserPreference).where(UserPreference.user_id == self.user_id))
+            behaviors_task = self.db.execute(
+                select(UserBehavior)
+                .where(UserBehavior.user_id == self.user_id)
+                .order_by(desc(UserBehavior.created_at))
+                .limit(100)
+            )
+            prefs_result, behaviors_result = await asyncio.gather(prefs_task, behaviors_task)
             
-            preferences = {}
-            interaction_patterns = {}
-            skill_interests = self._skills
-            job_search_patterns = {}
-            success_metrics = {}
+            preferences = {p.preference_key: json.loads(p.preference_value) for p in prefs_result.scalars().all()}
+            behaviors = behaviors_result.scalars().all()
             
-            # Create basic profile without database dependencies
             profile = UserLearningProfile(
                 user_id=self.user_id,
                 preferences=preferences,
-                interaction_patterns=interaction_patterns,
-                skill_interests=skill_interests,
-                job_search_patterns=job_search_patterns,
-                feedback_history=[],
-                success_metrics=success_metrics
+                interaction_patterns=self._analyze_interaction_patterns(behaviors),
+                skill_interests=self._extract_skill_interests(behaviors),
+                job_search_patterns=self._extract_job_search_patterns(behaviors),
+                feedback_history=[],  # Placeholder for future implementation
+                success_metrics={}    # Placeholder for future implementation
             )
             
             self.user_profile_cache = profile
             return profile
             
         except Exception as e:
-            logger.error(f"Error getting user learning profile: {e}")
+            logger.error(f"Error building user learning profile: {e}")
             return None
 
-    def _analyze_interaction_patterns_safe(self, behaviors: List[UserBehavior]) -> Dict[str, Any]:
+    def _analyze_interaction_patterns(self, behaviors: List[UserBehavior]) -> Dict[str, Any]:
         """Analyze interaction patterns safely"""
         
         patterns = {
@@ -303,74 +268,83 @@ class AsyncSafeEnhancedMemoryManager:
         
         return patterns
 
-    async def save_user_behavior_safe(
+    def _extract_skill_interests(self, behaviors: List[UserBehavior]) -> List[str]:
+        """Extract skill interests from user behaviors."""
+        interests = set()
+        for behavior in behaviors:
+            if behavior.action_type == "skill_search":
+                try:
+                    context = json.loads(behavior.context)
+                    if "skills" in context:
+                        interests.update(context["skills"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        return list(interests)
+
+    def _extract_job_search_patterns(self, behaviors: List[UserBehavior]) -> Dict[str, Any]:
+        """Extract job search patterns from user behaviors."""
+        patterns = {}
+        for behavior in behaviors:
+            if behavior.action_type == "job_search":
+                try:
+                    context = json.loads(behavior.context)
+                    if "keywords" in context:
+                        patterns["keywords"] = context["keywords"]
+                    if "location" in context:
+                        patterns["location"] = context["location"]
+                    if "remote" in context:
+                        patterns["remote"] = context["remote"]
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        return patterns
+
+    async def save_user_behavior(
         self,
         action_type: str,
         context: Dict[str, Any],
         success: bool = True
-    ) -> bool:
-        """Save user behavior safely inside an async transaction"""
-
-        if self.db is None:
-            logger.info(
-                f"User behavior (no-db): {action_type} - {json.dumps(context, default=str)[:100]}..."
-            )
-            return True
-
-        async def _write():
-            async with async_session_maker() as session:
-                async with session.begin():
-                    session.add(
-                        UserBehavior(
-                            user_id=self.user_id,
-                            action_type=action_type,
-                            context=context,  # Pass as dict directly for JSON column
-                            success=success,
-                        )
-                    )
-
+    ):
+        """
+        Saves a user's action and its context to the database for later analysis.
+        """
         try:
-            asyncio.create_task(_write())
-            return True
+            behavior = UserBehavior(
+                user_id=self.user_id,
+                action_type=action_type,
+                context=context,
+                success=success
+            )
+            self.db.add(behavior)
+            await self.db.commit()
         except Exception as e:
             logger.warning(f"Could not save user behavior: {e}")
-            return False
+            await self.db.rollback()
 
-    async def save_user_preference_safe(
+    async def save_user_preference(
         self,
         preference_key: str,
         preference_value: Any,
-    ) -> bool:
-        """Save user preference safely inside an async transaction"""
-
-        if self.db is None:
-            logger.info(f"User preference (no-db): {preference_key} = {preference_value}")
-            return True
-
-        async def _write_pref():
-            async with async_session_maker() as session:
-                async with session.begin():
-                    await session.merge(
-                        UserPreference(
-                            user_id=self.user_id,
-                            preference_key=preference_key,
-                            preference_value=json.dumps(preference_value, default=str),
-                            updated_at=datetime.utcnow(),
-                        )
-                    )
-
+    ):
+        """
+        Saves or updates a user's preference in the database.
+        """
         try:
-            asyncio.create_task(_write_pref())
-            return True
+            preference = UserPreference(
+                user_id=self.user_id,
+                preference_key=preference_key,
+                preference_value=json.dumps(preference_value, default=str),
+            )
+            await self.db.merge(preference)
+            await self.db.commit()
         except Exception as e:
             logger.warning(f"Could not save user preference: {e}")
-            return False
+            await self.db.rollback()
 
-    async def get_contextual_system_prompt_safe(self) -> str:
+    async def get_contextual_system_prompt(self) -> str:
         """Get contextual system prompt with safe async operations"""
         
         try:
-            context = await self.get_enhanced_conversation_context(include_user_learning=False)
+            context = await self.get_conversation_context(include_user_learning=False)
             
             base_prompt = (
                 "You are Job Hacker Bot, an expert AI assistant specialized in job searching, "
@@ -404,19 +378,13 @@ class AsyncSafeEnhancedMemoryManager:
                 "career development, and professional advancement."
             )
 
-    async def get_enhanced_conversation_context_safe(
-        self, 
-        page_id: Optional[str] = None,
-        include_user_learning: bool = True
-    ) -> ConversationContext:
-        """Safe wrapper for get_enhanced_conversation_context"""
-        try:
-            return await self.get_enhanced_conversation_context(page_id, include_user_learning)
-        except Exception as e:
-            logger.error(f"Error in get_enhanced_conversation_context_safe: {e}")
-            return self._create_empty_context()
-
-# Legacy compatibility - wrapper for the fixed version
-class EnhancedMemoryManager(AsyncSafeEnhancedMemoryManager):
-    """Legacy wrapper for backwards compatibility"""
-    pass 
+    def _create_empty_context(self) -> ConversationContext:
+        """Creates a default, empty context object."""
+        return ConversationContext(
+            summary="New conversation started.",
+            key_topics=[],
+            user_preferences={},
+            recent_messages=[],
+            conversation_length=0,
+            last_updated=datetime.utcnow()
+        ) 
