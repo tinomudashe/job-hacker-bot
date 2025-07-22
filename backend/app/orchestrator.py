@@ -2914,8 +2914,8 @@ ENHANCED CONTENT:"""
                     # 2. Create the generation chain to output structured JSON.
                     parser = PydanticOutputParser(pydantic_object=ResumeData)
                     
-                    prompt = ChatPromptTemplate.from_template(
-                        """You are an expert career coach and resume writer. Your task is to refine a user's resume and return it as a structured JSON object.
+                    prompt = PromptTemplate(
+                        template="""You are an expert career coach and resume writer. Your task is to refine a user's resume and return it as a structured JSON object.
                         
                         USER'S CURRENT RESUME DATA:
                         {context}
@@ -2932,7 +2932,9 @@ ENHANCED CONTENT:"""
                         - Return ONLY a valid JSON object matching the provided schema. Do not add any extra text or formatting.
 
                         {format_instructions}
-                        """
+                        """,
+                        input_variables=["context", "target_role", "company_name", "job_description"],
+                        partial_variables={"format_instructions": parser.get_format_instructions()},
                     )
                     
                     llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.3)
@@ -2944,10 +2946,9 @@ ENHANCED CONTENT:"""
                         "target_role": target_role,
                         "company_name": company_name or "target companies",
                         "job_description": job_description or f"General {target_role} position requirements",
-                        "format_instructions": parser.get_format_instructions(),
                     })
                     
-                    # 4. Update the user's single master resume record with the new structured data.
+                    # 4. FIX: Update the user's single master resume record with the new structured data.
                     db_resume.data = refined_resume_data.dict()
                     attributes.flag_modified(db_resume, "data")
                     await session.commit()
