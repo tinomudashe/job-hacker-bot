@@ -314,21 +314,37 @@ export function PDFGenerationDialog({
               profileData.phone
             );
 
-            // Populate personal info with user's profile data
-            setPersonalInfo({
+            // EDIT: The data loading logic is now more robust. It prioritizes the comprehensive
+            // /api/resume endpoint as the source of truth and uses /api/profile only as a fallback.
+            // This prevents race conditions where the faster but less complete profile data could
+            // overwrite the more detailed resume data.
+            const finalPersonalInfo = {
               fullName:
-                `${profileData.first_name || ""} ${
-                  profileData.last_name || ""
+                resumeData?.personalInfo?.name ||
+                `${profileData?.first_name || ""} ${
+                  profileData?.last_name || ""
                 }`.trim() ||
-                profileData.name ||
+                profileData?.name ||
                 "",
-              email: profileData.email || "",
-              phone: profileData.phone || "",
-              address: profileData.address || "",
-              linkedin: profileData.linkedin || "",
-              website: "", // No website field in user profile currently
-              summary: profileData.profile_headline || "",
-            });
+              email:
+                resumeData?.personalInfo?.email || profileData?.email || "",
+              phone:
+                resumeData?.personalInfo?.phone || profileData?.phone || "",
+              address:
+                resumeData?.personalInfo?.location ||
+                profileData?.address ||
+                "",
+              linkedin:
+                resumeData?.personalInfo?.linkedin ||
+                profileData?.linkedin ||
+                "",
+              website: resumeData?.personalInfo?.website || "", // Profile doesn't have this
+              summary:
+                resumeData?.personalInfo?.summary ||
+                profileData?.profile_headline ||
+                "",
+            };
+            setPersonalInfo(finalPersonalInfo);
           }
 
           if (resumeResponse.ok) {
@@ -728,7 +744,7 @@ export function PDFGenerationDialog({
             id: edu.id || crypto.randomUUID(),
             degree: edu.degree,
             institution: edu.school,
-            dates: { start: null, end: edu.year },
+            dates: edu.year,
             description: edu.description,
           })),
         skills: skillsArray.filter((s) => s.trim()),
