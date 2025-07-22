@@ -763,7 +763,20 @@ async def orchestrator_websocket(
         if db_resume and db_resume.data:
             from app.resume import fix_resume_data_structure
             
-            fixed_data = fix_resume_data_structure(db_resume.data)
+            # FIX: Defensively ensure the data from the database has all required keys
+            # before attempting to validate it with the Pydantic model. This handles
+            # legacy resume records that might be missing newer fields.
+            data_from_db = db_resume.data.copy() # Use a copy to avoid modifying the original
+            data_from_db.setdefault('personalInfo', {})
+            data_from_db.setdefault('experience', [])
+            data_from_db.setdefault('education', [])
+            data_from_db.setdefault('skills', [])
+            data_from_db.setdefault('projects', [])
+            data_from_db.setdefault('certifications', [])
+            data_from_db.setdefault('languages', [])
+            data_from_db.setdefault('interests', []) # Add the missing 'interests' key
+
+            fixed_data = fix_resume_data_structure(data_from_db)
 
             # FIX: Add date parsing logic directly within this helper function.
             # This ensures any tool calling this helper gets clean, valid data.
@@ -805,7 +818,8 @@ async def orchestrator_websocket(
             skills=[],
             projects=[],
             certifications=[],
-            languages=[]
+            languages=[],
+            interests=[] # Also add the missing 'interests' key here
         )
         new_db_resume = Resume(user_id=user_id, data=new_resume_data.dict())
         db.add(new_db_resume)
@@ -2524,9 +2538,11 @@ You can download your CV/Resume in multiple professional styles. The download di
                 log.info(f"Detected attached file in query: '{extracted_filename}'. Analyzing it directly.")
                 
                 # Find the specific document, prioritizing the most recent one
+                # FIX: Use the locally scoped 'user_id' instead of the detached 'user.id'
+                # to prevent a synchronous DB call within an async context.
                 doc_result = await db.execute(
                     select(Document).where(
-                        Document.user_id == user.id,
+                        Document.user_id == user_id,
                         Document.name.ilike(f"%{extracted_filename}%")
                     ).order_by(Document.date_created.desc())
                 )
@@ -2570,8 +2586,9 @@ You can download your CV/Resume in multiple professional styles. The download di
                 f"Skills: {user.skills}"
             )
 
+            # FIX: Use the locally scoped 'user_id' here as well for the same reason.
             doc_result = await db.execute(
-                select(Document).where(Document.user_id == user.id)
+                select(Document).where(Document.user_id == user_id)
             )
             documents = doc_result.scalars().all()
 
