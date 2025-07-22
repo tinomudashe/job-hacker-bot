@@ -198,10 +198,10 @@ async def generate_cv(
                 "summary": "Example CV data structure.",
                 "value": {
                     "personal_info": {
-                        "full_name": "Tinomudashe Marecha",
-                        "email": "jnrhapson@yahoo.com",
+                        "full_name": "John Doe",
+                        "email": "john.doe@example.com",
                         "phone": "+1 (123) 456-7890",
-                        "linkedin_url": "https://www.linkedin.com/in/myLinkedIn",
+                        "linkedin_url": "https://www.linkedin.com/in/johndoe",
                         "location": "New York, NY",
                         "summary": "A concise overview of your professional background..."
                     },
