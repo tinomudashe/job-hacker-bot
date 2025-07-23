@@ -2,7 +2,7 @@ import os
 import logging
 import httpx
 import asyncio
-from typing import List, Optional
+from typing import List, Optional, AsyncIterator, Tuple, Dict, Any
 import uuid
 import json
 from pathlib import Path
@@ -63,6 +63,87 @@ from app.cover_letter_generator import (
 )
 from sqlalchemy.orm import joinedload,attributes
 import json
+
+# --- START LANGGRAPH IMPLEMENTATION ---
+from typing import TypedDict, Union
+from langchain_core.messages import BaseMessage
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.graph import StateGraph, END
+from langgraph.pregel import Pregel
+from langchain_core.agents import AgentAction, AgentFinish
+
+# 1. Define Graph State
+class GraphState(TypedDict):
+    """
+    Represents the state of our graph.
+    Attributes:
+        input: The user's input message.
+        chat_history: The history of the conversation.
+        agent_outcome: The decision made by the agent (e.g., call a tool or finish).
+        tool_output: The result from a tool execution.
+    """
+    input: str
+    chat_history: List[BaseMessage]
+    agent_outcome: Union[AgentAction, AgentFinish, None]
+    tool_output: Optional[str]
+
+# 2. Custom Database Checkpointer
+class DatabaseCheckpointSaver(BaseCheckpointSaver):
+    """
+    A custom checkpointer that saves and loads conversation state
+    to and from our PostgreSQL database using the EnhancedMemoryManager.
+    """
+    def __init__(self, user: User, db_session_factory):
+        super().__init__()
+        self.user = user
+        self.db_session_factory = db_session_factory
+
+    @property
+    def is_async(self) -> bool:
+        return True
+
+    async def aget_tuple(self, config: Dict[str, Any]) -> Optional[tuple]:
+        """Load a conversation state from the database."""
+        thread_id = config["configurable"]["thread_id"] # page_id
+        async with self.db_session_factory() as session:
+            memory_manager = EnhancedMemoryManager(session, self.user)
+            memory_context = await memory_manager.get_conversation_context(thread_id)
+
+            if memory_context is None or not memory_context.recent_messages:
+                return None
+
+            chat_history = []
+            for msg in memory_context.recent_messages:
+                if msg.get("role") == "user":
+                    chat_history.append(HumanMessage(content=msg.get("content", "")))
+                elif msg.get("role") == "assistant":
+                    chat_history.append(AIMessage(content=msg.get("content", "")))
+
+            checkpoint = {
+                "ts": memory_context.last_updated.isoformat(),
+                "channel_values": {
+                    "chat_history": chat_history
+                }
+            }
+            return (config, checkpoint, None)
+
+    async def alist(self, config: Dict[str, Any]) -> AsyncIterator[Tuple[Dict, Dict]]:
+        # This is required by the abstract class, but we don't need to implement it
+        # for our use case as we are not listing multiple checkpoints.
+        async def empty_iterator():
+            if False:
+                yield
+        return empty_iterator()
+
+    async def aput(self, config: Dict[str, Any], checkpoint: Dict[str, Any]) -> None:
+        """Save a conversation state to the database."""
+        # In our architecture, message saving is handled outside the graph loop
+        # right after receiving it from the user and after the agent generates a response.
+        # Therefore, this method can be a no-op. The `aget_tuple` is the critical part
+        # for loading the history correctly.
+        return
+# --- END LANGGRAPH IMPLEMENTATION ---
+
 
 # --- Configuration & Logging ---
 log = logging.getLogger(__name__)
@@ -4715,233 +4796,38 @@ Your resume database record is now properly structured. Try clicking a download 
             log.error(f"Error using LangChain WebBrowser tool for {url}: {e}")
             return f"❌ Error browsing {url}: {str(e)}. Please try again or use a different URL."
 
-    # Add the new tools to the tools list - CV/RESUME TOOLS FIRST for priority!
-    tools = [
-        # ⭐ CV/RESUME TOOLS (HIGHEST PRIORITY) ⭐
-        refine_cv_for_role,  # 🥇 PRIMARY CV refinement tool - FIRST PRIORITY!
-        generate_tailored_resume,  # Tailored resume generation tool
-        create_resume_from_scratch,  # Resume creation from scratch tool
-        enhance_resume_section,  # Resume section enhancement tool
-        get_cv_best_practices,  # Comprehensive CV guidance tool
-        analyze_skills_gap,  # Skills gap analysis tool
-        get_ats_optimization_tips,  # ATS optimization guide
-        show_resume_download_options,  # CV/Resume download center
-        generate_resume_pdf,
-        
-        # 🎯 PROFILE MANAGEMENT TOOLS
-        extract_and_populate_profile_from_documents,  # Extract real info from documents
-        get_authenticated_user_data,  # Access protected endpoints via WebSocket auth
-        
-        # 🔗 COVER LETTER TOOLS (SEPARATE FROM CV TOOLS) 🔗
-        generate_cover_letter_from_url,
-        generate_cover_letter,
-        
-        # 📋 PROFILE & DATA MANAGEMENT TOOLS
-        update_personal_information,
-        update_user_profile,  # NEW: Comprehensive user profile updates
-        manage_skills_comprehensive,  # NEW: Advanced skills management with categories
-        add_work_experience,  # ENHANCED: Now with detailed variables
-        add_education,  # ENHANCED: Now with detailed variables
-        add_project,  # NEW: Project management with detailed variables
-        add_certification,  # NEW: Certification management
-        set_skills,
-        
-        # 🔍 DOCUMENT & SEARCH TOOLS
-        enhanced_document_search,  # Enhanced document search tool
-        get_document_insights,  # Enhanced document insights tool
-        analyze_specific_document,  # Specific document analysis tool
-        list_documents,
-        read_document,
-        search_web_for_advice,  # NEW: Web search for up-to-date advice and information
-        
-        # 🎯 JOB SEARCH TOOLS (PRIORITY ORDER)
-        search_jobs_linkedin_api,  # ⭐ PRIMARY: Direct LinkedIn API access
-        
-        
-        # 🚀 CAREER DEVELOPMENT TOOLS
-        get_interview_preparation_guide,  # Interview prep tool
-        get_salary_negotiation_advice,  # Salary negotiation guide
-        create_career_development_plan,  # Career planning tool,
-        check_and_fix_resume_data_structure,  # Resume data structure check tool
-        
-        # 🕐 CONTEXT AWARENESS TOOLS
-        get_current_time_and_date,  # NEW: Current date/time awareness for temporal context
-        get_user_location_context,  # NEW: User location and market context
-        update_user_location,  # NEW: Update user location in profile
-        browse_web_with_langchain,
-    ]
-
-    # --- Add browser tools ---
-    # Try Playwright browser tool first (synchronous version)
-    try:
-        from app.langchain_webbrowser import create_webbrowser_tool
-        browser_tool = create_webbrowser_tool()
-        tools.append(browser_tool)
-        log.info("Added Playwright browser tool to agent")
-    except Exception as e:
-        log.warning(f"Failed to add Playwright browser tool: {e}")
-        # Fall back to simple browser tool
-        try:
-            from app.simple_browser_tool import create_simple_browser_tool
-            browser_tool = create_simple_browser_tool()
-            tools.append(browser_tool)
-            log.info("Added simple browser tool to agent as fallback")
-        except Exception as e2:
-            log.warning(f"Failed to add simple browser tool: {e2}")
-
-    # Add advanced memory tools if available
-    if 'memory_tools' in locals() and memory_tools:
-        tools.extend(memory_tools)
-        log.info(f"Added {len(memory_tools)} advanced memory tools to agent")
-    
+    # --- Document Retriever Tool ---
     if retriever:
         retriever_tool = create_retriever_tool(
             retriever,
             "document_retriever",
-            "Searches and returns information from the user's documents."
+            "Searches and retrieves information from the user's uploaded documents (CV, resume, etc.). Use this to answer questions about the user's background, skills, and experience."
         )
         tools.append(retriever_tool)
 
-    # Generate enhanced system prompt with user profile context
-    try:
-        # Build user context directly since memory manager is disabled
-        user_context_parts = []
+    # --- LangGraph Setup ---
+    # We define the graph components here, inside the websocket function,
+    # so they have access to the `tools` list and other local variables.
+
+    async def call_agent(state: GraphState):
+        """Invokes the agent with the current state."""
+        # FIX: Re-create the agent on each turn to get the latest contextual prompt.
+        # This ensures the agent's instructions are always up-to-date with the conversation summary.
+        enhanced_system_prompt = await memory_manager.get_contextual_system_prompt()
+        agent_runnable = create_master_agent(tools, user_documents, enhanced_system_prompt)
         
-        # Get user's name and basic info from Clerk
-        user_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or "User"
-        user_context_parts.append(f"User Name: {user_name}")
-        if user.email:
-            user_context_parts.append(f"Email: {user.email}")
-        
-        # Add location context
-        if hasattr(user, 'address') and user.address:
-            user_context_parts.append(f"Location: {user.address}")
-        else:
-            user_context_parts.append("Location: Not specified (recommend calling get_user_location_context)")
-        
-        # Add current time context
-        from datetime import datetime
-        current_time = datetime.now()
-        user_context_parts.append(f"Current Time: {current_time.strftime('%A, %B %d, %Y at %I:%M %p')}")
-        user_context_parts.append(f"Session Context: {'Business hours' if 9 <= current_time.hour <= 17 else 'After hours'}")
-        
-        # Get user's resume data from database
-        try:
-            result = await db.execute(select(Resume).where(Resume.user_id == user_id))
-            db_resume = result.scalars().first()
-            
-            if db_resume:
-                if db_resume.personal_info:
-                    personal = db_resume.personal_info
-                    if personal.get('summary'):
-                        user_context_parts.append(f"Professional Summary: {personal['summary'][:200]}")
-                    if personal.get('location'):
-                        user_context_parts.append(f"Location: {personal['location']}")
-                
-                if db_resume.experience and isinstance(db_resume.experience, list):
-                    exp_count = len(db_resume.experience)
-                    user_context_parts.append(f"Work Experience: {exp_count} positions on file")
-                
-                if db_resume.data and db_resume.data.get('skills') and isinstance(db_resume.data.get('skills'), list):
-                    skills_list = db_resume.data.get('skills', [])
-                    skills_preview = ", ".join(skills_list[:8])
-                    user_context_parts.append(f"Technical Skills: {skills_preview}...")
-        except Exception as e:
-            log.warning(f"Could not retrieve user resume data: {e}")
-        
-        # Get uploaded documents count
-        try:
-            doc_count_result = await db.execute(
-                select(Document).where(Document.user_id == user_id)
-            )
-            documents = doc_count_result.scalars().all()
-            if documents:
-                user_context_parts.append(f"Uploaded Documents: {len(documents)} files available")
-        except Exception as e:
-            log.warning(f"Could not retrieve document count: {e}")
-        
-        # Build enhanced system prompt with user context
-        user_context_text = "\n".join(user_context_parts)
-        
-        enhanced_system_prompt = f"""## 🎯 USER PROFILE CONTEXT
-{user_context_text}
+        inputs = {"input": state["input"], "chat_history": state["chat_history"]}
+        agent_outcome = await agent_runnable.ainvoke(inputs)
+        return {"agent_outcome": agent_outcome}
 
-## 🔥 CRITICAL RULES FOR USER {user_name.upper()}:
+    async def execute_tools_node(state: GraphState):
+        """Executes tools and returns the output."""
+        # ... existing code ...
 
-### ✅ YOU HAVE FULL ACCESS TO USER DATA:
-- Resume/CV information in database
-- Uploaded documents and files  
-- Profile information from Clerk
-- Work experience, education, skills
-- Personal information and contact details
-
-### ❌ NEVER ASK FOR BACKGROUND INFORMATION:
-- ❌ NEVER say "I need you to provide your background"
-- ❌ NEVER say "Could you tell me about your experience" 
-- ❌ NEVER say "Please provide your skills"
-- ❌ NEVER say "I'm still under development and need information"
-- ❌ NEVER say "I apologize, I'm still under development and my memory is limited"
-
-### ✅ ALWAYS USE YOUR TOOLS:
-- Use enhanced_document_search for user information
-- Use cover letter tools that auto-access profile data
-- Use CV refinement tools that pull from database
-- Access resume data automatically through tools
-- Use search_web_for_advice for current industry trends, salary info, interview tips, and up-to-date career guidance
-
-### ✅ FOR COVER LETTERS:
-- Ask ONLY for: job URL OR (company name + job title + job description)
-- NEVER ask for user's background - tools access this automatically
-- ALWAYS CALL generate_cover_letter or generate_cover_letter_from_url tools
-- ALL cover letter responses MUST include [DOWNLOADABLE_COVER_LETTER] marker for download button
-- ALWAYS show the FULL cover letter content in the message, not just a summary
-
-### ✅ FOR CV/RESUME WORK:
-- Use refine_cv_for_role for CV enhancement requests
-- Never ask for user's CV content - you can access it
-- Tools automatically pull from database and uploaded files
-- ALL CV/resume responses MUST include [DOWNLOADABLE_RESUME] marker for download button
-- ALWAYS CALL the CV/resume tools - NEVER just provide text without calling tools
-
-### ✅ FOR PROFILE MANAGEMENT:
-- If user has placeholder data (like "New User", "c0e8daf4@noemail.com"), IMMEDIATELY call extract_and_populate_profile_from_documents BEFORE any other action
-- When generating resumes/CVs with placeholder data, FIRST call extract_and_populate_profile_from_documents, then generate the resume
-- AUTOMATICALLY call extract_and_populate_profile_from_documents whenever you detect placeholder email patterns (@noemail.com)
-- ALWAYS ensure ALL variables are populated (name, email, phone, location, LinkedIn, skills, education, experience, projects, certifications) so PDF dialog has NO empty fields
-- NEVER generate resumes/CVs with placeholder data - always extract real data first
-
-### ✅ FOR WEB SEARCH & CURRENT INFORMATION:
-- Use search_web_for_advice when user asks for current trends, market conditions, or recent developments
-- Search for up-to-date salary information, industry insights, or interview preparation tips
-- Get current information about companies, technologies, or career advice
-- Examples: "latest remote work trends", "current software engineer salary ranges", "interview tips for tech companies"
-- ALWAYS use web search for questions that require recent, current, or trending information
-- DO NOT use web search for job searching - use existing job search tools instead
-
-### ✅ FOR LOCATION & TIME AWARENESS:
-- Use get_user_location_context to understand user's job market and provide location-specific advice
-- Use get_current_time_and_date for time-sensitive recommendations (e.g., application timing, business hours)
-- Consider location when discussing salary ranges, cost of living, and job market conditions
-- Use update_user_location when user mentions moving or changing location
-- Provide timezone-aware advice for remote work and international opportunities
-- Examples: "Poland tech salaries", "best time to apply for jobs", "remote work from your location"
-
-### ✅ FOR CONTEXTUAL CAREER ADVICE:
-- Always consider user's current location when providing salary guidance or job market insights
-- Use time context for application timing, interview scheduling, and career planning advice
-- Combine location + time + web search for comprehensive, current, and relevant career guidance
-- Adapt advice based on local business culture and market conditions
-
-Remember: You are an intelligent assistant with full access to {user_name}'s data, current location context, real-time information, AND current web information. Use your tools confidently!"""
-        
-        master_agent = create_master_agent(tools, user_documents, enhanced_system_prompt)
-        log.info(f"Created master agent with user context for {user_name} (user {user_id})")
-        
-    except Exception as e:
-        log.warning(f"Failed to create enhanced context agent, falling back to basic: {e}")
-        master_agent = create_master_agent(tools, user_documents)
-
-    # --- Enhanced Chat History & Main Loop ---
+    # Compile the graph with our custom database checkpointer
+    graph = workflow.compile(checkpointer=DatabaseCheckpointSaver(user, async_session_maker))
+    
+    # --- Main WebSocket Loop ---
     try:
         if memory_manager:
             # Get enhanced conversation context with summarization and user learning
