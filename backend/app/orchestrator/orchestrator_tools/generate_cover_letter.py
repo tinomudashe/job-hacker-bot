@@ -5,7 +5,8 @@ from langchain_core.output_parsers import PydanticOutputParser
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models_db import User, GeneratedCoverLetter
 from .get_or_create_resume import get_or_create_resume
-from ..orchestrator_models.CoverLetterDetails import CoverLetterDetails
+from ..CoverLetterDetails import CoverLetterDetails
+from ..education_input import PersonalInfo, ResumeData
 import json
 import uuid
 import logging

@@ -52,7 +52,7 @@ from .orchestrator_tools.refine_cover_letter_from_url import refine_cover_letter
 from .orchestrator_tools.refine_cv_for_role import refine_cv_for_role
 from .orchestrator_tools.search_jobs_linkedin_api import search_jobs_linkedin_api
 from .orchestrator_tools.set_skills import set_skills
-from .orchestrator_tools.show_resume_download_option import show_resume_download_option
+from .orchestrator_tools.show_resume_download_options import show_resume_download_options
 from .orchestrator_tools.update_personal_information import update_personal_information
 
 load_dotenv()
@@ -185,7 +185,7 @@ async def orchestrator_websocket(
         partial(refine_cv_for_role, db=db, user=user),
         partial(enhance_resume_section, db=db, user=user),
         partial(generate_resume_pdf, db=db, user=user),
-        partial(show_resume_download_option, db=db, user=user),
+        partial(show_resume_download_options, db=db, user=user),
     ]
     job_search_tools = [search_jobs_linkedin_api, browse_web_with_langchain]
     career_guidance_tools = [

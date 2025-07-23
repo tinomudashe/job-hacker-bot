@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from app.models_db import User, GeneratedCoverLetter
 from app.url_scraper import scrape_job_url, JobDetails
-from ..orchestrator_models.CoverLetterDetails import CoverLetterDetails
+from ..CoverLetterDetails import CoverLetterDetails
 from app.db import get_db_session
 
 from langchain_core.prompts import PromptTemplate
