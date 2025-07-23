@@ -4434,132 +4434,42 @@ This up-to-date information can help inform your career decisions and strategies
 
     @tool
     async def get_current_time_and_date() -> str:
-        """
-        Get the current date, time, and timezone information.
-        
-        Use this tool when you need to provide time-sensitive advice, 
-        reference current events, or understand temporal context for user requests.
-        
-        Returns:
-            Current date, time, day of week, and timezone information
-        """
-        try:
-            from datetime import datetime
-            import pytz
-            
-            # Get current UTC time
-            utc_now = datetime.utcnow()
-            
-            # Get current local time (assuming server timezone)
-            local_now = datetime.now()
-            
-            # Format the information
-            current_info = f"""🕐 **Current Date & Time Information:**
+        """Gets the current date and time for temporal context."""
+        now = datetime.now()
+        return f"Current date and time is: {now.strftime('%A, %B %d, %Y at %I:%M %p')}"
 
-**📅 Date:** {local_now.strftime('%A, %B %d, %Y')}
-**🕒 Time:** {local_now.strftime('%I:%M %p')} (Local)
-**🌍 UTC Time:** {utc_now.strftime('%I:%M %p UTC')}
-**📆 Day of Week:** {local_now.strftime('%A')}
-**🗓️ Week of Year:** Week {local_now.isocalendar()[1]}
-**🌅 Quarter:** Q{(local_now.month - 1) // 3 + 1} {local_now.year}
-
-**💡 Context for Advice:**
-- Current season: {'Winter' if local_now.month in [12, 1, 2] else 'Spring' if local_now.month in [3, 4, 5] else 'Summer' if local_now.month in [6, 7, 8] else 'Fall'}
-- Business hours context: {'Business hours' if 9 <= local_now.hour <= 17 else 'After hours'}
-- This is helpful for timing job applications, interview scheduling, and understanding market cycles."""
-            
-            log.info(f"✅ Provided current time/date context: {local_now.strftime('%Y-%m-%d %H:%M')}")
-            return current_info
-            
-        except Exception as e:
-            log.error(f"Error getting current time/date: {e}")
-            return f"❌ Unable to retrieve current date/time information: {str(e)}"
-    
     @tool
     async def get_user_location_context() -> str:
-        """
-        Get the user's location and relevant context for career advice.
-        
-        Use this tool to understand the user's geographic context for job market advice,
-        salary expectations, industry presence, and location-specific career guidance.
-        
-        Returns:
-            User's location information and relevant career market context
-        """
+        """Gets user's location based on their IP address for local job market context."""
         try:
-            # Get user's location from profile
-            user_location = user.address if hasattr(user, 'address') and user.address else None
-            
-            if not user_location:
-                return """📍 **Location Information:**
+            # FIX: Use an asynchronous HTTP client to prevent blocking the event loop.
+            async with httpx.AsyncClient() as client:
+                response = await client.get("https://ipinfo.io/json", timeout=10.0)
+                response.raise_for_status()
+                data = response.json()
 
-**Current Location:** Not specified in profile
-**Recommendation:** Consider updating your profile with your location for more targeted job and salary advice.
-
-**💡 How to Update:**
-You can tell me: "Update my location to [City, Country]" and I'll update your profile."""
+            city = data.get("city", "Unknown")
+            region = data.get("region", "Unknown")
+            country = data.get("country", "Unknown")
             
-            # Basic location parsing and context
-            location_parts = user_location.split(',')
-            city = location_parts[0].strip() if len(location_parts) > 0 else ""
-            country = location_parts[-1].strip() if len(location_parts) > 1 else ""
+            location_str = f"Location: {city}, {region}, {country}"
             
-            # Provide context based on known locations
-            location_context = ""
-            if "Poland" in country or "warsaw" in city.lower() or "krakow" in city.lower() or "gdansk" in city.lower():
-                location_context = """
-**🇵🇱 Poland Career Context:**
-- Strong tech hub with growing startup ecosystem
-- Major companies: CD Projekt, Allegro, LiveChat, Asseco
-- Average tech salaries: 8,000-20,000 PLN/month for developers
-- Work permit friendly for EU citizens
-- Growing remote work opportunities
-- Major tech cities: Warsaw, Krakow, Gdansk, Wroclaw"""
+            # Update user's profile with this location if it's missing
+            if not user.address and city:
+                async with async_session_maker() as session:
+                    user_to_update = await session.get(User, user_id)
+                    if user_to_update:
+                        user_to_update.address = f"{city}, {country}"
+                        session.add(user_to_update)
+                        await session.commit()
+                        return f"✅ Location identified as {location_str} and saved to profile."
             
-            elif "Germany" in country or "berlin" in city.lower() or "munich" in city.lower():
-                location_context = """
-**🇩🇪 Germany Career Context:**
-- Largest tech market in Europe
-- Strong engineering and automotive sectors
-- Average tech salaries: €50,000-€90,000+ annually
-- Blue Card available for skilled workers
-- Excellent work-life balance culture
-- Major tech hubs: Berlin, Munich, Hamburg, Frankfurt"""
-            
-            elif "Remote" in user_location or "remote" in user_location.lower():
-                location_context = """
-**🌍 Remote Work Context:**
-- Access to global job market
-- Salary ranges vary by company location and policy
-- Consider timezone overlaps for team collaboration
-- Growing demand across all industries
-- Important to specify preferred time zones and regions"""
-            
-            else:
-                location_context = f"""
-**🌐 {country} Career Context:**
-- Consider local job market conditions and salary ranges
-- Research major companies and industries in your area
-- Networking opportunities through local tech meetups
-- Remote work may expand your opportunities globally"""
-            
-            location_info = f"""📍 **Your Location Context:**
-
-**Current Location:** {user_location}
-**City:** {city}
-**Country/Region:** {country}
-{location_context}
-
-**💡 Location-Aware Advice:**
-I can now provide location-specific salary guidance, job market insights, and career advice tailored to your geographic area."""
-            
-            log.info(f"✅ Provided location context for user in: {user_location}")
-            return location_info
+            return f"✅ User location identified as: {location_str}"
             
         except Exception as e:
-            log.error(f"Error getting user location context: {e}")
+            log.error(f"Unable to retrieve location information: {e}", exc_info=True)
             return f"❌ Unable to retrieve location information: {str(e)}"
-    
+
     @tool
     async def update_user_location(
         location: str
