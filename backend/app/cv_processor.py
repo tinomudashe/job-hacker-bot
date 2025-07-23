@@ -5,8 +5,14 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, EmailStr
 import json
 from pathlib import Path
-from PyPDF2 import PdfReader
+import io
 import docx
+from PIL import Image
+from pdf2image import convert_from_path
+from pypdf import PdfReader
+
+from app.schemas import ResumeData, PersonalInfo, Experience, Education, Dates
+from app.llm_utils import call_llm_for_json_extraction
 
 logger = logging.getLogger(__name__)
 
