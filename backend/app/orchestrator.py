@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
-from sqlalchemy import update, func
+from sqlalchemy import update, func, delete
 import re
 
 load_dotenv()
