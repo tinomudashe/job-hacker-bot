@@ -54,3 +54,4 @@ opentelemetry-instrumentation-sqlalchemy>=0.43b0
 
 # Email Sending
 fastapi-mail>=1.4.1
+starlette>=0.47.2 # not directly required, pinned by Snyk to avoid a vulnerability
