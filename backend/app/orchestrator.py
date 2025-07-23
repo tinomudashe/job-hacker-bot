@@ -5231,3 +5231,9 @@ Your resume database record is now properly structured. Try clicking a download 
             })
         except Exception:
             pass  # WebSocket might be closed 
+
+    # Define the graph
+    workflow = StateGraph(GraphState)
+    workflow.add_node("agent", call_agent)
+    workflow.add_node("action", execute_tools_node)
+    workflow.set_entry_point("agent")
