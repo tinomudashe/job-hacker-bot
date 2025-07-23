@@ -12,7 +12,9 @@ import os
 import uuid
 import asyncio
 from pathlib import Path
-from PyPDF2 import PdfReader
+import io
+import docx
+from pypdf import PdfReader
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS

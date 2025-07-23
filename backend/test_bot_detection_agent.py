@@ -6,6 +6,12 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from browser_use import Agent, Controller
 from browser_use.browser import BrowserProfile, BrowserSession
 from browser_use.agent.memory import MemoryConfig
+import io
+import docx
+from pypdf import PdfReader
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from sqlalchemy.ext.asyncio import AsyncSession
 
 load_dotenv()
 
@@ -17,7 +23,6 @@ controller = Controller()
 
 @controller.action('Read my cv for context to fill forms')
 def read_cv():
-    from PyPDF2 import PdfReader
     pdf = PdfReader(CV)
     text = ''
     for page in pdf.pages:

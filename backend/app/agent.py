@@ -189,7 +189,7 @@ async def run_application_agent(
             return cv_info["cv_content"]
         elif CV_PATH.exists():
             logger.info(f"Fallback to default CV at {CV_PATH}")
-            from PyPDF2 import PdfReader
+            from pypdf import PdfReader
             pdf = PdfReader(str(CV_PATH))
             text = "".join(page.extract_text() or "" for page in pdf.pages)
             return text
