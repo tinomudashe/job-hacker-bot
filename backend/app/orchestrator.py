@@ -5237,3 +5237,2044 @@ Your resume database record is now properly structured. Try clicking a download 
     workflow.add_node("agent", call_agent)
     workflow.add_node("action", execute_tools_node)
     workflow.set_entry_point("agent")
+    workflow.add_conditional_edges(
+        "agent",
+        should_continue,
+        {"continue": "action", "end": END}
+    )
+    workflow.add_edge('action', 'agent')
+    
+    # Compile the graph with our custom database checkpointer
+    graph = workflow.compile(checkpointer=DatabaseCheckpointSaver(user, async_session_maker))
+    
+    # --- Main WebSocket Loop ---
+    try:
+        if memory_manager:
+            # Get enhanced conversation context with summarization and user learning
+            context = await memory_manager.get_conversation_context()
+            
+            # Convert recent messages to LangChain format
+            current_chat_history = []
+            for msg_data in context.conversation_history:
+                try:
+                    content = msg_data["content"]
+                    if msg_data["role"] == "user":
+                        current_chat_history.append(HumanMessage(content=content))
+                    else:
+                        current_chat_history.append(AIMessage(content=content))
+                except Exception as e:
+                    log.warning(f"Error processing message in enhanced context: {e}")
+            
+            # Add conversation summary as system message if available
+            if context.context_summary and len(context.conversation_history) > 20:
+                summary_message = HumanMessage(content=f"[Conversation Summary: {context.context_summary}]")
+                current_chat_history.insert(0, summary_message)
+            
+            log.info(f"Loaded enhanced chat history: {len(current_chat_history)} messages, summary available: {bool(context.context_summary)}")
+        else:
+            # Fallback to basic chat history loading
+            raise Exception("Memory manager not available, using basic history")
+        
+    except Exception as e:
+        log.error(f"Error loading enhanced chat history, falling back to basic: {e}")
+        # Fallback to basic chat history loading with proper transaction handling
+        try:
+            if db.is_active:
+                await db.rollback()  # Ensure clean transaction state
+            history_records = await db.execute(
+                select(ChatMessage)
+                .where(ChatMessage.user_id == user_id)
+                .where(ChatMessage.page_id.is_(None))
+                .order_by(ChatMessage.created_at)
+            )
+            
+            current_chat_history = []
+            for r in history_records.scalars().all():
+                try:
+                    content = json.loads(r.message)
+                except (json.JSONDecodeError, TypeError):
+                    content = r.message
+                
+                if r.is_user_message:
+                    current_chat_history.append(HumanMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+                else:
+                    current_chat_history.append(AIMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+        except Exception as fallback_error:
+            log.error(f"Failed to load basic chat history: {fallback_error}")
+            current_chat_history = []  # Start with empty history if all fails
+
+    # Track the currently loaded page to avoid reloading
+    current_loaded_page_id = None
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            
+            # Parse message data to check for page context
+            message_content = data
+            page_id = None
+            
+            try:
+                message_data = json.loads(data)
+
+                if message_data.get("type") == "stop_generation":
+                    log.info("Received stop_generation signal. Halting any current agent activity.")
+                    # We can add more complex cancellation logic here in the future if needed.
+                    # For now, we just ignore the message and wait for the next one.
+                    continue
+                
+                if message_data.get("type") == "clear_context":
+                    current_chat_history = []
+                    current_loaded_page_id = None
+                    log.info(f"Chat context cleared for user {user_id}")
+                    continue
+                elif message_data.get("type") == "switch_page":
+                    # Handle explicit page switching from frontend
+                    new_page_id = message_data.get("page_id")
+                    if new_page_id != current_loaded_page_id:
+                        # --- FIX: Use EnhancedMemoryManager to get context ---
+                        context = await memory_manager.get_conversation_context(new_page_id)
+                        current_chat_history = [
+                            HumanMessage(content=msg["content"]) if msg["role"] == "user" 
+                            else AIMessage(content=msg["content"]) 
+                            for msg in context.recent_messages
+                        ]
+                        current_loaded_page_id = new_page_id
+                        
+                        # Update last_opened_at timestamp
+                        if new_page_id:
+                            await db.execute(
+                                update(Page)
+                                .where(Page.id == new_page_id)
+                                .values(last_opened_at=func.now())
+                            )
+                            await db.commit()
+                            log.info(f"Updated last_opened_at for page {new_page_id}")
+                    continue
+                elif message_data.get("type") == "regenerate":
+                    log.info("🔄 Regeneration request received")
+                    regenerate_content = message_data.get("content", "")
+                    regenerate_page_id = message_data.get("page_id")
+                    
+                    log.info(f"🔄 Regenerate content: '{regenerate_content[:50]}...'")
+                    log.info(f"🔄 Page ID: {regenerate_page_id}")
+                    log.info(f"🔄 Current chat history length: {len(current_chat_history)}")
+                    
+                    # Load page history if we're regenerating from a different page
+                    if regenerate_page_id != current_loaded_page_id:
+                        log.info(f"🔄 Loading history for page {regenerate_page_id} for regeneration")
+                        context = await memory_manager.get_conversation_context(regenerate_page_id)
+                        current_chat_history = [
+                            HumanMessage(content=msg["content"]) if msg["role"] == "user" 
+                            else AIMessage(content=msg["content"]) 
+                            for msg in context.recent_messages
+                        ]
+                        current_loaded_page_id = regenerate_page_id
+                    
+                    # Remove the last AI message from history
+                    if current_chat_history and isinstance(current_chat_history[-1], AIMessage):
+                        removed_message = current_chat_history.pop()
+                        log.info(f"🔄 Removed last AI message from history: '{removed_message.content[:50]}...'")
+                    
+                    # Add the regenerate content as user message if not already present
+                    if not current_chat_history or current_chat_history[-1].content != regenerate_content:
+                        current_chat_history.append(HumanMessage(content=regenerate_content))
+                        log.info(f"🔄 Added regenerate content to history")
+                    
+                    try:
+                        log.info(f"🔄 Starting master agent with {len(current_chat_history)} history messages")
+                        
+                        # Use timeout for regeneration to prevent hanging
+                        try:
+                            response = await asyncio.wait_for(
+                                master_agent.ainvoke({
+                                    "input": regenerate_content,
+                                    "chat_history": current_chat_history,
+                                }),
+                                timeout=180.0  # 3 minute timeout for complex requests
+                            )
+                            
+                            if response and 'output' in response:
+                                agent_response = response['output']
+                                log.info(f"🔄 Master agent regenerated response: '{agent_response[:100]}...'")
+                                
+                                # Delete the last AI message from database before saving new one
+                                try:
+                                    last_ai_message = await db.execute(
+                                        select(ChatMessage)
+                                        .where(ChatMessage.user_id == user.id)
+                                        .where(ChatMessage.page_id == regenerate_page_id)
+                                        .where(ChatMessage.is_user_message == False)
+                                        .order_by(ChatMessage.created_at.desc())
+                                        .limit(1)
+                                    )
+                                    last_ai_msg = last_ai_message.scalars().first()
+                                    if last_ai_msg:
+                                        await db.delete(last_ai_msg)
+                                        log.info(f"🔄 Deleted original AI message {last_ai_msg.id} from database")
+                                    
+                                    # Now save the new regenerated message
+                                    new_message = ChatMessage(
+                                        id=str(uuid.uuid4()),
+                                        user_id=user.id,
+                                        message=agent_response,
+                                        is_user_message=False,
+                                        page_id=regenerate_page_id
+                                    )
+                                    db.add(new_message)
+                                    await db.commit()
+                                    log.info(f"🔄 Regenerated message saved to database with page_id: {regenerate_page_id}")
+                                except Exception as save_error:
+                                    log.error(f"🔄 Error saving regenerated message: {save_error}")
+                                    if db.is_active:
+                                        await db.rollback()
+                                
+                                await websocket.send_json({
+                                    "type": "message",
+                                    "message": agent_response
+                                })
+                            else:
+                                log.error("🔄 Master agent returned invalid response format")
+                                await websocket.send_text("I apologize, but I encountered an issue generating a response. Please try again.")
+                                
+                        except asyncio.TimeoutError:
+                            log.error("🔄 Master agent timed out during regeneration")
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "The regeneration took too long and timed out. Please try again with a simpler request."
+                            })
+                        except Exception as agent_error:
+                            log.error(f"🔄 Master agent error during regeneration: {agent_error}")
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "I encountered an error while regenerating the response. Please try again."
+                            })
+                            
+                    except Exception as e:
+                        log.error(f"🔄 Error during regeneration: {e}", exc_info=True)
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "I apologize, but I encountered an error during regeneration. Please try again."
+                        })
+                    continue
+                elif "content" in message_data:
+                    # New format with page context
+                    message_content = message_data["content"]
+                    page_id = message_data.get("page_id")
+                    
+                    # FIX: If it's the first message of a new chat, page_id will be missing.
+                    # We need to create the page first to get an ID before saving any messages.
+                    if not page_id:
+                        try:
+                            # Create a title from the first message
+                            title = message_content.split('\n')[0]
+                            title = title.split('. ')[0]
+                            title = title.split('? ')[0]
+                            title = title.split('! ')[0]
+                            title = title[:50] + '...' if len(title) > 50 else title
+                            
+                            new_page = Page(user_id=user_id, title=title)
+                            db.add(new_page)
+                            await db.commit()
+                            await db.refresh(new_page)
+                            page_id = new_page.id
+                            log.info(f"✅ Created new page {page_id} for new conversation.")
+                            
+                            # Send the new page_id back to the frontend immediately
+                            await websocket.send_json({
+                                "type": "page_created",
+                                "page_id": page_id,
+                                "title": title,
+                                "created_at": new_page.created_at.isoformat()
+                            })
+                            
+                        except Exception as page_creation_error:
+                            log.error(f"❌ Failed to create new page: {page_creation_error}")
+                            if db.is_active:
+                                await db.rollback()
+                            # Stop processing if we can't create a page
+                            continue
+
+                    # Only load page history if WebSocket context isn't already set for this page
+                    # Frontend is responsible for loading messages via API, WebSocket just tracks context
+                    if page_id != current_loaded_page_id:
+                        if page_id:
+                            # Load conversation history for AI context only (don't send to frontend)
+                            try:
+                                page_history = await db.execute(
+                                    select(ChatMessage)
+                                    .where(ChatMessage.user_id == user_id)
+                                    .where(ChatMessage.page_id == page_id)
+                                    .order_by(ChatMessage.created_at)
+                                )
+                                
+                                # Build chat history for AI context
+                                new_chat_history = []
+                                for r in page_history.scalars().all():
+                                    try:
+                                        content = json.loads(r.message)
+                                    except (json.JSONDecodeError, TypeError):
+                                        content = r.message
+                                    
+                                    if r.is_user_message:
+                                        new_chat_history.append(HumanMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+                                    else:
+                                        new_chat_history.append(AIMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+                                
+                                current_chat_history = new_chat_history
+                                current_loaded_page_id = page_id
+                                log.info(f"WebSocket context loaded {len(current_chat_history)} messages for page {page_id}")
+                            except Exception as page_error:
+                                log.error(f"Failed to load page history for WebSocket context {page_id}: {page_error}")
+                                if db.is_active:
+                                    await db.rollback()
+                                current_chat_history = []
+                        else:
+                            # New conversation - clear context
+                            current_chat_history = []
+                            current_loaded_page_id = None
+                            log.info("WebSocket context switched to new conversation")
+                
+            except json.JSONDecodeError:
+                # It's a regular text message (legacy format)
+                pass
+            
+            # Save user message with page context
+            try:
+                user_message_id = str(uuid.uuid4())
+                db.add(ChatMessage(
+                    id=user_message_id,
+                    user_id=user_id,
+                    page_id=page_id,
+                    message=message_content,
+                    is_user_message=True
+                ))
+                await db.commit()
+                log.info(f"Saved user message {user_message_id} with page_id: {page_id}")
+            except Exception as save_error:
+                log.error(f"Failed to save user message: {save_error}")
+                if db.is_active:
+                    await db.rollback()
+                user_message_id = str(uuid.uuid4())  # Generate new ID for retry
+            
+            current_chat_history.append(HumanMessage(id=user_message_id, content=message_content))
+
+            # Track user message behavior
+            if memory_manager:
+                try:
+                    await memory_manager.save_user_behavior(
+                        action_type="chat_message",
+                        context={
+                            "message_length": len(message_content),
+                            "page_id": page_id,
+                            "timestamp": datetime.utcnow().isoformat()
+                        },
+                        success=True
+                    )
+                except Exception as e:
+                    log.warning(f"Failed to save user behavior: {e}")
+
+            # Pass message to our agent with enhanced context
+            try:
+                response = await master_agent.ainvoke({
+                    "input": message_content,
+                    "chat_history": current_chat_history,
+                })
+                result = response.get("output", "I'm sorry, I encountered an issue.")
+                
+                # Track successful agent response
+                if memory_manager:
+                    await memory_manager.save_user_behavior(
+                        action_type="agent_response",
+                        context={
+                            "response_length": len(result),
+                            "input_length": len(message_content),
+                            "page_id": page_id
+                        },
+                        success=True
+                    )
+                
+            except Exception as e:
+                log.error(f"Error in agent processing: {e}")
+                result = "I'm sorry, I encountered an issue processing your request. Please try again."
+                
+                # Track failed agent response
+                if memory_manager:
+                    try:
+                        await memory_manager.save_user_behavior(
+                            action_type="agent_response",
+                            context={
+                                "error": str(e),
+                                "input_length": len(message_content),
+                                "page_id": page_id
+                            },
+                            success=False
+                        )
+                    except Exception:
+                        pass
+            
+            await websocket.send_json({
+                "type": "message",
+                "message": result
+            })
+            
+            # Save AI message with page context
+            try:
+                ai_message_id = str(uuid.uuid4())
+                db.add(ChatMessage(
+                    id=ai_message_id,
+                    user_id=user_id,
+                    page_id=page_id,
+                    message=result,
+                    is_user_message=False
+                ))
+                await db.commit()
+                log.info(f"Saved AI message {ai_message_id} with page_id: {page_id}")
+            except Exception as save_error:
+                log.error(f"Failed to save AI message: {save_error}")
+                if db.is_active:
+                    await db.rollback()
+                ai_message_id = str(uuid.uuid4())  # Generate new ID for retry
+            
+            current_chat_history.append(AIMessage(id=ai_message_id, content=result))
+            
+    except WebSocketDisconnect:
+        log.info(f"WebSocket disconnected for user {user_id}")
+    except Exception as e:
+        log.error(f"WebSocket error for user {user_id}: {e}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": f"An error occurred: {str(e)}"
+            })
+        except Exception:
+            pass  # WebSocket might be closed 
+
+    # Define the graph
+    workflow = StateGraph(GraphState)
+    workflow.add_node("agent", call_agent)
+    workflow.add_node("action", execute_tools_node)
+    workflow.set_entry_point("agent")
+    workflow.add_conditional_edges(
+        "agent",
+        should_continue,
+        {"continue": "action", "end": END}
+    )
+    workflow.add_edge('action', 'agent')
+    
+    # Compile the graph with our custom database checkpointer
+    graph = workflow.compile(checkpointer=DatabaseCheckpointSaver(user, async_session_maker))
+    
+    # --- Main WebSocket Loop ---
+    try:
+        if memory_manager:
+            # Get enhanced conversation context with summarization and user learning
+            context = await memory_manager.get_conversation_context()
+            
+            # Convert recent messages to LangChain format
+            current_chat_history = []
+            for msg_data in context.conversation_history:
+                try:
+                    content = msg_data["content"]
+                    if msg_data["role"] == "user":
+                        current_chat_history.append(HumanMessage(content=content))
+                    else:
+                        current_chat_history.append(AIMessage(content=content))
+                except Exception as e:
+                    log.warning(f"Error processing message in enhanced context: {e}")
+            
+            # Add conversation summary as system message if available
+            if context.context_summary and len(context.conversation_history) > 20:
+                summary_message = HumanMessage(content=f"[Conversation Summary: {context.context_summary}]")
+                current_chat_history.insert(0, summary_message)
+            
+            log.info(f"Loaded enhanced chat history: {len(current_chat_history)} messages, summary available: {bool(context.context_summary)}")
+        else:
+            # Fallback to basic chat history loading
+            raise Exception("Memory manager not available, using basic history")
+        
+    except Exception as e:
+        log.error(f"Error loading enhanced chat history, falling back to basic: {e}")
+        # Fallback to basic chat history loading with proper transaction handling
+        try:
+            if db.is_active:
+                await db.rollback()  # Ensure clean transaction state
+            history_records = await db.execute(
+                select(ChatMessage)
+                .where(ChatMessage.user_id == user_id)
+                .where(ChatMessage.page_id.is_(None))
+                .order_by(ChatMessage.created_at)
+            )
+            
+            current_chat_history = []
+            for r in history_records.scalars().all():
+                try:
+                    content = json.loads(r.message)
+                except (json.JSONDecodeError, TypeError):
+                    content = r.message
+                
+                if r.is_user_message:
+                    current_chat_history.append(HumanMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+                else:
+                    current_chat_history.append(AIMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+        except Exception as fallback_error:
+            log.error(f"Failed to load basic chat history: {fallback_error}")
+            current_chat_history = []  # Start with empty history if all fails
+
+    # Track the currently loaded page to avoid reloading
+    current_loaded_page_id = None
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            
+            # Parse message data to check for page context
+            message_content = data
+            page_id = None
+            
+            try:
+                message_data = json.loads(data)
+
+                if message_data.get("type") == "stop_generation":
+                    log.info("Received stop_generation signal. Halting any current agent activity.")
+                    # We can add more complex cancellation logic here in the future if needed.
+                    # For now, we just ignore the message and wait for the next one.
+                    continue
+                
+                if message_data.get("type") == "clear_context":
+                    current_chat_history = []
+                    current_loaded_page_id = None
+                    log.info(f"Chat context cleared for user {user_id}")
+                    continue
+                elif message_data.get("type") == "switch_page":
+                    # Handle explicit page switching from frontend
+                    new_page_id = message_data.get("page_id")
+                    if new_page_id != current_loaded_page_id:
+                        # --- FIX: Use EnhancedMemoryManager to get context ---
+                        context = await memory_manager.get_conversation_context(new_page_id)
+                        current_chat_history = [
+                            HumanMessage(content=msg["content"]) if msg["role"] == "user" 
+                            else AIMessage(content=msg["content"]) 
+                            for msg in context.recent_messages
+                        ]
+                        current_loaded_page_id = new_page_id
+                        
+                        # Update last_opened_at timestamp
+                        if new_page_id:
+                            await db.execute(
+                                update(Page)
+                                .where(Page.id == new_page_id)
+                                .values(last_opened_at=func.now())
+                            )
+                            await db.commit()
+                            log.info(f"Updated last_opened_at for page {new_page_id}")
+                    continue
+                elif message_data.get("type") == "regenerate":
+                    log.info("🔄 Regeneration request received")
+                    regenerate_content = message_data.get("content", "")
+                    regenerate_page_id = message_data.get("page_id")
+                    
+                    log.info(f"🔄 Regenerate content: '{regenerate_content[:50]}...'")
+                    log.info(f"🔄 Page ID: {regenerate_page_id}")
+                    log.info(f"🔄 Current chat history length: {len(current_chat_history)}")
+                    
+                    # Load page history if we're regenerating from a different page
+                    if regenerate_page_id != current_loaded_page_id:
+                        log.info(f"🔄 Loading history for page {regenerate_page_id} for regeneration")
+                        context = await memory_manager.get_conversation_context(regenerate_page_id)
+                        current_chat_history = [
+                            HumanMessage(content=msg["content"]) if msg["role"] == "user" 
+                            else AIMessage(content=msg["content"]) 
+                            for msg in context.recent_messages
+                        ]
+                        current_loaded_page_id = regenerate_page_id
+                    
+                    # Remove the last AI message from history
+                    if current_chat_history and isinstance(current_chat_history[-1], AIMessage):
+                        removed_message = current_chat_history.pop()
+                        log.info(f"🔄 Removed last AI message from history: '{removed_message.content[:50]}...'")
+                    
+                    # Add the regenerate content as user message if not already present
+                    if not current_chat_history or current_chat_history[-1].content != regenerate_content:
+                        current_chat_history.append(HumanMessage(content=regenerate_content))
+                        log.info(f"🔄 Added regenerate content to history")
+                    
+                    try:
+                        log.info(f"🔄 Starting master agent with {len(current_chat_history)} history messages")
+                        
+                        # Use timeout for regeneration to prevent hanging
+                        try:
+                            response = await asyncio.wait_for(
+                                master_agent.ainvoke({
+                                    "input": regenerate_content,
+                                    "chat_history": current_chat_history,
+                                }),
+                                timeout=180.0  # 3 minute timeout for complex requests
+                            )
+                            
+                            if response and 'output' in response:
+                                agent_response = response['output']
+                                log.info(f"🔄 Master agent regenerated response: '{agent_response[:100]}...'")
+                                
+                                # Delete the last AI message from database before saving new one
+                                try:
+                                    last_ai_message = await db.execute(
+                                        select(ChatMessage)
+                                        .where(ChatMessage.user_id == user.id)
+                                        .where(ChatMessage.page_id == regenerate_page_id)
+                                        .where(ChatMessage.is_user_message == False)
+                                        .order_by(ChatMessage.created_at.desc())
+                                        .limit(1)
+                                    )
+                                    last_ai_msg = last_ai_message.scalars().first()
+                                    if last_ai_msg:
+                                        await db.delete(last_ai_msg)
+                                        log.info(f"🔄 Deleted original AI message {last_ai_msg.id} from database")
+                                    
+                                    # Now save the new regenerated message
+                                    new_message = ChatMessage(
+                                        id=str(uuid.uuid4()),
+                                        user_id=user.id,
+                                        message=agent_response,
+                                        is_user_message=False,
+                                        page_id=regenerate_page_id
+                                    )
+                                    db.add(new_message)
+                                    await db.commit()
+                                    log.info(f"🔄 Regenerated message saved to database with page_id: {regenerate_page_id}")
+                                except Exception as save_error:
+                                    log.error(f"🔄 Error saving regenerated message: {save_error}")
+                                    if db.is_active:
+                                        await db.rollback()
+                                
+                                await websocket.send_json({
+                                    "type": "message",
+                                    "message": agent_response
+                                })
+                            else:
+                                log.error("🔄 Master agent returned invalid response format")
+                                await websocket.send_text("I apologize, but I encountered an issue generating a response. Please try again.")
+                                
+                        except asyncio.TimeoutError:
+                            log.error("🔄 Master agent timed out during regeneration")
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "The regeneration took too long and timed out. Please try again with a simpler request."
+                            })
+                        except Exception as agent_error:
+                            log.error(f"🔄 Master agent error during regeneration: {agent_error}")
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "I encountered an error while regenerating the response. Please try again."
+                            })
+                            
+                    except Exception as e:
+                        log.error(f"🔄 Error during regeneration: {e}", exc_info=True)
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "I apologize, but I encountered an error during regeneration. Please try again."
+                        })
+                    continue
+                elif "content" in message_data:
+                    # New format with page context
+                    message_content = message_data["content"]
+                    page_id = message_data.get("page_id")
+                    
+                    # FIX: If it's the first message of a new chat, page_id will be missing.
+                    # We need to create the page first to get an ID before saving any messages.
+                    if not page_id:
+                        try:
+                            # Create a title from the first message
+                            title = message_content.split('\n')[0]
+                            title = title.split('. ')[0]
+                            title = title.split('? ')[0]
+                            title = title.split('! ')[0]
+                            title = title[:50] + '...' if len(title) > 50 else title
+                            
+                            new_page = Page(user_id=user_id, title=title)
+                            db.add(new_page)
+                            await db.commit()
+                            await db.refresh(new_page)
+                            page_id = new_page.id
+                            log.info(f"✅ Created new page {page_id} for new conversation.")
+                            
+                            # Send the new page_id back to the frontend immediately
+                            await websocket.send_json({
+                                "type": "page_created",
+                                "page_id": page_id,
+                                "title": title,
+                                "created_at": new_page.created_at.isoformat()
+                            })
+                            
+                        except Exception as page_creation_error:
+                            log.error(f"❌ Failed to create new page: {page_creation_error}")
+                            if db.is_active:
+                                await db.rollback()
+                            # Stop processing if we can't create a page
+                            continue
+
+                    # Only load page history if WebSocket context isn't already set for this page
+                    # Frontend is responsible for loading messages via API, WebSocket just tracks context
+                    if page_id != current_loaded_page_id:
+                        if page_id:
+                            # Load conversation history for AI context only (don't send to frontend)
+                            try:
+                                page_history = await db.execute(
+                                    select(ChatMessage)
+                                    .where(ChatMessage.user_id == user_id)
+                                    .where(ChatMessage.page_id == page_id)
+                                    .order_by(ChatMessage.created_at)
+                                )
+                                
+                                # Build chat history for AI context
+                                new_chat_history = []
+                                for r in page_history.scalars().all():
+                                    try:
+                                        content = json.loads(r.message)
+                                    except (json.JSONDecodeError, TypeError):
+                                        content = r.message
+                                    
+                                    if r.is_user_message:
+                                        new_chat_history.append(HumanMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+                                    else:
+                                        new_chat_history.append(AIMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+                                
+                                current_chat_history = new_chat_history
+                                current_loaded_page_id = page_id
+                                log.info(f"WebSocket context loaded {len(current_chat_history)} messages for page {page_id}")
+                            except Exception as page_error:
+                                log.error(f"Failed to load page history for WebSocket context {page_id}: {page_error}")
+                                if db.is_active:
+                                    await db.rollback()
+                                current_chat_history = []
+                        else:
+                            # New conversation - clear context
+                            current_chat_history = []
+                            current_loaded_page_id = None
+                            log.info("WebSocket context switched to new conversation")
+                
+            except json.JSONDecodeError:
+                # It's a regular text message (legacy format)
+                pass
+            
+            # Save user message with page context
+            try:
+                user_message_id = str(uuid.uuid4())
+                db.add(ChatMessage(
+                    id=user_message_id,
+                    user_id=user_id,
+                    page_id=page_id,
+                    message=message_content,
+                    is_user_message=True
+                ))
+                await db.commit()
+                log.info(f"Saved user message {user_message_id} with page_id: {page_id}")
+            except Exception as save_error:
+                log.error(f"Failed to save user message: {save_error}")
+                if db.is_active:
+                    await db.rollback()
+                user_message_id = str(uuid.uuid4())  # Generate new ID for retry
+            
+            current_chat_history.append(HumanMessage(id=user_message_id, content=message_content))
+
+            # Track user message behavior
+            if memory_manager:
+                try:
+                    await memory_manager.save_user_behavior(
+                        action_type="chat_message",
+                        context={
+                            "message_length": len(message_content),
+                            "page_id": page_id,
+                            "timestamp": datetime.utcnow().isoformat()
+                        },
+                        success=True
+                    )
+                except Exception as e:
+                    log.warning(f"Failed to save user behavior: {e}")
+
+            # Pass message to our agent with enhanced context
+            try:
+                response = await master_agent.ainvoke({
+                    "input": message_content,
+                    "chat_history": current_chat_history,
+                })
+                result = response.get("output", "I'm sorry, I encountered an issue.")
+                
+                # Track successful agent response
+                if memory_manager:
+                    await memory_manager.save_user_behavior(
+                        action_type="agent_response",
+                        context={
+                            "response_length": len(result),
+                            "input_length": len(message_content),
+                            "page_id": page_id
+                        },
+                        success=True
+                    )
+                
+            except Exception as e:
+                log.error(f"Error in agent processing: {e}")
+                result = "I'm sorry, I encountered an issue processing your request. Please try again."
+                
+                # Track failed agent response
+                if memory_manager:
+                    try:
+                        await memory_manager.save_user_behavior(
+                            action_type="agent_response",
+                            context={
+                                "error": str(e),
+                                "input_length": len(message_content),
+                                "page_id": page_id
+                            },
+                            success=False
+                        )
+                    except Exception:
+                        pass
+            
+            await websocket.send_json({
+                "type": "message",
+                "message": result
+            })
+            
+            # Save AI message with page context
+            try:
+                ai_message_id = str(uuid.uuid4())
+                db.add(ChatMessage(
+                    id=ai_message_id,
+                    user_id=user_id,
+                    page_id=page_id,
+                    message=result,
+                    is_user_message=False
+                ))
+                await db.commit()
+                log.info(f"Saved AI message {ai_message_id} with page_id: {page_id}")
+            except Exception as save_error:
+                log.error(f"Failed to save AI message: {save_error}")
+                if db.is_active:
+                    await db.rollback()
+                ai_message_id = str(uuid.uuid4())  # Generate new ID for retry
+            
+            current_chat_history.append(AIMessage(id=ai_message_id, content=result))
+            
+    except WebSocketDisconnect:
+        log.info(f"WebSocket disconnected for user {user_id}")
+    except Exception as e:
+        log.error(f"WebSocket error for user {user_id}: {e}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": f"An error occurred: {str(e)}"
+            })
+        except Exception:
+            pass  # WebSocket might be closed 
+
+    # Define the graph
+    workflow = StateGraph(GraphState)
+    workflow.add_node("agent", call_agent)
+    workflow.add_node("action", execute_tools_node)
+    workflow.set_entry_point("agent")
+    workflow.add_conditional_edges(
+        "agent",
+        should_continue,
+        {"continue": "action", "end": END}
+    )
+    workflow.add_edge('action', 'agent')
+    
+    # Compile the graph with our custom database checkpointer
+    graph = workflow.compile(checkpointer=DatabaseCheckpointSaver(user, async_session_maker))
+    
+    # --- Main WebSocket Loop ---
+    try:
+        if memory_manager:
+            # Get enhanced conversation context with summarization and user learning
+            context = await memory_manager.get_conversation_context()
+            
+            # Convert recent messages to LangChain format
+            current_chat_history = []
+            for msg_data in context.conversation_history:
+                try:
+                    content = msg_data["content"]
+                    if msg_data["role"] == "user":
+                        current_chat_history.append(HumanMessage(content=content))
+                    else:
+                        current_chat_history.append(AIMessage(content=content))
+                except Exception as e:
+                    log.warning(f"Error processing message in enhanced context: {e}")
+            
+            # Add conversation summary as system message if available
+            if context.context_summary and len(context.conversation_history) > 20:
+                summary_message = HumanMessage(content=f"[Conversation Summary: {context.context_summary}]")
+                current_chat_history.insert(0, summary_message)
+            
+            log.info(f"Loaded enhanced chat history: {len(current_chat_history)} messages, summary available: {bool(context.context_summary)}")
+        else:
+            # Fallback to basic chat history loading
+            raise Exception("Memory manager not available, using basic history")
+        
+    except Exception as e:
+        log.error(f"Error loading enhanced chat history, falling back to basic: {e}")
+        # Fallback to basic chat history loading with proper transaction handling
+        try:
+            if db.is_active:
+                await db.rollback()  # Ensure clean transaction state
+            history_records = await db.execute(
+                select(ChatMessage)
+                .where(ChatMessage.user_id == user_id)
+                .where(ChatMessage.page_id.is_(None))
+                .order_by(ChatMessage.created_at)
+            )
+            
+            current_chat_history = []
+            for r in history_records.scalars().all():
+                try:
+                    content = json.loads(r.message)
+                except (json.JSONDecodeError, TypeError):
+                    content = r.message
+                
+                if r.is_user_message:
+                    current_chat_history.append(HumanMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+                else:
+                    current_chat_history.append(AIMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+        except Exception as fallback_error:
+            log.error(f"Failed to load basic chat history: {fallback_error}")
+            current_chat_history = []  # Start with empty history if all fails
+
+    # Track the currently loaded page to avoid reloading
+    current_loaded_page_id = None
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            
+            # Parse message data to check for page context
+            message_content = data
+            page_id = None
+            
+            try:
+                message_data = json.loads(data)
+
+                if message_data.get("type") == "stop_generation":
+                    log.info("Received stop_generation signal. Halting any current agent activity.")
+                    # We can add more complex cancellation logic here in the future if needed.
+                    # For now, we just ignore the message and wait for the next one.
+                    continue
+                
+                if message_data.get("type") == "clear_context":
+                    current_chat_history = []
+                    current_loaded_page_id = None
+                    log.info(f"Chat context cleared for user {user_id}")
+                    continue
+                elif message_data.get("type") == "switch_page":
+                    # Handle explicit page switching from frontend
+                    new_page_id = message_data.get("page_id")
+                    if new_page_id != current_loaded_page_id:
+                        # --- FIX: Use EnhancedMemoryManager to get context ---
+                        context = await memory_manager.get_conversation_context(new_page_id)
+                        current_chat_history = [
+                            HumanMessage(content=msg["content"]) if msg["role"] == "user" 
+                            else AIMessage(content=msg["content"]) 
+                            for msg in context.recent_messages
+                        ]
+                        current_loaded_page_id = new_page_id
+                        
+                        # Update last_opened_at timestamp
+                        if new_page_id:
+                            await db.execute(
+                                update(Page)
+                                .where(Page.id == new_page_id)
+                                .values(last_opened_at=func.now())
+                            )
+                            await db.commit()
+                            log.info(f"Updated last_opened_at for page {new_page_id}")
+                    continue
+                elif message_data.get("type") == "regenerate":
+                    log.info("🔄 Regeneration request received")
+                    regenerate_content = message_data.get("content", "")
+                    regenerate_page_id = message_data.get("page_id")
+                    
+                    log.info(f"🔄 Regenerate content: '{regenerate_content[:50]}...'")
+                    log.info(f"🔄 Page ID: {regenerate_page_id}")
+                    log.info(f"🔄 Current chat history length: {len(current_chat_history)}")
+                    
+                    # Load page history if we're regenerating from a different page
+                    if regenerate_page_id != current_loaded_page_id:
+                        log.info(f"🔄 Loading history for page {regenerate_page_id} for regeneration")
+                        context = await memory_manager.get_conversation_context(regenerate_page_id)
+                        current_chat_history = [
+                            HumanMessage(content=msg["content"]) if msg["role"] == "user" 
+                            else AIMessage(content=msg["content"]) 
+                            for msg in context.recent_messages
+                        ]
+                        current_loaded_page_id = regenerate_page_id
+                    
+                    # Remove the last AI message from history
+                    if current_chat_history and isinstance(current_chat_history[-1], AIMessage):
+                        removed_message = current_chat_history.pop()
+                        log.info(f"🔄 Removed last AI message from history: '{removed_message.content[:50]}...'")
+                    
+                    # Add the regenerate content as user message if not already present
+                    if not current_chat_history or current_chat_history[-1].content != regenerate_content:
+                        current_chat_history.append(HumanMessage(content=regenerate_content))
+                        log.info(f"🔄 Added regenerate content to history")
+                    
+                    try:
+                        log.info(f"🔄 Starting master agent with {len(current_chat_history)} history messages")
+                        
+                        # Use timeout for regeneration to prevent hanging
+                        try:
+                            response = await asyncio.wait_for(
+                                master_agent.ainvoke({
+                                    "input": regenerate_content,
+                                    "chat_history": current_chat_history,
+                                }),
+                                timeout=180.0  # 3 minute timeout for complex requests
+                            )
+                            
+                            if response and 'output' in response:
+                                agent_response = response['output']
+                                log.info(f"🔄 Master agent regenerated response: '{agent_response[:100]}...'")
+                                
+                                # Delete the last AI message from database before saving new one
+                                try:
+                                    last_ai_message = await db.execute(
+                                        select(ChatMessage)
+                                        .where(ChatMessage.user_id == user.id)
+                                        .where(ChatMessage.page_id == regenerate_page_id)
+                                        .where(ChatMessage.is_user_message == False)
+                                        .order_by(ChatMessage.created_at.desc())
+                                        .limit(1)
+                                    )
+                                    last_ai_msg = last_ai_message.scalars().first()
+                                    if last_ai_msg:
+                                        await db.delete(last_ai_msg)
+                                        log.info(f"🔄 Deleted original AI message {last_ai_msg.id} from database")
+                                    
+                                    # Now save the new regenerated message
+                                    new_message = ChatMessage(
+                                        id=str(uuid.uuid4()),
+                                        user_id=user.id,
+                                        message=agent_response,
+                                        is_user_message=False,
+                                        page_id=regenerate_page_id
+                                    )
+                                    db.add(new_message)
+                                    await db.commit()
+                                    log.info(f"🔄 Regenerated message saved to database with page_id: {regenerate_page_id}")
+                                except Exception as save_error:
+                                    log.error(f"🔄 Error saving regenerated message: {save_error}")
+                                    if db.is_active:
+                                        await db.rollback()
+                                
+                                await websocket.send_json({
+                                    "type": "message",
+                                    "message": agent_response
+                                })
+                            else:
+                                log.error("🔄 Master agent returned invalid response format")
+                                await websocket.send_text("I apologize, but I encountered an issue generating a response. Please try again.")
+                                
+                        except asyncio.TimeoutError:
+                            log.error("🔄 Master agent timed out during regeneration")
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "The regeneration took too long and timed out. Please try again with a simpler request."
+                            })
+                        except Exception as agent_error:
+                            log.error(f"🔄 Master agent error during regeneration: {agent_error}")
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "I encountered an error while regenerating the response. Please try again."
+                            })
+                            
+                    except Exception as e:
+                        log.error(f"🔄 Error during regeneration: {e}", exc_info=True)
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "I apologize, but I encountered an error during regeneration. Please try again."
+                        })
+                    continue
+                elif "content" in message_data:
+                    # New format with page context
+                    message_content = message_data["content"]
+                    page_id = message_data.get("page_id")
+                    
+                    # FIX: If it's the first message of a new chat, page_id will be missing.
+                    # We need to create the page first to get an ID before saving any messages.
+                    if not page_id:
+                        try:
+                            # Create a title from the first message
+                            title = message_content.split('\n')[0]
+                            title = title.split('. ')[0]
+                            title = title.split('? ')[0]
+                            title = title.split('! ')[0]
+                            title = title[:50] + '...' if len(title) > 50 else title
+                            
+                            new_page = Page(user_id=user_id, title=title)
+                            db.add(new_page)
+                            await db.commit()
+                            await db.refresh(new_page)
+                            page_id = new_page.id
+                            log.info(f"✅ Created new page {page_id} for new conversation.")
+                            
+                            # Send the new page_id back to the frontend immediately
+                            await websocket.send_json({
+                                "type": "page_created",
+                                "page_id": page_id,
+                                "title": title,
+                                "created_at": new_page.created_at.isoformat()
+                            })
+                            
+                        except Exception as page_creation_error:
+                            log.error(f"❌ Failed to create new page: {page_creation_error}")
+                            if db.is_active:
+                                await db.rollback()
+                            # Stop processing if we can't create a page
+                            continue
+
+                    # Only load page history if WebSocket context isn't already set for this page
+                    # Frontend is responsible for loading messages via API, WebSocket just tracks context
+                    if page_id != current_loaded_page_id:
+                        if page_id:
+                            # Load conversation history for AI context only (don't send to frontend)
+                            try:
+                                page_history = await db.execute(
+                                    select(ChatMessage)
+                                    .where(ChatMessage.user_id == user_id)
+                                    .where(ChatMessage.page_id == page_id)
+                                    .order_by(ChatMessage.created_at)
+                                )
+                                
+                                # Build chat history for AI context
+                                new_chat_history = []
+                                for r in page_history.scalars().all():
+                                    try:
+                                        content = json.loads(r.message)
+                                    except (json.JSONDecodeError, TypeError):
+                                        content = r.message
+                                    
+                                    if r.is_user_message:
+                                        new_chat_history.append(HumanMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+                                    else:
+                                        new_chat_history.append(AIMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+                                
+                                current_chat_history = new_chat_history
+                                current_loaded_page_id = page_id
+                                log.info(f"WebSocket context loaded {len(current_chat_history)} messages for page {page_id}")
+                            except Exception as page_error:
+                                log.error(f"Failed to load page history for WebSocket context {page_id}: {page_error}")
+                                if db.is_active:
+                                    await db.rollback()
+                                current_chat_history = []
+                        else:
+                            # New conversation - clear context
+                            current_chat_history = []
+                            current_loaded_page_id = None
+                            log.info("WebSocket context switched to new conversation")
+                
+            except json.JSONDecodeError:
+                # It's a regular text message (legacy format)
+                pass
+            
+            # Save user message with page context
+            try:
+                user_message_id = str(uuid.uuid4())
+                db.add(ChatMessage(
+                    id=user_message_id,
+                    user_id=user_id,
+                    page_id=page_id,
+                    message=message_content,
+                    is_user_message=True
+                ))
+                await db.commit()
+                log.info(f"Saved user message {user_message_id} with page_id: {page_id}")
+            except Exception as save_error:
+                log.error(f"Failed to save user message: {save_error}")
+                if db.is_active:
+                    await db.rollback()
+                user_message_id = str(uuid.uuid4())  # Generate new ID for retry
+            
+            current_chat_history.append(HumanMessage(id=user_message_id, content=message_content))
+
+            # Track user message behavior
+            if memory_manager:
+                try:
+                    await memory_manager.save_user_behavior(
+                        action_type="chat_message",
+                        context={
+                            "message_length": len(message_content),
+                            "page_id": page_id,
+                            "timestamp": datetime.utcnow().isoformat()
+                        },
+                        success=True
+                    )
+                except Exception as e:
+                    log.warning(f"Failed to save user behavior: {e}")
+
+            # Pass message to our agent with enhanced context
+            try:
+                response = await master_agent.ainvoke({
+                    "input": message_content,
+                    "chat_history": current_chat_history,
+                })
+                result = response.get("output", "I'm sorry, I encountered an issue.")
+                
+                # Track successful agent response
+                if memory_manager:
+                    await memory_manager.save_user_behavior(
+                        action_type="agent_response",
+                        context={
+                            "response_length": len(result),
+                            "input_length": len(message_content),
+                            "page_id": page_id
+                        },
+                        success=True
+                    )
+                
+            except Exception as e:
+                log.error(f"Error in agent processing: {e}")
+                result = "I'm sorry, I encountered an issue processing your request. Please try again."
+                
+                # Track failed agent response
+                if memory_manager:
+                    try:
+                        await memory_manager.save_user_behavior(
+                            action_type="agent_response",
+                            context={
+                                "error": str(e),
+                                "input_length": len(message_content),
+                                "page_id": page_id
+                            },
+                            success=False
+                        )
+                    except Exception:
+                        pass
+            
+            await websocket.send_json({
+                "type": "message",
+                "message": result
+            })
+            
+            # Save AI message with page context
+            try:
+                ai_message_id = str(uuid.uuid4())
+                db.add(ChatMessage(
+                    id=ai_message_id,
+                    user_id=user_id,
+                    page_id=page_id,
+                    message=result,
+                    is_user_message=False
+                ))
+                await db.commit()
+                log.info(f"Saved AI message {ai_message_id} with page_id: {page_id}")
+            except Exception as save_error:
+                log.error(f"Failed to save AI message: {save_error}")
+                if db.is_active:
+                    await db.rollback()
+                ai_message_id = str(uuid.uuid4())  # Generate new ID for retry
+            
+            current_chat_history.append(AIMessage(id=ai_message_id, content=result))
+            
+    except WebSocketDisconnect:
+        log.info(f"WebSocket disconnected for user {user_id}")
+    except Exception as e:
+        log.error(f"WebSocket error for user {user_id}: {e}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": f"An error occurred: {str(e)}"
+            })
+        except Exception:
+            pass  # WebSocket might be closed 
+
+    # Define the graph
+    workflow = StateGraph(GraphState)
+    workflow.add_node("agent", call_agent)
+    workflow.add_node("action", execute_tools_node)
+    workflow.set_entry_point("agent")
+    workflow.add_conditional_edges(
+        "agent",
+        should_continue,
+        {"continue": "action", "end": END}
+    )
+    workflow.add_edge('action', 'agent')
+    
+    # Compile the graph with our custom database checkpointer
+    graph = workflow.compile(checkpointer=DatabaseCheckpointSaver(user, async_session_maker))
+    
+    # --- Main WebSocket Loop ---
+    try:
+        if memory_manager:
+            # Get enhanced conversation context with summarization and user learning
+            context = await memory_manager.get_conversation_context()
+            
+            # Convert recent messages to LangChain format
+            current_chat_history = []
+            for msg_data in context.conversation_history:
+                try:
+                    content = msg_data["content"]
+                    if msg_data["role"] == "user":
+                        current_chat_history.append(HumanMessage(content=content))
+                    else:
+                        current_chat_history.append(AIMessage(content=content))
+                except Exception as e:
+                    log.warning(f"Error processing message in enhanced context: {e}")
+            
+            # Add conversation summary as system message if available
+            if context.context_summary and len(context.conversation_history) > 20:
+                summary_message = HumanMessage(content=f"[Conversation Summary: {context.context_summary}]")
+                current_chat_history.insert(0, summary_message)
+            
+            log.info(f"Loaded enhanced chat history: {len(current_chat_history)} messages, summary available: {bool(context.context_summary)}")
+        else:
+            # Fallback to basic chat history loading
+            raise Exception("Memory manager not available, using basic history")
+        
+    except Exception as e:
+        log.error(f"Error loading enhanced chat history, falling back to basic: {e}")
+        # Fallback to basic chat history loading with proper transaction handling
+        try:
+            if db.is_active:
+                await db.rollback()  # Ensure clean transaction state
+            history_records = await db.execute(
+                select(ChatMessage)
+                .where(ChatMessage.user_id == user_id)
+                .where(ChatMessage.page_id.is_(None))
+                .order_by(ChatMessage.created_at)
+            )
+            
+            current_chat_history = []
+            for r in history_records.scalars().all():
+                try:
+                    content = json.loads(r.message)
+                except (json.JSONDecodeError, TypeError):
+                    content = r.message
+                
+                if r.is_user_message:
+                    current_chat_history.append(HumanMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+                else:
+                    current_chat_history.append(AIMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+        except Exception as fallback_error:
+            log.error(f"Failed to load basic chat history: {fallback_error}")
+            current_chat_history = []  # Start with empty history if all fails
+
+    # Track the currently loaded page to avoid reloading
+    current_loaded_page_id = None
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            
+            # Parse message data to check for page context
+            message_content = data
+            page_id = None
+            
+            try:
+                message_data = json.loads(data)
+
+                if message_data.get("type") == "stop_generation":
+                    log.info("Received stop_generation signal. Halting any current agent activity.")
+                    # We can add more complex cancellation logic here in the future if needed.
+                    # For now, we just ignore the message and wait for the next one.
+                    continue
+                
+                if message_data.get("type") == "clear_context":
+                    current_chat_history = []
+                    current_loaded_page_id = None
+                    log.info(f"Chat context cleared for user {user_id}")
+                    continue
+                elif message_data.get("type") == "switch_page":
+                    # Handle explicit page switching from frontend
+                    new_page_id = message_data.get("page_id")
+                    if new_page_id != current_loaded_page_id:
+                        # --- FIX: Use EnhancedMemoryManager to get context ---
+                        context = await memory_manager.get_conversation_context(new_page_id)
+                        current_chat_history = [
+                            HumanMessage(content=msg["content"]) if msg["role"] == "user" 
+                            else AIMessage(content=msg["content"]) 
+                            for msg in context.recent_messages
+                        ]
+                        current_loaded_page_id = new_page_id
+                        
+                        # Update last_opened_at timestamp
+                        if new_page_id:
+                            await db.execute(
+                                update(Page)
+                                .where(Page.id == new_page_id)
+                                .values(last_opened_at=func.now())
+                            )
+                            await db.commit()
+                            log.info(f"Updated last_opened_at for page {new_page_id}")
+                    continue
+                elif message_data.get("type") == "regenerate":
+                    log.info("🔄 Regeneration request received")
+                    regenerate_content = message_data.get("content", "")
+                    regenerate_page_id = message_data.get("page_id")
+                    
+                    log.info(f"🔄 Regenerate content: '{regenerate_content[:50]}...'")
+                    log.info(f"🔄 Page ID: {regenerate_page_id}")
+                    log.info(f"🔄 Current chat history length: {len(current_chat_history)}")
+                    
+                    # Load page history if we're regenerating from a different page
+                    if regenerate_page_id != current_loaded_page_id:
+                        log.info(f"🔄 Loading history for page {regenerate_page_id} for regeneration")
+                        context = await memory_manager.get_conversation_context(regenerate_page_id)
+                        current_chat_history = [
+                            HumanMessage(content=msg["content"]) if msg["role"] == "user" 
+                            else AIMessage(content=msg["content"]) 
+                            for msg in context.recent_messages
+                        ]
+                        current_loaded_page_id = regenerate_page_id
+                    
+                    # Remove the last AI message from history
+                    if current_chat_history and isinstance(current_chat_history[-1], AIMessage):
+                        removed_message = current_chat_history.pop()
+                        log.info(f"🔄 Removed last AI message from history: '{removed_message.content[:50]}...'")
+                    
+                    # Add the regenerate content as user message if not already present
+                    if not current_chat_history or current_chat_history[-1].content != regenerate_content:
+                        current_chat_history.append(HumanMessage(content=regenerate_content))
+                        log.info(f"🔄 Added regenerate content to history")
+                    
+                    try:
+                        log.info(f"🔄 Starting master agent with {len(current_chat_history)} history messages")
+                        
+                        # Use timeout for regeneration to prevent hanging
+                        try:
+                            response = await asyncio.wait_for(
+                                master_agent.ainvoke({
+                                    "input": regenerate_content,
+                                    "chat_history": current_chat_history,
+                                }),
+                                timeout=180.0  # 3 minute timeout for complex requests
+                            )
+                            
+                            if response and 'output' in response:
+                                agent_response = response['output']
+                                log.info(f"🔄 Master agent regenerated response: '{agent_response[:100]}...'")
+                                
+                                # Delete the last AI message from database before saving new one
+                                try:
+                                    last_ai_message = await db.execute(
+                                        select(ChatMessage)
+                                        .where(ChatMessage.user_id == user.id)
+                                        .where(ChatMessage.page_id == regenerate_page_id)
+                                        .where(ChatMessage.is_user_message == False)
+                                        .order_by(ChatMessage.created_at.desc())
+                                        .limit(1)
+                                    )
+                                    last_ai_msg = last_ai_message.scalars().first()
+                                    if last_ai_msg:
+                                        await db.delete(last_ai_msg)
+                                        log.info(f"🔄 Deleted original AI message {last_ai_msg.id} from database")
+                                    
+                                    # Now save the new regenerated message
+                                    new_message = ChatMessage(
+                                        id=str(uuid.uuid4()),
+                                        user_id=user.id,
+                                        message=agent_response,
+                                        is_user_message=False,
+                                        page_id=regenerate_page_id
+                                    )
+                                    db.add(new_message)
+                                    await db.commit()
+                                    log.info(f"🔄 Regenerated message saved to database with page_id: {regenerate_page_id}")
+                                except Exception as save_error:
+                                    log.error(f"🔄 Error saving regenerated message: {save_error}")
+                                    if db.is_active:
+                                        await db.rollback()
+                                
+                                await websocket.send_json({
+                                    "type": "message",
+                                    "message": agent_response
+                                })
+                            else:
+                                log.error("🔄 Master agent returned invalid response format")
+                                await websocket.send_text("I apologize, but I encountered an issue generating a response. Please try again.")
+                                
+                        except asyncio.TimeoutError:
+                            log.error("🔄 Master agent timed out during regeneration")
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "The regeneration took too long and timed out. Please try again with a simpler request."
+                            })
+                        except Exception as agent_error:
+                            log.error(f"🔄 Master agent error during regeneration: {agent_error}")
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "I encountered an error while regenerating the response. Please try again."
+                            })
+                            
+                    except Exception as e:
+                        log.error(f"🔄 Error during regeneration: {e}", exc_info=True)
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "I apologize, but I encountered an error during regeneration. Please try again."
+                        })
+                    continue
+                elif "content" in message_data:
+                    # New format with page context
+                    message_content = message_data["content"]
+                    page_id = message_data.get("page_id")
+                    
+                    # FIX: If it's the first message of a new chat, page_id will be missing.
+                    # We need to create the page first to get an ID before saving any messages.
+                    if not page_id:
+                        try:
+                            # Create a title from the first message
+                            title = message_content.split('\n')[0]
+                            title = title.split('. ')[0]
+                            title = title.split('? ')[0]
+                            title = title.split('! ')[0]
+                            title = title[:50] + '...' if len(title) > 50 else title
+                            
+                            new_page = Page(user_id=user_id, title=title)
+                            db.add(new_page)
+                            await db.commit()
+                            await db.refresh(new_page)
+                            page_id = new_page.id
+                            log.info(f"✅ Created new page {page_id} for new conversation.")
+                            
+                            # Send the new page_id back to the frontend immediately
+                            await websocket.send_json({
+                                "type": "page_created",
+                                "page_id": page_id,
+                                "title": title,
+                                "created_at": new_page.created_at.isoformat()
+                            })
+                            
+                        except Exception as page_creation_error:
+                            log.error(f"❌ Failed to create new page: {page_creation_error}")
+                            if db.is_active:
+                                await db.rollback()
+                            # Stop processing if we can't create a page
+                            continue
+
+                    # Only load page history if WebSocket context isn't already set for this page
+                    # Frontend is responsible for loading messages via API, WebSocket just tracks context
+                    if page_id != current_loaded_page_id:
+                        if page_id:
+                            # Load conversation history for AI context only (don't send to frontend)
+                            try:
+                                page_history = await db.execute(
+                                    select(ChatMessage)
+                                    .where(ChatMessage.user_id == user_id)
+                                    .where(ChatMessage.page_id == page_id)
+                                    .order_by(ChatMessage.created_at)
+                                )
+                                
+                                # Build chat history for AI context
+                                new_chat_history = []
+                                for r in page_history.scalars().all():
+                                    try:
+                                        content = json.loads(r.message)
+                                    except (json.JSONDecodeError, TypeError):
+                                        content = r.message
+                                    
+                                    if r.is_user_message:
+                                        new_chat_history.append(HumanMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+                                    else:
+                                        new_chat_history.append(AIMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+                                
+                                current_chat_history = new_chat_history
+                                current_loaded_page_id = page_id
+                                log.info(f"WebSocket context loaded {len(current_chat_history)} messages for page {page_id}")
+                            except Exception as page_error:
+                                log.error(f"Failed to load page history for WebSocket context {page_id}: {page_error}")
+                                if db.is_active:
+                                    await db.rollback()
+                                current_chat_history = []
+                        else:
+                            # New conversation - clear context
+                            current_chat_history = []
+                            current_loaded_page_id = None
+                            log.info("WebSocket context switched to new conversation")
+                
+            except json.JSONDecodeError:
+                # It's a regular text message (legacy format)
+                pass
+            
+            # Save user message with page context
+            try:
+                user_message_id = str(uuid.uuid4())
+                db.add(ChatMessage(
+                    id=user_message_id,
+                    user_id=user_id,
+                    page_id=page_id,
+                    message=message_content,
+                    is_user_message=True
+                ))
+                await db.commit()
+                log.info(f"Saved user message {user_message_id} with page_id: {page_id}")
+            except Exception as save_error:
+                log.error(f"Failed to save user message: {save_error}")
+                if db.is_active:
+                    await db.rollback()
+                user_message_id = str(uuid.uuid4())  # Generate new ID for retry
+            
+            current_chat_history.append(HumanMessage(id=user_message_id, content=message_content))
+
+            # Track user message behavior
+            if memory_manager:
+                try:
+                    await memory_manager.save_user_behavior(
+                        action_type="chat_message",
+                        context={
+                            "message_length": len(message_content),
+                            "page_id": page_id,
+                            "timestamp": datetime.utcnow().isoformat()
+                        },
+                        success=True
+                    )
+                except Exception as e:
+                    log.warning(f"Failed to save user behavior: {e}")
+
+            # Pass message to our agent with enhanced context
+            try:
+                response = await master_agent.ainvoke({
+                    "input": message_content,
+                    "chat_history": current_chat_history,
+                })
+                result = response.get("output", "I'm sorry, I encountered an issue.")
+                
+                # Track successful agent response
+                if memory_manager:
+                    await memory_manager.save_user_behavior(
+                        action_type="agent_response",
+                        context={
+                            "response_length": len(result),
+                            "input_length": len(message_content),
+                            "page_id": page_id
+                        },
+                        success=True
+                    )
+                
+            except Exception as e:
+                log.error(f"Error in agent processing: {e}")
+                result = "I'm sorry, I encountered an issue processing your request. Please try again."
+                
+                # Track failed agent response
+                if memory_manager:
+                    try:
+                        await memory_manager.save_user_behavior(
+                            action_type="agent_response",
+                            context={
+                                "error": str(e),
+                                "input_length": len(message_content),
+                                "page_id": page_id
+                            },
+                            success=False
+                        )
+                    except Exception:
+                        pass
+            
+            await websocket.send_json({
+                "type": "message",
+                "message": result
+            })
+            
+            # Save AI message with page context
+            try:
+                ai_message_id = str(uuid.uuid4())
+                db.add(ChatMessage(
+                    id=ai_message_id,
+                    user_id=user_id,
+                    page_id=page_id,
+                    message=result,
+                    is_user_message=False
+                ))
+                await db.commit()
+                log.info(f"Saved AI message {ai_message_id} with page_id: {page_id}")
+            except Exception as save_error:
+                log.error(f"Failed to save AI message: {save_error}")
+                if db.is_active:
+                    await db.rollback()
+                ai_message_id = str(uuid.uuid4())  # Generate new ID for retry
+            
+            current_chat_history.append(AIMessage(id=ai_message_id, content=result))
+            
+    except WebSocketDisconnect:
+        log.info(f"WebSocket disconnected for user {user_id}")
+    except Exception as e:
+        log.error(f"WebSocket error for user {user_id}: {e}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": f"An error occurred: {str(e)}"
+            })
+        except Exception:
+            pass  # WebSocket might be closed 
+
+    # Define the graph
+    workflow = StateGraph(GraphState)
+    workflow.add_node("agent", call_agent)
+    workflow.add_node("action", execute_tools_node)
+    workflow.set_entry_point("agent")
+    workflow.add_conditional_edges(
+        "agent",
+        should_continue,
+        {"continue": "action", "end": END}
+    )
+    workflow.add_edge('action', 'agent')
+    
+    # Compile the graph with our custom database checkpointer
+    graph = workflow.compile(checkpointer=DatabaseCheckpointSaver(user, async_session_maker))
+    
+    # --- Main WebSocket Loop ---
+    try:
+        if memory_manager:
+            # Get enhanced conversation context with summarization and user learning
+            context = await memory_manager.get_conversation_context()
+            
+            # Convert recent messages to LangChain format
+            current_chat_history = []
+            for msg_data in context.conversation_history:
+                try:
+                    content = msg_data["content"]
+                    if msg_data["role"] == "user":
+                        current_chat_history.append(HumanMessage(content=content))
+                    else:
+                        current_chat_history.append(AIMessage(content=content))
+                except Exception as e:
+                    log.warning(f"Error processing message in enhanced context: {e}")
+            
+            # Add conversation summary as system message if available
+            if context.context_summary and len(context.conversation_history) > 20:
+                summary_message = HumanMessage(content=f"[Conversation Summary: {context.context_summary}]")
+                current_chat_history.insert(0, summary_message)
+            
+            log.info(f"Loaded enhanced chat history: {len(current_chat_history)} messages, summary available: {bool(context.context_summary)}")
+        else:
+            # Fallback to basic chat history loading
+            raise Exception("Memory manager not available, using basic history")
+        
+    except Exception as e:
+        log.error(f"Error loading enhanced chat history, falling back to basic: {e}")
+        # Fallback to basic chat history loading with proper transaction handling
+        try:
+            if db.is_active:
+                await db.rollback()  # Ensure clean transaction state
+            history_records = await db.execute(
+                select(ChatMessage)
+                .where(ChatMessage.user_id == user_id)
+                .where(ChatMessage.page_id.is_(None))
+                .order_by(ChatMessage.created_at)
+            )
+            
+            current_chat_history = []
+            for r in history_records.scalars().all():
+                try:
+                    content = json.loads(r.message)
+                except (json.JSONDecodeError, TypeError):
+                    content = r.message
+                
+                if r.is_user_message:
+                    current_chat_history.append(HumanMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+                else:
+                    current_chat_history.append(AIMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+        except Exception as fallback_error:
+            log.error(f"Failed to load basic chat history: {fallback_error}")
+            current_chat_history = []  # Start with empty history if all fails
+
+    # Track the currently loaded page to avoid reloading
+    current_loaded_page_id = None
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            
+            # Parse message data to check for page context
+            message_content = data
+            page_id = None
+            
+            try:
+                message_data = json.loads(data)
+
+                if message_data.get("type") == "stop_generation":
+                    log.info("Received stop_generation signal. Halting any current agent activity.")
+                    # We can add more complex cancellation logic here in the future if needed.
+                    # For now, we just ignore the message and wait for the next one.
+                    continue
+                
+                if message_data.get("type") == "clear_context":
+                    current_chat_history = []
+                    current_loaded_page_id = None
+                    log.info(f"Chat context cleared for user {user_id}")
+                    continue
+                elif message_data.get("type") == "switch_page":
+                    # Handle explicit page switching from frontend
+                    new_page_id = message_data.get("page_id")
+                    if new_page_id != current_loaded_page_id:
+                        # --- FIX: Use EnhancedMemoryManager to get context ---
+                        context = await memory_manager.get_conversation_context(new_page_id)
+                        current_chat_history = [
+                            HumanMessage(content=msg["content"]) if msg["role"] == "user" 
+                            else AIMessage(content=msg["content"]) 
+                            for msg in context.recent_messages
+                        ]
+                        current_loaded_page_id = new_page_id
+                        
+                        # Update last_opened_at timestamp
+                        if new_page_id:
+                            await db.execute(
+                                update(Page)
+                                .where(Page.id == new_page_id)
+                                .values(last_opened_at=func.now())
+                            )
+                            await db.commit()
+                            log.info(f"Updated last_opened_at for page {new_page_id}")
+                    continue
+                elif message_data.get("type") == "regenerate":
+                    log.info("🔄 Regeneration request received")
+                    regenerate_content = message_data.get("content", "")
+                    regenerate_page_id = message_data.get("page_id")
+                    
+                    log.info(f"🔄 Regenerate content: '{regenerate_content[:50]}...'")
+                    log.info(f"🔄 Page ID: {regenerate_page_id}")
+                    log.info(f"🔄 Current chat history length: {len(current_chat_history)}")
+                    
+                    # Load page history if we're regenerating from a different page
+                    if regenerate_page_id != current_loaded_page_id:
+                        log.info(f"🔄 Loading history for page {regenerate_page_id} for regeneration")
+                        context = await memory_manager.get_conversation_context(regenerate_page_id)
+                        current_chat_history = [
+                            HumanMessage(content=msg["content"]) if msg["role"] == "user" 
+                            else AIMessage(content=msg["content"]) 
+                            for msg in context.recent_messages
+                        ]
+                        current_loaded_page_id = regenerate_page_id
+                    
+                    # Remove the last AI message from history
+                    if current_chat_history and isinstance(current_chat_history[-1], AIMessage):
+                        removed_message = current_chat_history.pop()
+                        log.info(f"🔄 Removed last AI message from history: '{removed_message.content[:50]}...'")
+                    
+                    # Add the regenerate content as user message if not already present
+                    if not current_chat_history or current_chat_history[-1].content != regenerate_content:
+                        current_chat_history.append(HumanMessage(content=regenerate_content))
+                        log.info(f"🔄 Added regenerate content to history")
+                    
+                    try:
+                        log.info(f"🔄 Starting master agent with {len(current_chat_history)} history messages")
+                        
+                        # Use timeout for regeneration to prevent hanging
+                        try:
+                            response = await asyncio.wait_for(
+                                master_agent.ainvoke({
+                                    "input": regenerate_content,
+                                    "chat_history": current_chat_history,
+                                }),
+                                timeout=180.0  # 3 minute timeout for complex requests
+                            )
+                            
+                            if response and 'output' in response:
+                                agent_response = response['output']
+                                log.info(f"🔄 Master agent regenerated response: '{agent_response[:100]}...'")
+                                
+                                # Delete the last AI message from database before saving new one
+                                try:
+                                    last_ai_message = await db.execute(
+                                        select(ChatMessage)
+                                        .where(ChatMessage.user_id == user.id)
+                                        .where(ChatMessage.page_id == regenerate_page_id)
+                                        .where(ChatMessage.is_user_message == False)
+                                        .order_by(ChatMessage.created_at.desc())
+                                        .limit(1)
+                                    )
+                                    last_ai_msg = last_ai_message.scalars().first()
+                                    if last_ai_msg:
+                                        await db.delete(last_ai_msg)
+                                        log.info(f"🔄 Deleted original AI message {last_ai_msg.id} from database")
+                                    
+                                    # Now save the new regenerated message
+                                    new_message = ChatMessage(
+                                        id=str(uuid.uuid4()),
+                                        user_id=user.id,
+                                        message=agent_response,
+                                        is_user_message=False,
+                                        page_id=regenerate_page_id
+                                    )
+                                    db.add(new_message)
+                                    await db.commit()
+                                    log.info(f"🔄 Regenerated message saved to database with page_id: {regenerate_page_id}")
+                                except Exception as save_error:
+                                    log.error(f"🔄 Error saving regenerated message: {save_error}")
+                                    if db.is_active:
+                                        await db.rollback()
+                                
+                                await websocket.send_json({
+                                    "type": "message",
+                                    "message": agent_response
+                                })
+                            else:
+                                log.error("🔄 Master agent returned invalid response format")
+                                await websocket.send_text("I apologize, but I encountered an issue generating a response. Please try again.")
+                                
+                        except asyncio.TimeoutError:
+                            log.error("🔄 Master agent timed out during regeneration")
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "The regeneration took too long and timed out. Please try again with a simpler request."
+                            })
+                        except Exception as agent_error:
+                            log.error(f"🔄 Master agent error during regeneration: {agent_error}")
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "I encountered an error while regenerating the response. Please try again."
+                            })
+                            
+                    except Exception as e:
+                        log.error(f"🔄 Error during regeneration: {e}", exc_info=True)
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "I apologize, but I encountered an error during regeneration. Please try again."
+                        })
+                    continue
+                elif "content" in message_data:
+                    # New format with page context
+                    message_content = message_data["content"]
+                    page_id = message_data.get("page_id")
+                    
+                    # FIX: If it's the first message of a new chat, page_id will be missing.
+                    # We need to create the page first to get an ID before saving any messages.
+                    if not page_id:
+                        try:
+                            # Create a title from the first message
+                            title = message_content.split('\n')[0]
+                            title = title.split('. ')[0]
+                            title = title.split('? ')[0]
+                            title = title.split('! ')[0]
+                            title = title[:50] + '...' if len(title) > 50 else title
+                            
+                            new_page = Page(user_id=user_id, title=title)
+                            db.add(new_page)
+                            await db.commit()
+                            await db.refresh(new_page)
+                            page_id = new_page.id
+                            log.info(f"✅ Created new page {page_id} for new conversation.")
+                            
+                            # Send the new page_id back to the frontend immediately
+                            await websocket.send_json({
+                                "type": "page_created",
+                                "page_id": page_id,
+                                "title": title,
+                                "created_at": new_page.created_at.isoformat()
+                            })
+                            
+                        except Exception as page_creation_error:
+                            log.error(f"❌ Failed to create new page: {page_creation_error}")
+                            if db.is_active:
+                                await db.rollback()
+                            # Stop processing if we can't create a page
+                            continue
+
+                    # Only load page history if WebSocket context isn't already set for this page
+                    # Frontend is responsible for loading messages via API, WebSocket just tracks context
+                    if page_id != current_loaded_page_id:
+                        if page_id:
+                            # Load conversation history for AI context only (don't send to frontend)
+                            try:
+                                page_history = await db.execute(
+                                    select(ChatMessage)
+                                    .where(ChatMessage.user_id == user_id)
+                                    .where(ChatMessage.page_id == page_id)
+                                    .order_by(ChatMessage.created_at)
+                                )
+                                
+                                # Build chat history for AI context
+                                new_chat_history = []
+                                for r in page_history.scalars().all():
+                                    try:
+                                        content = json.loads(r.message)
+                                    except (json.JSONDecodeError, TypeError):
+                                        content = r.message
+                                    
+                                    if r.is_user_message:
+                                        new_chat_history.append(HumanMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+                                    else:
+                                        new_chat_history.append(AIMessage(id=r.id, content=content if isinstance(content, str) else json.dumps(content)))
+                                
+                                current_chat_history = new_chat_history
+                                current_loaded_page_id = page_id
+                                log.info(f"WebSocket context loaded {len(current_chat_history)} messages for page {page_id}")
+                            except Exception as page_error:
+                                log.error(f"Failed to load page history for WebSocket context {page_id}: {page_error}")
+                                if db.is_active:
+                                    await db.rollback()
+                                current_chat_history = []
+                        else:
+                            # New conversation - clear context
+                            current_chat_history = []
+                            current_loaded_page_id = None
+                            log.info("WebSocket context switched to new conversation")
+                
+            except json.JSONDecodeError:
+                # It's a regular text message (legacy format)
+                pass
+            
+            # Save user message with page context
+            try:
+                user_message_id = str(uuid.uuid4())
+                db.add(ChatMessage(
+                    id=user_message_id,
+                    user_id=user_id,
+                    page_id=page_id,
+                    message=message_content,
+                    is_user_message=True
+                ))
+                await db.commit()
+                log.info(f"Saved user message {user_message_id} with page_id: {page_id}")
+            except Exception as save_error:
+                log.error(f"Failed to save user message: {save_error}")
+                if db.is_active:
+                    await db.rollback()
+                user_message_id = str(uuid.uuid4())  # Generate new ID for retry
+            
+            current_chat_history.append(HumanMessage(id=user_message_id, content=message_content))
+
+            # Track user message behavior
+            if memory_manager:
+                try:
+                    await memory_manager.save_user_behavior(
+                        action_type="chat_message",
+                        context={
+                            "message_length": len(message_content),
+                            "page_id": page_id,
+                            "timestamp": datetime.utcnow().isoformat()
+                        },
+                        success=True
+                    )
+                except Exception as e:
+                    log.warning(f"Failed to save user behavior: {e}")
+
+            # Pass message to our agent with enhanced context
+            try:
+                response = await master_agent.ainvoke({
+                    "input": message_content,
+                    "chat_history": current_chat_history,
+                })
+                result = response.get("output", "I'm sorry, I encountered an issue.")
+                
+                # Track successful agent response
+                if memory_manager:
+                    await memory_manager.save_user_behavior(
+                        action_type="agent_response",
+                        context={
+                            "response_length": len(result),
+                            "input_length": len(message_content),
+                            "page_id": page_id
+                        },
+                        success=True
+                    )
+                
+            except Exception as e:
+                log.error(f"Error in agent processing: {e}")
+                result = "I'm sorry, I encountered an issue processing your request. Please try again."
+                
+                # Track failed agent response
+                if memory_manager:
+                    try:
+                        await memory_manager.save_user_behavior(
+                            action_type="agent_response",
+                            context={
+                                "error": str(e),
+                                "input_length": len(message_content
