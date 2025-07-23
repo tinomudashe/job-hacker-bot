@@ -53,9 +53,21 @@ opentelemetry-instrumentation-sqlalchemy>=0.43b0
 
 # Email Sending
 fastapi-mail>=1.4.1
+
+# --- Consolidated LangChain Dependencies ---
+# Using stricter, more modern constraints to prevent resolver timeout.
+langchain>=0.2.0,<0.3
+langchain-core>=0.2.10,<0.3
+langchain-community>=0.2.0,<0.3
+langchain-google-genai>=1.0.6,<2.0
+langchain-google-vertexai>=1.0.6,<2.0
+langchain-openai>=0.1.8,<0.2.0
 langchain-text-splitters>=0.2.1,<0.3
 langchainhub>=0.1.20,<0.2.0
 langsmith>=0.1.75,<0.2.0
+langgraph>=0.1.2,<0.2
+# --- End LangChain Dependencies ---
+
 numpy==1.26.4
 openai==1.34.0
 pdf2image==1.17.0
@@ -84,4 +96,3 @@ urllib3==2.2.1
 uvicorn==0.30.1
 websockets==12.0
 yarl==1.9.4
-langgraph>=0.1.2,<0.2
