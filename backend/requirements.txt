@@ -39,7 +39,7 @@ websockets==12.0
 
 # Google Cloud APIs
 google-generativeai==0.3.1
-google-cloud-talent==3.5.0
+google-cloud-talent==2.17.2
 google-cloud-texttospeech==2.16.1
 google-cloud-speech==2.27.0
 
