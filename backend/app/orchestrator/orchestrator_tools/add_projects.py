@@ -3,10 +3,11 @@ from langchain_core.tools import tool
 import logging
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
+
 from app.models_db import User
 from .get_or_create_resume import get_or_create_resume
-from app.models_db import Project
-from sqlalchemy import flag_modified
+from app.orchestrator.orchestrator_models.resume_model import Project
 
 log = logging.getLogger(__name__)
 
