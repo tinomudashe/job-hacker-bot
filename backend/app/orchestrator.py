@@ -3689,7 +3689,7 @@ Include this mix:
             )
             
             return final_response
-
+            
         except Exception as e:
             log.error(f"Error generating interview guide: {e}", exc_info=True)
             return "❌ I'm sorry, but I encountered an error while trying to generate the interview preparation guide. Please try again."
@@ -3824,7 +3824,7 @@ Provide specific, actionable negotiation advice with realistic expectations."""
             chain = prompt | llm | StrOutputParser()
             
             advice = await chain.ainvoke({
-                "job_title": job_title,
+                    "job_title": job_title,
                 "experience_level": experience_level,
                 "location": location or "general market",
                 "industry": industry or "general"
@@ -3864,7 +3864,7 @@ Provide specific, actionable negotiation advice with realistic expectations."""
 **🔗 Related Tools:**
 - `search jobs for [role]` - Research current market opportunities
 - `get interview preparation guide` - Prepare to demonstrate value"""
-            
+
         except Exception as e:
             log.error(f"Error getting salary negotiation advice: {e}", exc_info=True)
             return f"❌ Sorry, I encountered an error while getting negotiation advice: {str(e)}. Please try again."
@@ -4120,9 +4120,9 @@ Provide specific, time-bound, measurable actions that create a clear path to the
             # Get user documents for extraction
             doc_result = await db.execute(
                 select(Document).where(Document.user_id == user_id).order_by(Document.date_created.desc())
-            )
+                )
             documents = doc_result.scalars().all()
-            
+                
             if not documents:
                 return "❌ No documents found to extract profile information from. Please upload your CV/resume first."
             
@@ -4143,8 +4143,8 @@ Provide specific, time-bound, measurable actions that create a clear path to the
                 """You are an expert information extractor. Extract COMPREHENSIVE resume information from CV/resume documents.
 
 DOCUMENT CONTENT:
-{document_content}
-
+                        {document_content}
+                        
 EXTRACTION TASK:
 Extract ALL information and return ONLY a JSON object with these exact keys:
 - "full_name": Person's complete name
@@ -4510,7 +4510,7 @@ This up-to-date information can help inform your career decisions and strategies
                 
                 log.info(f"✅ Web search completed for advice query: '{query}' - found {len(results)} results")
                 return formatted_response
-            
+                    
         except Exception as e:
             log.error(f"Error in web search for advice: {e}", exc_info=True)
             return f"❌ Unable to fetch current information for '{query}' at the moment. Let me provide guidance based on established best practices instead."
@@ -4520,7 +4520,7 @@ This up-to-date information can help inform your career decisions and strategies
         """Gets the current date and time for temporal context."""
         now = datetime.now()
         return f"Current date and time is: {now.strftime('%A, %B %d, %Y at %I:%M %p')}"
-
+    
     @tool
     async def get_user_location_context() -> str:
         """Gets user's location based on their IP address for local job market context."""
@@ -4743,7 +4743,7 @@ Your resume database record is now properly structured. Try clicking a download 
     if all("✅" in status for status in sections_status) 
     else "❌ Some sections are missing. Run 'extract and populate profile from documents' to complete your resume data."
 }"""
-                
+            
         except Exception as e:
             log.error(f"Error checking resume data structure: {e}", exc_info=True)
             return f"❌ Error checking resume data structure: {str(e)}"
@@ -5595,31 +5595,31 @@ Your resume database record is now properly structured. Try clicking a download 
                     )
                 
             except Exception as e:
-                log.error(f"Error in agent processing: {e}")
-                result = "I'm sorry, I encountered an issue processing your request. Please try again."
+                    log.error(f"Error in agent processing: {e}")
+                    result = "I'm sorry, I encountered an issue processing your request. Please try again."
                 
                 # Track failed agent response
-                if memory_manager:
-                    try:
-                        await memory_manager.save_user_behavior(
-                            action_type="agent_response",
-                            context={
-                                "error": str(e),
-                                "input_length": len(message_content),
-                                "page_id": page_id
-                            },
-                            success=False
-                        )
-                    except Exception:
-                        pass
+            if memory_manager:
+                try:
+                    await memory_manager.save_user_behavior(
+                        action_type="agent_response",
+                        context={
+                            "error": str(e),
+                            "input_length": len(message_content),
+                            "page_id": page_id
+                        },
+                        success=False
+                    )
+                except Exception:
+                    pass
             
-            await websocket.send_json({
+        await websocket.send_json({
                 "type": "message",
                 "message": result
             })
             
             # Save AI message with page context
-            try:
+        try:
                 ai_message_id = str(uuid.uuid4())
                 db.add(ChatMessage(
                     id=ai_message_id,
@@ -5630,13 +5630,13 @@ Your resume database record is now properly structured. Try clicking a download 
                 ))
                 await db.commit()
                 log.info(f"Saved AI message {ai_message_id} with page_id: {page_id}")
-            except Exception as save_error:
+        except Exception as save_error:
                 log.error(f"Failed to save AI message: {save_error}")
                 if db.is_active:
                     await db.rollback()
                 ai_message_id = str(uuid.uuid4())  # Generate new ID for retry
             
-            current_chat_history.append(AIMessage(id=ai_message_id, content=result))
+        current_chat_history.append(AIMessage(id=ai_message_id, content=result))
             
     except WebSocketDisconnect:
         log.info(f"WebSocket disconnected for user {user_id}")
@@ -5687,12 +5687,11 @@ Your resume database record is now properly structured. Try clicking a download 
             if context.context_summary and len(context.conversation_history) > 20:
                 summary_message = HumanMessage(content=f"[Conversation Summary: {context.context_summary}]")
                 current_chat_history.insert(0, summary_message)
-            
-            log.info(f"Loaded enhanced chat history: {len(current_chat_history)} messages, summary available: {bool(context.context_summary)}")
-        else:
+                log.info(f"Loaded enhanced chat history: {len(current_chat_history)} messages, summary available: {bool(context.context_summary)}")
+            else:
             # Fallback to basic chat history loading
-            raise Exception("Memory manager not available, using basic history")
-        
+                raise Exception("Memory manager not available, using basic history")
+                        
     except Exception as e:
         log.error(f"Error loading enhanced chat history, falling back to basic: {e}")
         # Fallback to basic chat history loading with proper transaction handling
@@ -7256,25 +7255,19 @@ Your resume database record is now properly structured. Try clicking a download 
                 
                 # Track successful agent response
                 if memory_manager:
-                    await memory_manager.save_user_behavior(
-                        action_type="agent_response",
-                        context={
-                            "response_length": len(result),
-                            "input_length": len(message_content),
-                            "page_id": page_id
-                        },
-                        success=True
-                    )
-                
-            except Exception as e:
-                log.error(f"Error in agent processing: {e}")
-                result = "I'm sorry, I encountered an issue processing your request. Please try again."
-                
-                # Track failed agent response
-                if memory_manager:
                     try:
                         await memory_manager.save_user_behavior(
                             action_type="agent_response",
                             context={
                                 "error": str(e),
-                                "input_length": len(message_content
+                                "input_length": len(message_content)
+                            },
+                            success=False
+                        )
+                    except Exception as e:
+                        log.warning(f"Failed to save user behavior after agent error: {e}")
+
+            except WebSocketDisconnect:
+                log.info(f"WebSocket orchestrator disconnected for user: {user_id}")
+    except Exception as e:
+        log.error(f"Error in orchestrator websocket: {e}", exc_info=True)
