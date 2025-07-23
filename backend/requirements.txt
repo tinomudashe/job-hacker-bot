@@ -3,7 +3,7 @@ fastapi==0.116.1
 uvicorn==0.21.1
 
 # File Uploads & Parsing
-python-multipart==0.0.6
+python-multipart==0.0.7
 pydantic==2.7.1
 
 # Vector Search & LangChain Core
@@ -19,7 +19,7 @@ python-docx==0.8.11
 
 # Authentication
 passlib[bcrypt]==1.7.4
-python-jose[cryptography]==3.3.0
+python-jose==3.4.0
 PyJWT==2.8.0
 
 # Database
