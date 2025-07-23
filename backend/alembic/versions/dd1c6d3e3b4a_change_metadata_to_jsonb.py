@@ -25,7 +25,7 @@ def upgrade() -> None:
     """
     op.alter_column('langchain_pg_embedding', 'cmetadata',
                existing_type=sa.JSON(),
-               type_=postgresql.JSONB(astext_compat=True),
+               type_=postgresql.JSONB(),
                existing_nullable=True,
                postgresql_using='cmetadata::text::jsonb')
 
@@ -35,7 +35,7 @@ def downgrade() -> None:
     Revert the metadata column in langchain_pg_embedding from JSONB back to JSON.
     """
     op.alter_column('langchain_pg_embedding', 'cmetadata',
-               existing_type=postgresql.JSONB(astext_compat=True),
+               existing_type=postgresql.JSONB(),
                type_=sa.JSON(),
                existing_nullable=True,
                postgresql_using='cmetadata::text::json') 
