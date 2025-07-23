@@ -894,6 +894,8 @@ async def orchestrator_websocket(
     
 
     
+    tools = []
+    
     @tool
     async def search_jobs_tool(
         query: Optional[str] = None,
