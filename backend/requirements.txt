@@ -44,7 +44,7 @@ google-cloud-texttospeech==2.16.1
 google-cloud-speech==2.27.0
 
 # Payments & Email
-stripe==15.3.0
+stripe<=7.0.0
 fastapi-mail==1.4.1
 
 # PDF Generation
