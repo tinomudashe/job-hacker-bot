@@ -244,13 +244,17 @@ async def orchestrator_websocket(
     # The helper function handles those that do need it.
 
     # --- Worker Definitions ---
+    # Load the specific prompt for the conversational agent
+    general_prompt = load_prompt_from_file("general_conversation_prompt.txt") or "You are a helpful assistant."
+
     workers = {
         "profile_management": create_worker(profile_tools, MAIN_SYSTEM_PROMPT),
         "document_interaction": create_worker(document_tools, MAIN_SYSTEM_PROMPT),
-        "resume_cv": create_worker(resume_cv_tools, MAIN_SYSTEM_PROMPT),
+        "resume_cv": create_worker(resume_cv_tools + cover_letter_tools, MAIN_SYSTEM_PROMPT),
         "job_search": create_worker(job_search_tools, MAIN_SYSTEM_PROMPT),
         "career_guidance": create_worker(career_guidance_tools, MAIN_SYSTEM_PROMPT),
-        "general_conversation": create_worker([], "You are a helpful assistant. Respond to the user directly for general conversation, greetings, or questions where no specific tool is needed."),
+        # Use the new, dedicated prompt for the conversational worker
+        "general_conversation": create_worker([], general_prompt),
     }
 
     # --- Graph Construction ---
