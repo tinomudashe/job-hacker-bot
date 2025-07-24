@@ -261,100 +261,34 @@ export const useWebSocket = (currentPageId?: string) => {
   }, [isLoaded, isSignedIn, connect]);
 
   const sendMessage = useCallback(
-    async (content: string) => {
-      try {
-        let pageId = currentPageIdRef.current;
-
-        console.log(
-          `📤 [WebSocket] sendMessage called with content: "${content}"`
+    (message: string) => {
+      // Centralized validation to prevent sending empty messages
+      if (!message || message.trim() === "") {
+        console.warn(
+          "Attempted to send an empty or whitespace-only message. Aborting."
         );
-        console.log(`📤 [WebSocket] Current pageId: ${pageId}`);
-        console.log(
-          `📤 [WebSocket] Current messages count: ${messages.length}`
-        );
-
-        // REVERTED: Simple page creation logic that was working
-        if (messages.length === 0 && !pageId) {
-          console.log(`📄 [WebSocket] Creating new page for first message`);
-          const token = await getToken();
-          if (!token) {
-            setError("Authentication token not found.");
-            return;
-          }
-
-          try {
-            const response = await fetch("/api/pages", {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${token}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ first_message: content }),
-            });
-
-            if (response.ok) {
-              const newPage = await response.json();
-              pageId = newPage.id;
-              // Immediately update currentPageIdRef so subsequent messages use it
-              currentPageIdRef.current = pageId;
-              // Also update outer state if useWebSocket is used by a component that reads currentPageId from its state
-              // This might need a direct setter passed from the component or a ref sync mechanism
-              // For now, rely on currentPageIdRef and the effect to trigger a history load
-              console.log(`📄 [WebSocket] New page created with ID: ${pageId}`);
-            } else {
-              throw new Error("Failed to create new page");
-            }
-          } catch (createPageError) {
-            console.error("Error creating new page:", createPageError);
-            setError(
-              `Failed to start new conversation: ${
-                createPageError instanceof Error
-                  ? createPageError.message
-                  : "Unknown error"
-              }`
-            );
-            return; // Stop execution if page creation fails
-          }
-        }
-
-        // Optimistically add user message to state
-        const newUserMessage: Message = {
-          id: uuidv4(),
-          content: content,
-          isUser: true,
-          createdAt: new Date().toISOString(), // Add creation timestamp
-        };
-        setMessages((prev) => [...prev, newUserMessage]);
-        setIsLoading(true); // Indicate loading for AI response
-
-        // Send message to WebSocket
-        if (
-          socketRef.current &&
-          socketRef.current.readyState === WebSocket.OPEN
-        ) {
-          const messagePayload = {
-            type: "message",
-            content: content,
-            page_id: pageId, // Ensure pageId is always sent
-          };
-          socketRef.current.send(JSON.stringify(messagePayload));
-          console.log(
-            `📤 [WebSocket] Sent message with page_id: ${pageId || "(new)"}`
-          );
-        } else {
-          setError("WebSocket is not connected. Please refresh the page.");
-          setIsLoading(false);
-        }
-      } catch (err) {
-        console.error("Error in sendMessage:", err);
-        setError(
-          "Failed to send message: " +
-            (err instanceof Error ? err.message : String(err))
-        );
-        setIsLoading(false);
+        return;
       }
+
+      if (socketRef.current?.readyState !== WebSocket.OPEN) {
+        console.warn("WebSocket is not connected. Message not sent.");
+        return;
+      }
+      const messageData = {
+        content: message.trim(),
+        page_id: currentPageIdRef.current,
+      };
+      socketRef.current.send(JSON.stringify(messageData));
+      // Optimistically add user message to the UI
+      const userMessage: Message = {
+        id: uuidv4(),
+        content: message.trim(),
+        isUser: true,
+        createdAt: new Date().toISOString(),
+      };
+      setMessages((prevMessages) => [...prevMessages, userMessage]);
     },
-    [messages, getToken]
+    [currentPageIdRef]
   );
 
   const deleteMessage = useCallback(
