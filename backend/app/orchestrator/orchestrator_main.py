@@ -435,6 +435,7 @@ async def orchestrator_websocket(
                     await websocket.send_json({"type": "error", "message": "Cannot process an empty message."})
                     continue # Wait for the next message
 
+                # Validate or create page
                 if not page_id:
                     new_page = Page(user_id=user.id, title=message_content[:50])
                     db.add(new_page)
@@ -442,10 +443,33 @@ async def orchestrator_websocket(
                     await db.refresh(new_page)
                     page_id = new_page.id
                     await websocket.send_json({"type": "page_created", "page_id": page_id, "title": new_page.title})
+                else:
+                    # Verify the page exists and belongs to the user
+                    existing_page = await db.execute(
+                        select(Page).where(Page.id == page_id, Page.user_id == user.id)
+                    )
+                    if not existing_page.scalar_one_or_none():
+                        log.warning(f"Page {page_id} not found for user {user.id}, creating new page")
+                        new_page = Page(user_id=user.id, title=message_content[:50])
+                        db.add(new_page)
+                        await db.commit()
+                        await db.refresh(new_page)
+                        page_id = new_page.id
+                        await websocket.send_json({"type": "page_created", "page_id": page_id, "title": new_page.title})
 
                 # Save user message (already validated)
-                db.add(ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, message=message_content, is_user_message=True))
-                await db.commit()
+                try:
+                    db.add(ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, message=message_content, is_user_message=True))
+                    await db.commit()
+                except Exception as db_error:
+                    log.error(f"Failed to save user message to database for user {user.id}, page {page_id}: {db_error}")
+                    await db.rollback()
+                    # Send error to user and continue
+                    await websocket.send_json({
+                        "type": "error", 
+                        "message": "Failed to save your message. Please try again."
+                    })
+                    continue
                 
                 # Load history
                 context = await memory_manager.get_conversation_context(page_id)
@@ -482,8 +506,13 @@ async def orchestrator_websocket(
                 await websocket.send_json({"type": "message", "message": final_response})
                 
                 # Save AI message (already validated)
-                db.add(ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, message=final_response, is_user_message=False))
-                await db.commit()
+                try:
+                    db.add(ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, message=final_response, is_user_message=False))
+                    await db.commit()
+                except Exception as db_error:
+                    log.error(f"Failed to save AI message to database for user {user.id}, page {page_id}: {db_error}")
+                    await db.rollback()
+                    # Continue anyway - user got the response via WebSocket
 
             except Exception as e:
                 # This block catches errors for a single message, logs them, and informs the user.
