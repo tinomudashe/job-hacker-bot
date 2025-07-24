@@ -257,7 +257,8 @@ export const ChatContainer = ({
               <button
                 onClick={scrollToBottom}
                 className={cn(
-                  "flex items-center justify-center w-8 h-8 rounded-xl transition-all duration-200",
+                  "flex items-center justify-center rounded-xl transition-all duration-200",
+                  "w-8 h-8 sm:w-10 sm:h-10", // Smaller on mobile, larger on desktop
                   "bg-background/60 backdrop-blur-xl backdrop-saturate-150",
                   "border border-white/8 hover:border-white/12",
                   "shadow-2xl",
