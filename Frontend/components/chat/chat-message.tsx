@@ -31,6 +31,7 @@ import { Logo } from "../ui/logo";
 import { FlashcardDialog } from "./flashcard-dialog";
 import { MessageContent } from "./message-content";
 import { PDFGenerationDialog } from "./pdf-generation-dialog";
+import { ReasoningStream } from "./reasoning-stream";
 
 // Safari compatibility polyfills
 const isSafari = () => {
@@ -50,6 +51,16 @@ const safeGet = (obj: any, path: string[], defaultValue: any = undefined) => {
   }
 };
 
+interface ReasoningStep {
+  type: 'reasoning_start' | 'reasoning_chunk' | 'reasoning_complete';
+  content: string;
+  step?: string;
+  specialist?: string;
+  tool_name?: string;
+  progress?: string;
+  timestamp: string;
+}
+
 interface ChatMessageProps {
   id: string;
   content: string | object;
@@ -59,6 +70,7 @@ interface ChatMessageProps {
   onEdit: (id: string, newContent: string) => void;
   onRegenerate: (id: string) => void;
   user?: any;
+  reasoningSteps?: ReasoningStep[];
 }
 
 const PDF_STYLES = [
@@ -502,6 +514,7 @@ export function ChatMessage({
   onEdit,
   onRegenerate,
   user,
+  reasoningSteps,
 }: ChatMessageProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState("");
@@ -1520,6 +1533,14 @@ export function ChatMessage({
             isUser ? "items-end" : "items-start"
           )}
         >
+          {/* Reasoning Stream - Only show for AI messages with reasoning steps */}
+          {!isUser && reasoningSteps && reasoningSteps.length > 0 && (
+            <ReasoningStream 
+              steps={reasoningSteps} 
+              isComplete={reasoningSteps.some(step => step.type === 'reasoning_complete')}
+              className="mb-3"
+            />
+          )}
           <div
             ref={messageRef}
             className={cn(

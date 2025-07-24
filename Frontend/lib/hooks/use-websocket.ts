@@ -13,6 +13,17 @@ interface Message {
   content: string;
   isUser: boolean;
   createdAt?: string; // Optional: Backend provides created_at, useful for display/ordering
+  reasoningSteps?: ReasoningStep[]; // For AI messages with reasoning streams
+}
+
+interface ReasoningStep {
+  type: 'reasoning_start' | 'reasoning_chunk' | 'reasoning_complete';
+  content: string;
+  step?: string;
+  specialist?: string;
+  tool_name?: string;
+  progress?: string;
+  timestamp: string;
 }
 
 export const useWebSocket = (currentPageId?: string) => {
@@ -162,6 +173,52 @@ export const useWebSocket = (currentPageId?: string) => {
           return newMessages;
         });
         setIsLoading(false);
+      } else if (parsedData.type === "reasoning_start" || parsedData.type === "reasoning_chunk" || parsedData.type === "reasoning_complete") {
+        // Handle reasoning stream events
+        console.log(`🧠 [WebSocket Reasoning]: ${parsedData.type}`, parsedData.data);
+        
+        setMessages((prev) => {
+          const lastMessage = prev[prev.length - 1];
+          
+          // If the last message is from AI and doesn't have reasoning steps yet, add them
+          if (lastMessage && !lastMessage.isUser) {
+            const updatedMessage = {
+              ...lastMessage,
+              reasoningSteps: [
+                ...(lastMessage.reasoningSteps || []),
+                {
+                  type: parsedData.type,
+                  content: parsedData.data.content,
+                  step: parsedData.data.step,
+                  specialist: parsedData.data.specialist,
+                  tool_name: parsedData.data.tool_name,
+                  progress: parsedData.data.progress,
+                  timestamp: parsedData.timestamp || new Date().toISOString()
+                }
+              ]
+            };
+            
+            return [...prev.slice(0, -1), updatedMessage];
+          } else {
+            // Create a new message for reasoning if no AI message exists
+            const reasoningMessage = {
+              id: uuidv4(),
+              content: "Processing your request...",
+              isUser: false,
+              reasoningSteps: [{
+                type: parsedData.type,
+                content: parsedData.data.content,
+                step: parsedData.data.step,
+                specialist: parsedData.data.specialist,
+                tool_name: parsedData.data.tool_name,
+                progress: parsedData.data.progress,
+                timestamp: parsedData.timestamp || new Date().toISOString()
+              }]
+            };
+            
+            return [...prev, reasoningMessage];
+          }
+        });
       } else if (parsedData.type === "info") {
         // Handle info messages (e.g., "Loading...", "Searching...")
         // You might want to display these as temporary status updates rather than full messages

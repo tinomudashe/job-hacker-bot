@@ -3,6 +3,7 @@ import logging
 import uuid
 import json
 from pathlib import Path
+from datetime import datetime
 from typing import List, Literal, Optional, Any, Dict, TypedDict
 
 from dotenv import load_dotenv
@@ -166,8 +167,16 @@ def create_agent_node(tools: list, system_prompt: str):
     """Create an agent node that can decide to call tools."""
     
     async def agent_node(state: AgentState):
-        """The agent decision-making node."""
-        log.info(f"--- 🤖 AGENT NODE ({state.get('route', 'unknown')}) ---")
+        """The agent decision-making node with reasoning streams."""
+        route = state.get('route', 'unknown')
+        log.info(f"--- 🤖 AGENT NODE ({route}) ---")
+        
+        # Stream reasoning start - matches your app's Brain icon theme
+        reasoning_start = {
+            "type": "reasoning_start",
+            "specialist": route,
+            "message": f"🧠 {route.replace('_', ' ').title()} specialist is analyzing your request..."
+        }
         
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),
@@ -178,6 +187,13 @@ def create_agent_node(tools: list, system_prompt: str):
         llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro-latest", temperature=0.2)
         llm_with_tools = llm.bind_tools(tools)
         
+        # Stream thinking process
+        reasoning_thinking = {
+            "type": "reasoning_chunk",
+            "content": "Understanding the context and requirements...",
+            "step": "analysis"
+        }
+        
         response = await (prompt | llm_with_tools).ainvoke({
             "input": state["input"],
             "chat_history": state["chat_history"],
@@ -186,17 +202,34 @@ def create_agent_node(tools: list, system_prompt: str):
         
         # Check if the model wants to call tools
         if response.tool_calls:
+            # Stream tool planning
+            tool_names = [call["name"] for call in response.tool_calls]
+            tool_planning = {
+                "type": "reasoning_chunk", 
+                "content": f"Planning to use tools: {', '.join(tool_names)}",
+                "step": "tool_planning",
+                "tools": tool_names
+            }
+            
             return {
                 "agent_outcome": {
                     "output": response,
                     "tool_calls": response.tool_calls
-                }
+                },
+                "reasoning_events": [reasoning_start, reasoning_thinking, tool_planning]
             }
         else:
             # Direct response without tools
+            reasoning_complete = {
+                "type": "reasoning_complete",
+                "content": "Analysis complete - providing direct response",
+                "confidence": "high"
+            }
+            
             return {
                 "agent_outcome": {"output": response.content},
-                "final_response": response.content
+                "final_response": response.content,
+                "reasoning_events": [reasoning_start, reasoning_thinking, reasoning_complete]
             }
     
     return agent_node
@@ -206,20 +239,38 @@ def create_tool_node(tools: list):
     wrapped_tools = wrap_tools_with_state_injection(tools)
     
     async def tool_execution_node(state: AgentState):
-        """Execute tools with state injection."""
+        """Execute tools with state injection and reasoning streams."""
         log.info(f"--- 🔧 TOOL NODE ---")
         
         agent_outcome = state.get("agent_outcome", {})
         tool_calls = agent_outcome.get("tool_calls", [])
+        reasoning_events = []
         
         if not tool_calls:
             # No tools to execute, return current state
             return state
         
+        # Stream tool execution start
+        reasoning_events.append({
+            "type": "reasoning_chunk",
+            "content": f"⚙️ Executing {len(tool_calls)} tool{'s' if len(tool_calls) > 1 else ''}...",
+            "step": "tool_execution_start",
+            "tool_count": len(tool_calls)
+        })
+        
         tool_results = []
-        for tool_call in tool_calls:
+        for i, tool_call in enumerate(tool_calls, 1):
             tool_name = tool_call["name"]
             tool_args = tool_call["args"]
+            
+            # Stream individual tool progress
+            reasoning_events.append({
+                "type": "reasoning_chunk",
+                "content": f"🔧 Running {tool_name} ({i}/{len(tool_calls)})",
+                "step": "tool_progress",
+                "tool_name": tool_name,
+                "progress": f"{i}/{len(tool_calls)}"
+            })
             
             # Find the matching tool
             matching_tool = None
@@ -232,18 +283,51 @@ def create_tool_node(tools: list):
                 try:
                     result = await matching_tool(**tool_args, state=state)
                     tool_results.append(f"Tool {tool_name}: {result}")
+                    
+                    # Stream tool success
+                    reasoning_events.append({
+                        "type": "reasoning_chunk",
+                        "content": f"✅ {tool_name} completed successfully",
+                        "step": "tool_success",
+                        "tool_name": tool_name
+                    })
                 except Exception as e:
+                    error_msg = f"Tool {tool_name} failed: {str(e)}"
                     log.error(f"Tool execution error for {tool_name}: {e}")
-                    tool_results.append(f"Tool {tool_name} failed: {str(e)}")
+                    tool_results.append(error_msg)
+                    
+                    # Stream tool error
+                    reasoning_events.append({
+                        "type": "reasoning_chunk", 
+                        "content": f"❌ {tool_name} encountered an error",
+                        "step": "tool_error",
+                        "tool_name": tool_name,
+                        "error": str(e)
+                    })
             else:
-                tool_results.append(f"Tool {tool_name} not found")
+                error_msg = f"Tool {tool_name} not found"
+                tool_results.append(error_msg)
+                reasoning_events.append({
+                    "type": "reasoning_chunk",
+                    "content": f"⚠️ {tool_name} not available",
+                    "step": "tool_not_found",
+                    "tool_name": tool_name
+                })
+        
+        # Stream completion
+        reasoning_events.append({
+            "type": "reasoning_chunk",
+            "content": "🎯 Tool execution complete - preparing response",
+            "step": "tool_execution_complete"
+        })
         
         # Combine tool results into final response
         final_response = "\n".join(tool_results)
         
         return {
             "agent_outcome": {"output": final_response},
-            "final_response": final_response
+            "final_response": final_response,
+            "reasoning_events": reasoning_events
         }
     
     return tool_execution_node
@@ -509,6 +593,15 @@ async def orchestrator_websocket(
                     for node_name, node_data in event.items():
                         if node_name.endswith("_agent") or node_name.endswith("_tools"):
                             await websocket.send_json({"type": "info", "message": f"Processing with {node_name}..."})
+                        
+                        # Stream reasoning events
+                        if isinstance(node_data, dict) and node_data.get("reasoning_events"):
+                            for reasoning_event in node_data["reasoning_events"]:
+                                await websocket.send_json({
+                                    "type": reasoning_event["type"],
+                                    "data": reasoning_event,
+                                    "timestamp": datetime.now().isoformat()
+                                })
                         
                         # Check for final response in any node
                         if isinstance(node_data, dict) and node_data.get("final_response"):

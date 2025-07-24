@@ -8,10 +8,21 @@ import { ChatMessage } from "./chat-message";
 import { ChatTextarea } from "./chat-textarea";
 import { LoadingMessage } from "./loading-message";
 
+interface ReasoningStep {
+  type: 'reasoning_start' | 'reasoning_chunk' | 'reasoning_complete';
+  content: string;
+  step?: string;
+  specialist?: string;
+  tool_name?: string;
+  progress?: string;
+  timestamp: string;
+}
+
 interface Message {
   id: string;
   content: string | object;
   isUser: boolean;
+  reasoningSteps?: ReasoningStep[];
 }
 
 interface ChatContainerProps {
@@ -224,6 +235,7 @@ export const ChatContainer = ({
                 onDelete={onDeleteMessage || (() => {})}
                 onEdit={onEditMessage}
                 onRegenerate={onRegenerateMessage}
+                reasoningSteps={message.reasoningSteps}
               />
             ))}
             {isLoading && (
