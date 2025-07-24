@@ -61,6 +61,27 @@ log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 router = APIRouter()
 
+# --- CORRECTED & FINAL: Load prompts with a fallback ---
+def load_prompt_from_file(file_name: str) -> Optional[str]:
+    """Helper to load a prompt from the orchestrator_prompts directory."""
+    prompt_path = Path(__file__).parent / "orchestrator_prompts" / file_name
+    try:
+        with open(prompt_path, "r") as f:
+            return f.read()
+    except FileNotFoundError:
+        log.warning(f"Prompt file not found: {file_name}")
+        return None
+
+# Load the main prompt, and if it fails, load the fallback.
+MAIN_SYSTEM_PROMPT = load_prompt_from_file("system_prompt.txt")
+if not MAIN_SYSTEM_PROMPT:
+    MAIN_SYSTEM_PROMPT = load_prompt_from_file("fallback_system_prompt.txt")
+    if not MAIN_SYSTEM_PROMPT:
+        # If both fail, use a hardcoded, basic prompt to prevent a crash.
+        log.error("CRITICAL: Both main and fallback prompts are missing. Agent will be unreliable.")
+        MAIN_SYSTEM_PROMPT = "You are a helpful assistant."
+
+
 # --- 1. State & Pydantic Models ---
 
 class AgentState(TypedDict):
@@ -216,11 +237,11 @@ async def orchestrator_websocket(
 
     # --- Worker Definitions ---
     workers = {
-        "profile_management": create_worker(profile_tools, "You are a specialist in managing user profile and resume data. Use the provided tools to add, update, or modify the user's information."),
-        "document_interaction": create_worker(document_tools, "You are a specialist in interacting with user-uploaded documents. Use your tools to list, read, and search through documents."),
-        "resume_cv": create_worker(resume_cv_tools, "You are an expert resume and CV writer. Use your tools to create, refine, and generate resumes."),
-        "job_search": create_worker(job_search_tools, "You are a job search specialist. Use your tools to find job opportunities online."),
-        "career_guidance": create_worker(career_guidance_tools, "You are a career coach. Provide advice and guidance using your tools."),
+        "profile_management": create_worker(profile_tools, MAIN_SYSTEM_PROMPT),
+        "document_interaction": create_worker(document_tools, MAIN_SYSTEM_PROMPT),
+        "resume_cv": create_worker(resume_cv_tools, MAIN_SYSTEM_PROMPT),
+        "job_search": create_worker(job_search_tools, MAIN_SYSTEM_PROMPT),
+        "career_guidance": create_worker(career_guidance_tools, MAIN_SYSTEM_PROMPT),
         "general_conversation": create_worker([], "You are a helpful assistant. Respond to the user directly for general conversation, greetings, or questions where no specific tool is needed."),
     }
 
@@ -252,54 +273,83 @@ async def orchestrator_websocket(
     graph = workflow.compile()
     
     # --- Main WebSocket Loop ---
+    memory_manager = EnhancedMemoryManager(db, user)
+    
+    # This outer try/except is for connection-level errors (e.g., the client disconnects)
     try:
-        memory_manager = EnhancedMemoryManager(db, user)
         while True:
-            data = await websocket.receive_text()
-            message_data = json.loads(data)
-            message_content = message_data.get("content")
-            page_id = message_data.get("page_id")
+            # --- NEW: Inner try/except for message-level errors ---
+            # This ensures that an error processing one message does not kill the entire connection.
+            try:
+                data = await websocket.receive_text()
+                message_data = json.loads(data)
+                message_content = message_data.get("content")
+                page_id = message_data.get("page_id")
 
-            if not page_id:
-                # Create a new page if one doesn't exist
-                # (Simplified for brevity)
-                new_page = Page(user_id=user.id, title=message_content[:50])
-                db.add(new_page)
+                # 1. Validate incoming user message
+                if not message_content or not message_content.strip():
+                    log.warning(f"User {user.id} sent an empty message. Ignoring.")
+                    await websocket.send_json({"type": "error", "message": "Cannot process an empty message."})
+                    continue # Wait for the next message
+
+                if not page_id:
+                    new_page = Page(user_id=user.id, title=message_content[:50])
+                    db.add(new_page)
+                    await db.commit()
+                    await db.refresh(new_page)
+                    page_id = new_page.id
+                    await websocket.send_json({"type": "page_created", "page_id": page_id, "title": new_page.title})
+
+                # Save user message (already validated)
+                db.add(ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, message=message_content, is_user_message=True))
                 await db.commit()
-                page_id = new_page.id
-                await websocket.send_json({"type": "page_created", "page_id": page_id, "title": new_page.title})
+                
+                # Load history
+                context = await memory_manager.get_conversation_context(page_id)
+                chat_history = [HumanMessage(content=msg["content"]) if msg["role"] == "user" else AIMessage(content=msg["content"]) for msg in context.recent_messages]
 
-            # Save user message
-            db.add(ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, message=message_content, is_user_message=True))
-            await db.commit()
-            
-            # Load history
-            context = await memory_manager.get_conversation_context(page_id)
-            chat_history = [HumanMessage(content=msg["content"]) if msg["role"] == "user" else AIMessage(content=msg["content"]) for msg in context.recent_messages]
+                initial_state = {"input": message_content, "chat_history": chat_history}
+                
+                # Invoke Graph and stream intermediate steps
+                final_response = None # Start with None
+                async for event in graph.astream(initial_state):
+                    if "router" in event:
+                        await websocket.send_json({"type": "info", "message": f"Routing to {event['router']['route']} specialist..."})
+                    if "validator" in event:
+                        if event['validator'].get('critique'):
+                            await websocket.send_json({"type": "info", "message": f"Refining response... Critique: {event['validator']['critique']}"})
+                        else:
+                            await websocket.send_json({"type": "info", "message": "Validating response..."})
+                    if END in event:
+                        final_response = event[END].get("final_response")
 
-            initial_state = {"input": message_content, "chat_history": chat_history}
-            
-            # Invoke Graph and stream intermediate steps
-            final_response = "I'm sorry, I encountered an issue and couldn't complete your request." # Default error message
-            async for event in graph.astream(initial_state):
-                if "router" in event:
-                    await websocket.send_json({"type": "info", "message": f"Routing to {event['router']['route']} specialist..."})
-                if "validator" in event:
-                    if event['validator'].get('critique'):
-                        await websocket.send_json({"type": "info", "message": f"Refining response... Critique: {event['validator']['critique']}"})
-                    else:
-                        await websocket.send_json({"type": "info", "message": "Validating response..."})
-                if END in event:
-                    final_response = event[END].get("final_response") or "I was unable to finalize a response."
+                # 2. Validate the final AI response before sending and saving
+                if not final_response or not final_response.strip():
+                    log.error(f"AI failed to generate a valid response for user {user.id} on page {page_id}.")
+                    final_response = "I'm sorry, I encountered an issue and couldn't complete your request. Please try again."
+                    # We send this error message to the user, but we still save it to the history
+                    # to maintain the conversation context.
 
-            # Send final response
-            await websocket.send_json({"type": "message", "message": final_response})
-            
-            # Save AI message
-            db.add(ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, message=final_response, is_user_message=False))
-            await db.commit()
+                # Send final response
+                await websocket.send_json({"type": "message", "message": final_response})
+                
+                # Save AI message (already validated)
+                db.add(ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, message=final_response, is_user_message=False))
+                await db.commit()
+
+            except Exception as e:
+                # This block catches errors for a single message, logs them, and informs the user.
+                log.error(f"Error processing message for user {user.id}: {e}", exc_info=True)
+                # Send a user-friendly error message over the WebSocket
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "An unexpected error occurred. Please try sending your message again."
+                })
+                # The 'continue' statement is implicit here; the loop will proceed to the next iteration.
 
     except WebSocketDisconnect:
         log.info(f"WebSocket disconnected for user {user.id}")
     except Exception as e:
-        log.error(f"WebSocket error for user {user.id}: {e}", exc_info=True)
+        # This catches errors that happen outside the message loop (e.g., initial connection).
+        log.error(f"A critical WebSocket error occurred for user {user.id}: {e}", exc_info=True)
+        # The connection will close, which is appropriate for a critical failure.
