@@ -1,6 +1,5 @@
 import os
 import logging
-from functools import partial
 import uuid
 import json
 from pathlib import Path
@@ -96,6 +95,9 @@ class AgentState(TypedDict):
     final_response: str
     critique: str
     retry_count: int
+    # Dependencies for tool execution
+    db_session: AsyncSession
+    current_user: User
 
 class RouteQuery(BaseModel):
     """Route a user query to the appropriate specialist agent."""
@@ -112,18 +114,139 @@ class Validation(BaseModel):
 
 # --- 2. Specialist Worker Creation ---
 
-def create_worker(tools: list, system_prompt: str):
-    """Helper function to create a specialist agent executor."""
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        MessagesPlaceholder(variable_name="chat_history"),
-        ("human", "{input}\n{critique}"), # Add critique to the prompt for refinement
-        MessagesPlaceholder(variable_name="agent_scratchpad"),
-    ])
-    # Use a faster model for specialists if desired, for now use pro
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro-latest", temperature=0.2)
-    agent = create_tool_calling_agent(llm, tools, prompt)
-    return AgentExecutor(agent=agent, tools=tools, verbose=True)
+class StateInjectingTool:
+    """Wrapper to inject state dependencies into tools."""
+    
+    def __init__(self, original_tool):
+        self.original_tool = original_tool
+        self.__name__ = getattr(original_tool, '__name__', 'unknown')
+        self.__doc__ = getattr(original_tool, '__doc__', '')
+        
+        # Copy tool attributes for LangChain compatibility 
+        if hasattr(original_tool, 'name'):
+            self.name = original_tool.name
+        if hasattr(original_tool, 'description'):
+            self.description = original_tool.description
+        if hasattr(original_tool, 'args_schema'):
+            self.args_schema = original_tool.args_schema
+            
+        # Check if tool needs db/user injection by examining args_schema
+        self.needs_db_user = False
+        if hasattr(original_tool, 'args_schema') and original_tool.args_schema:
+            # Use model_fields for Pydantic v2 compatibility
+            if hasattr(original_tool.args_schema, 'model_fields'):
+                fields = list(original_tool.args_schema.model_fields.keys())
+            elif hasattr(original_tool.args_schema, '__fields__'):
+                fields = list(original_tool.args_schema.__fields__.keys())
+            else:
+                fields = []
+            
+            # Check if db and user are in the first two parameters
+            self.needs_db_user = len(fields) >= 2 and fields[0] == 'db' and fields[1] == 'user'
+    
+    async def __call__(self, *args, state: AgentState = None, **kwargs):
+        """Inject db and user from state into tool call if needed."""
+        if state and self.needs_db_user:
+            # Tools that need db and user as first two positional args
+            db_session = state.get('db_session')
+            current_user = state.get('current_user')
+            return await self.original_tool(db_session, current_user, *args, **kwargs)
+        else:
+            # Tools that don't need db/user injection or no state provided
+            return await self.original_tool(*args, **kwargs)
+    
+    def __getattr__(self, name):
+        return getattr(self.original_tool, name)
+
+def wrap_tools_with_state_injection(tools: list) -> list:
+    """Wrap tools to inject dependencies from state."""
+    return [StateInjectingTool(tool) for tool in tools]
+
+def create_agent_node(tools: list, system_prompt: str):
+    """Create an agent node that can decide to call tools."""
+    
+    async def agent_node(state: AgentState):
+        """The agent decision-making node."""
+        log.info(f"--- 🤖 AGENT NODE ({state.get('route', 'unknown')}) ---")
+        
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{input}\n{critique}"),
+        ])
+        
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro-latest", temperature=0.2)
+        llm_with_tools = llm.bind_tools(tools)
+        
+        response = await (prompt | llm_with_tools).ainvoke({
+            "input": state["input"],
+            "chat_history": state["chat_history"],
+            "critique": state.get("critique", "")
+        })
+        
+        # Check if the model wants to call tools
+        if response.tool_calls:
+            return {
+                "agent_outcome": {
+                    "output": response,
+                    "tool_calls": response.tool_calls
+                }
+            }
+        else:
+            # Direct response without tools
+            return {
+                "agent_outcome": {"output": response.content},
+                "final_response": response.content
+            }
+    
+    return agent_node
+
+def create_tool_node(tools: list):
+    """Create a ToolNode for tool execution."""
+    wrapped_tools = wrap_tools_with_state_injection(tools)
+    
+    async def tool_execution_node(state: AgentState):
+        """Execute tools with state injection."""
+        log.info(f"--- 🔧 TOOL NODE ---")
+        
+        agent_outcome = state.get("agent_outcome", {})
+        tool_calls = agent_outcome.get("tool_calls", [])
+        
+        if not tool_calls:
+            # No tools to execute, return current state
+            return state
+        
+        tool_results = []
+        for tool_call in tool_calls:
+            tool_name = tool_call["name"]
+            tool_args = tool_call["args"]
+            
+            # Find the matching tool
+            matching_tool = None
+            for tool in wrapped_tools:
+                if getattr(tool, 'name', tool.__name__) == tool_name:
+                    matching_tool = tool
+                    break
+            
+            if matching_tool:
+                try:
+                    result = await matching_tool(**tool_args, state=state)
+                    tool_results.append(f"Tool {tool_name}: {result}")
+                except Exception as e:
+                    log.error(f"Tool execution error for {tool_name}: {e}")
+                    tool_results.append(f"Tool {tool_name} failed: {str(e)}")
+            else:
+                tool_results.append(f"Tool {tool_name} not found")
+        
+        # Combine tool results into final response
+        final_response = "\n".join(tool_results)
+        
+        return {
+            "agent_outcome": {"output": final_response},
+            "final_response": final_response
+        }
+    
+    return tool_execution_node
 
 # --- 3. Graph Node Functions ---
 
@@ -193,83 +316,100 @@ async def orchestrator_websocket(
     await websocket.accept()
     log.info(f"WebSocket connected for user: {user.id}")
 
-    # --- Tool Setup with Dependency Injection ---
+    # --- Tool Setup without functools.partial ---
+    # Dependencies will be injected through state at runtime
     
-    # CORRECTED: Define tool lists by creating partials directly.
-    # We no longer need the incompatible 'create_tool_from_partial' helper.
     profile_tools = [
-        partial(update_personal_information, db=db, user=user),
-        partial(add_work_experience, db=db, user=user),
-        partial(add_education, db=db, user=user),
-        partial(set_skills, db=db, user=user),
-        partial(manage_skills_comprehensive, db=db, user=user),
-        partial(add_projects, db=db, user=user),
-        partial(add_certification, db=db, user=user),
+        update_personal_information,
+        add_work_experience,
+        add_education,
+        set_skills,
+        manage_skills_comprehensive,
+        add_projects,
+        add_certification,
     ]
     document_tools = [
-        partial(list_documents, db=db, user=user),
-        partial(read_document, db=db, user=user),
-        partial(enhanced_document_search, db=db, user=user),
-        partial(analyze_specific_document, db=db, user=user),
+        list_documents,
+        read_document,
+        enhanced_document_search,
+        analyze_specific_document,
     ]
     resume_cv_tools = [
-        partial(create_resume_from_scratch, db=db, user=user),
-        partial(generate_tailored_resume, db=db, user=user),
-        partial(refine_cv_for_role, db=db, user=user),
-        partial(enhance_resume_section, db=db, user=user),
-        partial(generate_resume_pdf, db=db, user=user),
-        partial(show_resume_download_options, db=db, user=user),
+        create_resume_from_scratch,
+        generate_tailored_resume,
+        refine_cv_for_role,
+        enhance_resume_section,
+        generate_resume_pdf,
+        show_resume_download_options,
     ]
     job_search_tools = [search_jobs_linkedin_api, browse_web_with_langchain]
     career_guidance_tools = [
-        partial(get_interview_preparation_guide, db=db, user=user),
+        get_interview_preparation_guide,
         get_salary_negotiation_advice,
-        partial(create_career_development_plan, db=db, user=user),
+        create_career_development_plan,
         get_cv_best_practices,
         get_ats_optimization_tips,
-        partial(analyze_skills_gap, db=db, user=user),
+        analyze_skills_gap,
     ]
     cover_letter_tools = [
-        partial(generate_cover_letter, db=db, user=user),
-        partial(refine_cover_letter_from_url, db=db, user=user),
+        generate_cover_letter,
+        refine_cover_letter_from_url,
     ]
 
     # --- Worker Definitions ---
     # Load the specific prompt for the conversational agent
     general_prompt = load_prompt_from_file("general_conversation_prompt.txt") or "You are a helpful assistant."
 
-    workers = {
-        "profile_management": create_worker(profile_tools, MAIN_SYSTEM_PROMPT),
-        "document_interaction": create_worker(document_tools, MAIN_SYSTEM_PROMPT),
-        "resume_cv": create_worker(resume_cv_tools + cover_letter_tools, MAIN_SYSTEM_PROMPT),
-        "job_search": create_worker(job_search_tools, MAIN_SYSTEM_PROMPT),
-        "career_guidance": create_worker(career_guidance_tools, MAIN_SYSTEM_PROMPT),
-        # Use the new, dedicated prompt for the conversational worker
-        "general_conversation": create_worker([], general_prompt),
+    # Create agent and tool nodes for each specialist
+    agent_nodes = {}
+    tool_nodes = {}
+    
+    specialist_configs = {
+        "profile_management": (profile_tools, MAIN_SYSTEM_PROMPT),
+        "document_interaction": (document_tools, MAIN_SYSTEM_PROMPT),
+        "resume_cv": (resume_cv_tools + cover_letter_tools, MAIN_SYSTEM_PROMPT),
+        "job_search": (job_search_tools, MAIN_SYSTEM_PROMPT),
+        "career_guidance": (career_guidance_tools, MAIN_SYSTEM_PROMPT),
+        "general_conversation": ([], general_prompt),
     }
+    
+    for route_name, (tools, system_prompt) in specialist_configs.items():
+        agent_nodes[route_name] = create_agent_node(tools, system_prompt)
+        tool_nodes[route_name] = create_tool_node(tools)
 
     # --- Graph Construction ---
     workflow = StateGraph(AgentState)
     workflow.add_node("router", router_node)
 
-    for route_name, worker_executor in workers.items():
-        workflow.add_node(route_name, worker_executor)
-        workflow.add_edge(route_name, "validator")
+    # Add agent and tool nodes for each specialist
+    for route_name in specialist_configs.keys():
+        # Add agent decision node
+        workflow.add_node(f"{route_name}_agent", agent_nodes[route_name])
+        # Add tool execution node  
+        workflow.add_node(f"{route_name}_tools", tool_nodes[route_name])
+        
+        # Connect agent to tools, then tools to validator
+        workflow.add_edge(f"{route_name}_agent", f"{route_name}_tools")
+        workflow.add_edge(f"{route_name}_tools", "validator")
     
     workflow.add_node("validator", validator_node)
 
     def route_to_worker(state: AgentState):
-        return state["route"]
+        """Route to the appropriate agent node."""
+        route = state["route"]
+        return f"{route}_agent"
 
     workflow.add_conditional_edges("router", route_to_worker)
 
     def check_validation(state: AgentState):
+        """Check if response is valid or needs retry."""
         if state.get("final_response"):
             return END
         if state["retry_count"] >= 2:
             log.warning("Max retries reached. Exiting graph.")
             return END
-        return state["route"] # Loop back to the correct worker
+        # Loop back to the correct agent for retry
+        return f"{state['route']}_agent"
 
     workflow.add_conditional_edges("validator", check_validation)
     workflow.set_entry_point("router")
@@ -311,7 +451,12 @@ async def orchestrator_websocket(
                 context = await memory_manager.get_conversation_context(page_id)
                 chat_history = [HumanMessage(content=msg["content"]) if msg["role"] == "user" else AIMessage(content=msg["content"]) for msg in context.recent_messages]
 
-                initial_state = {"input": message_content, "chat_history": chat_history}
+                initial_state = {
+                    "input": message_content, 
+                    "chat_history": chat_history,
+                    "db_session": db,
+                    "current_user": user
+                }
                 
                 # Invoke Graph and stream intermediate steps
                 final_response = None # Start with None
