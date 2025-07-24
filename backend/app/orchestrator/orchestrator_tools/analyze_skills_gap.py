@@ -8,27 +8,18 @@ import logging
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
+from sqlalchemy.future import select
+from app.models_db import User, Resume
 
 log = logging.getLogger(__name__)
 
-@tool
-async def analyze_skills_gap(
-    db: AsyncSession,
-    user: User,
-    target_role: str,
-    current_skills: str = "",
-    job_description: str = ""
-) -> str:
-    """Analyze the skills gap between your current abilities and target role requirements.
-    
-    Args:
-        target_role: The role you're targeting (e.g., "Senior Software Engineer", "Product Manager")
-        current_skills: Your current skills (optional - will use profile if available)
-        job_description: Specific job description to analyze against (optional)
-    
-    Returns:
-        Comprehensive skills gap analysis with learning recommendations
-    """
+class AnalyzeSkillsGapInput(BaseModel):
+    """Input for analyzing the skills gap between the user's resume and a job description."""
+    job_description: str = Field(description="The full text of the job description to compare against.")
+
+@tool(args_schema=AnalyzeSkillsGapInput)
+async def analyze_skills_gap(db: AsyncSession, user: User, job_description: str) -> str:
+    """Analyzes the user's skills from their resume against a job description to identify gaps."""
     try:
         # Get user's current skills from profile
         result = await db.execute(select(Resume).where(Resume.user_id == user.id))

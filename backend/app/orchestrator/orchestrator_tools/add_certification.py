@@ -1,43 +1,32 @@
-from typing import Optional, List, Dict
-from langchain_core.tools import tool
 import logging
-import uuid
+from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import flag_modified
+from langchain_core.tools import tool
+from pydantic import BaseModel, Field
+import uuid
 
 from app.models_db import User
 from .get_or_create_resume import get_or_create_resume
-from ..certification_input import Certification
+from app.orchestrator.certification_input import Certification
+from sqlalchemy.orm.attributes import flag_modified
 
 log = logging.getLogger(__name__)
 
-@tool
+class AddCertificationInput(BaseModel):
+    """Input for adding a certification to the user's resume."""
+    name: str = Field(description="The name of the certification.")
+    authority: str = Field(description="The organization that issued the certification.")
+    issue_date: str = Field(description="The date the certification was issued, e.g., 'YYYY-MM-DD'.")
+
+@tool(args_schema=AddCertificationInput)
 async def add_certification(
     db: AsyncSession,
     user: User,
-    certification_name: str,
-    issuing_organization: str,
-    issue_date: Optional[str] = None,
-    expiration_date: Optional[str] = None,
-    credential_id: Optional[str] = None,
-    credential_url: Optional[str] = None,
-    description: Optional[str] = None
+    name: str,
+    authority: str,
+    issue_date: str
 ) -> str:
-    """
-    Add a certification entry to resume with detailed variables.
-    
-    Args:
-        certification_name: Name of certification (e.g., "AWS Solutions Architect", "Google Analytics Certified")
-        issuing_organization: Organization that issued it (e.g., "Amazon Web Services", "Google")
-        issue_date: When received (e.g., "January 2023", "2023-01")
-        expiration_date: When expires (e.g., "January 2026", "Does not expire")
-        credential_id: Certification ID/number
-        credential_url: URL to verify certification
-        description: Additional details about the certification
-    
-    Returns:
-        Success message with certification details
-    """
+    """Adds a new certification to the user's resume."""
     if not db or not user:
         return "❌ Error: Database session and user must be provided to add certification."
 

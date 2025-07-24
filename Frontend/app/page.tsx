@@ -8,6 +8,7 @@ import { useSubscription } from "@/lib/hooks/use-subscription";
 import { useWebSocket } from "@/lib/hooks/use-websocket";
 import { SignedIn, SignedOut, useAuth, useUser } from "@clerk/nextjs";
 import * as React from "react";
+import { toast } from "sonner";
 
 export default function Home() {
   // Start with empty state - will be populated by fetchMostRecentPage if needed
@@ -31,7 +32,25 @@ export default function Home() {
   } = useWebSocket(currentPageId);
   const { user } = useUser();
   const { getToken, isLoaded, isSignedIn } = useAuth();
-  const { subscription, loading: subscriptionLoading } = useSubscription();
+  const {
+    subscription,
+    loading: subscriptionLoading,
+    fetchSubscription,
+  } = useSubscription();
+
+  // NEW: Handle successful checkout redirect
+  React.useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    if (query.get("checkout") === "success") {
+      toast.success("Welcome to Pro!", {
+        description: "Your subscription has been activated.",
+      });
+      // Force a re-fetch of the subscription status to unlock features
+      fetchSubscription();
+      // Clean the URL
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, [fetchSubscription]);
 
   // Function to fetch the most recent conversation (only on initial load)
   const fetchMostRecentPage = React.useCallback(async () => {

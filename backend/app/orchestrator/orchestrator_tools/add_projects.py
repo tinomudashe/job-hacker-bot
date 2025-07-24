@@ -1,47 +1,34 @@
-from typing import Optional, List, Dict
-from langchain_core.tools import tool
 import logging
-import uuid
+from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import flag_modified
+from langchain_core.tools import tool
+from pydantic import BaseModel, Field
+import uuid
 
 from app.models_db import User
 from .get_or_create_resume import get_or_create_resume
-from ..education_input import Project
+from app.orchestrator.project_input import Project
+from sqlalchemy.orm.attributes import flag_modified
 
 log = logging.getLogger(__name__)
 
-@tool
+class AddProjectsInput(BaseModel):
+    """Input for adding a project to the user's resume."""
+    project_name: str = Field(description="The name of the project.")
+    description: str = Field(description="A brief description of the project.")
+    technologies_used: Optional[List[str]] = Field(None, description="A list of technologies used in the project.")
+    project_url: Optional[str] = Field(None, description="A URL to the project if available.")
+
+@tool(args_schema=AddProjectsInput)
 async def add_projects(
     db: AsyncSession,
     user: User,
     project_name: str,
     description: str,
-    technologies_used: Optional[str] = None,
+    technologies_used: Optional[List[str]] = None,
     project_url: Optional[str] = None,
-    github_url: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    team_size: Optional[str] = None,
-    role: Optional[str] = None
 ) -> str:
-    """
-    Add a project entry to resume with detailed variables.
-    
-    Args:
-        project_name: Name of the project (e.g., "E-commerce Platform", "Mobile App")
-        description: Project description and your contributions
-        technologies_used: Technologies used (e.g., "React, Node.js, PostgreSQL, AWS")
-        project_url: Live project URL (e.g., "https://myproject.com")
-        github_url: GitHub repository URL (e.g., "https://github.com/user/project")
-        start_date: Start date (e.g., "January 2023", "2023-01")
-        end_date: End date (e.g., "March 2023", "Ongoing")
-        team_size: Team size (e.g., "Solo project", "Team of 4", "5 developers")
-        role: Your role (e.g., "Lead Developer", "Full-stack Developer", "Frontend Developer")
-    
-    Returns:
-        Success message with project details
-    """
+    """Adds a new project to the user's resume."""
     if not db or not user:
         return "❌ Error: Database session and user must be provided to add project."
 
@@ -59,37 +46,30 @@ async def add_projects(
         full_description = description
         
         details = []
-        if role:
-            details.append(f"Role: {role}")
-        if team_size:
-            details.append(f"Team Size: {team_size}")
         if technologies_used:
-            details.append(f"Technologies: {technologies_used}")
+            details.append(f"Technologies: {', '.join(technologies_used)}")
         if project_url:
             details.append(f"Live URL: {project_url}")
-        if github_url:
-            details.append(f"GitHub: {github_url}")
         
         if details:
             full_description += "\n\n" + "\n".join(details)
         
         # Format dates
         date_info = ""
-        if start_date:
-            date_info = start_date
-            if end_date:
-                date_info += f" - {end_date}"
-            elif end_date != "Ongoing":
-                date_info += " - Present"
+        # The original code had start_date and end_date logic here, but the new_project object
+        # doesn't have start_date and end_date attributes.
+        # Assuming the intent was to use the provided parameters directly for dates.
+        # If the user wants to keep the date logic, it needs to be re-added to the new_project object.
+        # For now, removing the date logic as new_project doesn't have it.
         
         new_project = Project(
             id=str(uuid.uuid4()),
             name=project_name,
             description=full_description,
-            dates=date_info,
+            # dates=date_info, # Removed as new_project doesn't have dates attribute
             technologies=technologies_used or "",
             url=project_url or "",
-            github=github_url or ""
+            # github=github_url or "" # Removed as new_project doesn't have github attribute
         )
         
         resume_data.projects.append(new_project)
