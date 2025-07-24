@@ -142,8 +142,8 @@ async def create_checkout_session(
     db_user: User = Depends(get_current_active_user)
 ):
     """
-    Creates a Stripe Checkout session for a user to subscribe to the Pro plan
-    with a 1-day trial.
+    Creates a Stripe Checkout session for a user to subscribe to the Pro plan.
+    It now includes logic to prevent users with a previous subscription from getting a new trial.
     """
     if not price_id:
         logger.error("STRIPE_PRICE_ID is not set in the environment variables.")
@@ -152,10 +152,34 @@ async def create_checkout_session(
             detail="Stripe Price ID is not configured."
         )
 
-    line_items = [{'price': price_id, 'quantity': 1}]
-    subscription_data: Dict[str, Any] = {'trial_period_days': 1}
-
     subscription = await get_subscription(db, str(db_user.id))
+
+    # --- NEW: Free Trial Eligibility Check ---
+    is_eligible_for_trial = True
+    if subscription and subscription.status in ['active', 'trialing', 'past_due', 'canceled']:
+        # If the user has EVER had a subscription (even a canceled one), they are not eligible for a new trial.
+        is_eligible_for_trial = False
+        logger.info(f"User {db_user.id} has a subscription with status '{subscription.status}'. Not eligible for a new trial.")
+    
+    # If user is already active, redirect them to the customer portal instead of a new checkout.
+    if subscription and subscription.status in ['active', 'trialing', 'past_due']:
+         try:
+            logger.info(f"User {db_user.id} is already subscribed. Redirecting to customer portal.")
+            portal_session = stripe.billing_portal.Session.create(
+                customer=subscription.stripe_customer_id,
+                return_url=f"{app_url}/settings",
+            )
+            # Return a special response type that the frontend can use to redirect.
+            return {"redirect_to_portal": True, "url": portal_session.url}
+         except Exception as e:
+            logger.error(f"Failed to create Stripe portal session for already-subscribed user {db_user.id}: {e}")
+            raise HTTPException(status_code=500, detail="Could not create customer portal session.")
+
+    line_items = [{'price': price_id, 'quantity': 1}]
+    subscription_data: Dict[str, Any] = {}
+    if is_eligible_for_trial:
+        subscription_data['trial_period_days'] = 1
+        logger.info(f"User {db_user.id} is eligible for a new trial.")
 
     if not subscription:
         subscription = Subscription(user_id=str(db_user.id))
@@ -223,7 +247,7 @@ async def create_checkout_session(
             subscription_data=subscription_data,
             success_url=f"{app_url}/?checkout=success",
             cancel_url=f"{app_url}/?checkout=cancel",
-            metadata={'user_external_id': db_user.external_id, 'plan': 'pro-trial'}
+            metadata={'user_external_id': db_user.external_id, 'plan': 'pro-trial' if is_eligible_for_trial else 'pro'}
         )
         return {"url": checkout_session.url}
     except Exception as e:

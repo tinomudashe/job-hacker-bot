@@ -911,120 +911,172 @@ export function SettingsDialog({
                         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                       </div>
                     ) : (
-                      <>
-                        {(subscription && subscription.status === "active") ||
-                        subscription?.status === "trialing" ? (
-                          <Card className="!bg-white !border !border-gray-200 dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 dark:!border-white/8 rounded-lg sm:rounded-xl p-4 sm:p-6 shadow-lg">
-                            <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
-                              <Crown className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 dark:text-blue-400" />
-                              <span>Your Subscription</span>
-                            </h2>
-                            <div className="p-4 bg-muted rounded-lg mb-6">
-                              <div className="flex justify-between items-center">
-                                <div>
-                                  <h3 className="font-semibold text-base">
-                                    Pro Plan
-                                  </h3>
-                                  <p className="text-sm text-muted-foreground">
-                                    Renews on{" "}
-                                    {subscription.period_end
-                                      ? format(
-                                          new Date(subscription.period_end),
-                                          "MMMM d, yyyy"
-                                        )
-                                      : "N/A"}
-                                  </p>
-                                </div>
-                                <Badge
-                                  variant={
-                                    subscription.status === "trialing"
-                                      ? "secondary"
-                                      : "default"
-                                  }
-                                >
-                                  {subscription.status.charAt(0).toUpperCase() +
-                                    subscription.status.slice(1)}
-                                </Badge>
-                              </div>
-                            </div>
-                            <Button
-                              className="w-full"
-                              onClick={createPortalSession}
-                              disabled={portalLoading}
-                            >
-                              {portalLoading ? (
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              ) : (
-                                <CreditCard className="mr-2 h-4 w-4" />
-                              )}
-                              Manage Billing & Subscription
-                            </Button>
-                            <p className="text-xs text-muted-foreground mt-2 text-center">
-                              You will be redirected to Stripe to manage your
-                              subscription.
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-2 text-center">
-                              For questions, contact{" "}
-                              <a
-                                href="mailto:bot@jobhackerbot.com"
-                                className="underline"
-                              >
-                                bot@jobhackerbot.com
-                              </a>
-                            </p>
-                          </Card>
-                        ) : (
-                          <div className="!bg-white !border !border-gray-200 dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 dark:!border-white/8 rounded-lg sm:rounded-xl p-4 sm:p-6 shadow-lg">
-                            <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
-                              <Crown className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 dark:text-blue-400" />
-                              <span>Pro Subscription</span>
-                            </h2>
-                            <div className="grid grid-cols-1 gap-4">
-                              <Card className="h-full">
-                                <CardHeader className="pb-2">
-                                  <CardTitle className="text-lg">
-                                    Pro Plan
-                                  </CardTitle>
-                                  <CardDescription>$2.99/week</CardDescription>
-                                </CardHeader>
-                                <CardContent className="space-y-3">
-                                  <div className="flex items-center gap-2 text-sm">
-                                    <CheckCircle className="h-4 w-4 text-green-500" />
-                                    <span>
-                                      Unlimited resumes & cover letters
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center gap-2 text-sm">
-                                    <CheckCircle className="h-4 w-4 text-green-500" />
-                                    <span>Advanced AI interview coaching</span>
-                                  </div>
-                                  <div className="flex items-center gap-2 text-sm">
-                                    <CheckCircle className="h-4 w-4 text-green-500" />
-                                    <span>Priority support</span>
-                                  </div>
-                                  <div className="flex flex-col gap-2 pt-2">
-                                    <Button
-                                      className="w-full"
-                                      onClick={() => createCheckoutSession()}
-                                      disabled={subscriptionLoading}
-                                    >
-                                      {subscriptionLoading ? (
-                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                      ) : null}
-                                      Start Your Pro Trial
-                                    </Button>
-                                    <p className="text-xs text-muted-foreground text-center">
-                                      Enjoy a 1-day free trial. After your
-                                      trial, continue with Pro for just
-                                      $2.99/week. Cancel anytime.
+                      (() => {
+                        const activeStatuses = ["active", "trialing"];
+                        const failedStatuses = ["past_due", "unpaid"];
+
+                        if (
+                          subscription &&
+                          activeStatuses.includes(subscription.status)
+                        ) {
+                          return (
+                            <Card className="!bg-white !border !border-gray-200 dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 dark:!border-white/8 rounded-lg sm:rounded-xl p-4 sm:p-6 shadow-lg">
+                              <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
+                                <Crown className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 dark:text-blue-400" />
+                                <span>Your Subscription</span>
+                              </h2>
+                              <div className="p-4 bg-muted rounded-lg mb-6">
+                                <div className="flex justify-between items-center">
+                                  <div>
+                                    <h3 className="font-semibold text-base">
+                                      Pro Plan
+                                    </h3>
+                                    <p className="text-sm text-muted-foreground">
+                                      Renews on{" "}
+                                      {subscription.period_end
+                                        ? format(
+                                            new Date(subscription.period_end),
+                                            "MMMM d, yyyy"
+                                          )
+                                        : "N/A"}
                                     </p>
                                   </div>
-                                </CardContent>
-                              </Card>
+                                  <Badge
+                                    variant={
+                                      subscription.status === "trialing"
+                                        ? "secondary"
+                                        : "default"
+                                    }
+                                  >
+                                    {subscription.status
+                                      .charAt(0)
+                                      .toUpperCase() +
+                                      subscription.status.slice(1)}
+                                  </Badge>
+                                </div>
+                              </div>
+                              <Button
+                                className="w-full"
+                                onClick={createPortalSession}
+                                disabled={portalLoading}
+                              >
+                                {portalLoading ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                  <CreditCard className="mr-2 h-4 w-4" />
+                                )}
+                                Manage Billing & Subscription
+                              </Button>
+                              <p className="text-xs text-muted-foreground mt-2 text-center">
+                                You will be redirected to Stripe to manage your
+                                subscription.
+                              </p>
+                            </Card>
+                          );
+                        } else if (
+                          subscription &&
+                          failedStatuses.includes(subscription.status)
+                        ) {
+                          return (
+                            <Card className="!bg-white !border !border-gray-200 dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 dark:!border-white/8 rounded-lg sm:rounded-xl p-4 sm:p-6 shadow-lg">
+                              <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
+                                <Crown className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 dark:text-blue-400" />
+                                <span>Your Subscription</span>
+                              </h2>
+                              <div className="p-4 bg-muted rounded-lg mb-6">
+                                <div className="flex justify-between items-center">
+                                  <div>
+                                    <h3 className="font-semibold text-base">
+                                      Pro Plan
+                                    </h3>
+                                    <p className="text-sm text-muted-foreground">
+                                      Action Required: Please update your
+                                      payment method.
+                                    </p>
+                                  </div>
+                                  <Badge variant="destructive">
+                                    {subscription.status === "past_due"
+                                      ? "Past Due"
+                                      : "Unpaid"}
+                                  </Badge>
+                                </div>
+                              </div>
+                              <Button
+                                className="w-full"
+                                onClick={createPortalSession}
+                                disabled={portalLoading}
+                              >
+                                {portalLoading ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                  <CreditCard className="mr-2 h-4 w-4" />
+                                )}
+                                Update Payment Method
+                              </Button>
+                              <p className="text-xs text-muted-foreground mt-2 text-center">
+                                You will be redirected to Stripe to manage your
+                                subscription.
+                              </p>
+                            </Card>
+                          );
+                        } else {
+                          return (
+                            <div className="!bg-white !border !border-gray-200 dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 dark:!border-white/8 rounded-lg sm:rounded-xl p-4 sm:p-6 shadow-lg">
+                              <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
+                                <Crown className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 dark:text-blue-400" />
+                                <span>Pro Subscription</span>
+                              </h2>
+                              <div className="grid grid-cols-1 gap-4">
+                                <Card className="h-full">
+                                  <CardHeader className="pb-2">
+                                    <CardTitle className="text-lg">
+                                      Pro Plan
+                                    </CardTitle>
+                                    <CardDescription>
+                                      $2.99/week
+                                    </CardDescription>
+                                  </CardHeader>
+                                  <CardContent className="space-y-3">
+                                    <div className="flex items-center gap-2 text-sm">
+                                      <CheckCircle className="h-4 w-4 text-green-500" />
+                                      <span>
+                                        Unlimited resumes & cover letters
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-sm">
+                                      <CheckCircle className="h-4 w-4 text-green-500" />
+                                      <span>
+                                        Advanced AI interview coaching
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-sm">
+                                      <CheckCircle className="h-4 w-4 text-green-500" />
+                                      <span>Priority support</span>
+                                    </div>
+                                    <div className="flex flex-col gap-2 pt-2">
+                                      <Button
+                                        className="w-full"
+                                        onClick={() => createCheckoutSession()}
+                                        disabled={subscriptionLoading}
+                                      >
+                                        {subscriptionLoading ? (
+                                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        ) : null}
+                                        Start Your Pro Trial
+                                      </Button>
+                                      <p className="text-xs text-muted-foreground text-center">
+                                        Enjoy a 1-day free trial. After your
+                                        trial, continue with Pro for just
+                                        $2.99/week. Cancel anytime.
+                                      </p>
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              </div>
                             </div>
-                          </div>
-                        )}
-                      </>
+                          );
+                        }
+                      })()
                     )}
                   </div>
                 )}
