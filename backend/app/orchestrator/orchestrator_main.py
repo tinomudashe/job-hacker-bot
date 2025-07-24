@@ -96,9 +96,7 @@ class AgentState(TypedDict):
     final_response: str
     critique: str
     retry_count: int
-    # Dependencies for tool execution
-    db_session: AsyncSession
-    current_user: User
+    # Dependencies are now pre-injected into tools during creation
 
 class RouteQuery(BaseModel):
     """Route a user query to the appropriate specialist agent."""
@@ -115,53 +113,117 @@ class Validation(BaseModel):
 
 # --- 2. Specialist Worker Creation ---
 
-class StateInjectingTool:
-    """Wrapper to inject state dependencies into tools."""
-    
-    def __init__(self, original_tool):
-        self.original_tool = original_tool
-        self.__name__ = getattr(original_tool, '__name__', 'unknown')
-        self.__doc__ = getattr(original_tool, '__doc__', '')
-        
-        # Copy tool attributes for LangChain compatibility 
-        if hasattr(original_tool, 'name'):
-            self.name = original_tool.name
-        if hasattr(original_tool, 'description'):
-            self.description = original_tool.description
-        if hasattr(original_tool, 'args_schema'):
-            self.args_schema = original_tool.args_schema
-            
-        # Check if tool needs db/user injection by examining args_schema
-        self.needs_db_user = False
-        if hasattr(original_tool, 'args_schema') and original_tool.args_schema:
-            # Use model_fields for Pydantic v2 compatibility
-            if hasattr(original_tool.args_schema, 'model_fields'):
-                fields = list(original_tool.args_schema.model_fields.keys())
-            elif hasattr(original_tool.args_schema, '__fields__'):
-                fields = list(original_tool.args_schema.__fields__.keys())
-            else:
-                fields = []
-            
-            # Check if db and user are in the first two parameters
-            self.needs_db_user = len(fields) >= 2 and fields[0] == 'db' and fields[1] == 'user'
-    
-    async def __call__(self, *args, state: AgentState = None, **kwargs):
-        """Inject db and user from state into tool call if needed."""
-        if state and self.needs_db_user:
-            # Tools that need db and user as first two positional args
-            db_session = state.get('db_session')
-            current_user = state.get('current_user')
-            return await self.original_tool(db_session, current_user, *args, **kwargs)
-        else:
-            # Tools that don't need db/user injection or no state provided
-            return await self.original_tool(*args, **kwargs)
-    
-    def __getattr__(self, name):
-        return getattr(self.original_tool, name)
+from pydantic import create_model
+from functools import wraps
 
-def wrap_tools_with_state_injection(tools: list) -> list:
-    """Wrap tools to inject dependencies from state."""
-    return [StateInjectingTool(tool) for tool in tools]
+def get_clean_tool_schema(original_tool):
+    """Create a clean schema that excludes db/user parameters for LangChain."""
+    if not hasattr(original_tool, 'args_schema') or not original_tool.args_schema:
+        return None
+    
+    original_schema = original_tool.args_schema
+    
+    # Get fields from Pydantic model (v2 compatibility)
+    if hasattr(original_schema, 'model_fields'):
+        fields = original_schema.model_fields
+    elif hasattr(original_schema, '__fields__'):
+        fields = original_schema.__fields__
+    else:
+        return None
+    
+    # Remove db and user parameters from schema
+    clean_fields = {k: v for k, v in fields.items() if k not in ['db', 'user']}
+    
+    if not clean_fields:
+        return None
+    
+    # Create new Pydantic model with only user-facing parameters
+    CleanSchema = create_model(
+        f"{original_schema.__name__}Clean",
+        **{k: (v.annotation, v.default) if hasattr(v, 'annotation') else (v.type_, v.default) 
+           for k, v in clean_fields.items()}
+    )
+    
+    return CleanSchema
+
+def check_tool_needs_injection(original_tool):
+    """Check if tool needs db/user injection by examining its parameters."""
+    if not hasattr(original_tool, 'args_schema') or not original_tool.args_schema:
+        return False
+    
+    # Get field names
+    if hasattr(original_tool.args_schema, 'model_fields'):
+        field_names = list(original_tool.args_schema.model_fields.keys())
+    elif hasattr(original_tool.args_schema, '__fields__'):
+        field_names = list(original_tool.args_schema.__fields__.keys())
+    else:
+        return False
+    
+    # Check if first two parameters are db and user
+    return len(field_names) >= 2 and field_names[0] == 'db' and field_names[1] == 'user'
+
+def create_dependency_injected_tool(original_tool, db_session: AsyncSession, current_user: User):
+    """Create a tool with dependencies pre-injected using closures."""
+    
+    needs_injection = check_tool_needs_injection(original_tool)
+    tool_name = getattr(original_tool, 'name', original_tool.__name__)
+    
+    if needs_injection:
+        # Create wrapper that injects dependencies
+        @wraps(original_tool)
+        async def injected_tool(**kwargs):
+            try:
+                log.info(f"Executing tool {tool_name} with injected dependencies")
+                result = await original_tool(db_session, current_user, **kwargs)
+                
+                # Add UI data validation for specific tools
+                if tool_name == 'generate_cover_letter':
+                    if result and '[DOWNLOADABLE_COVER_LETTER]' not in str(result):
+                        result = f"[DOWNLOADABLE_COVER_LETTER]\n{result}"
+                elif tool_name == 'create_resume_from_scratch' or tool_name == 'generate_tailored_resume':
+                    if result and '[DOWNLOADABLE_RESUME]' not in str(result):
+                        result = f"[DOWNLOADABLE_RESUME]\n{result}"
+                elif tool_name == 'get_interview_preparation_guide':
+                    if result and '[INTERVIEW_FLASHCARDS_AVAILABLE]' not in str(result):
+                        result = f"{result}\n\n[INTERVIEW_FLASHCARDS_AVAILABLE]"
+                
+                return result
+                
+            except Exception as e:
+                log.error(f"Tool {tool_name} execution failed: {e}", exc_info=True)
+                # Return user-friendly error message instead of crashing
+                return f"⚠️ The {tool_name.replace('_', ' ')} tool encountered an issue: {str(e)}\n\nPlease try again or contact support if this continues."
+        
+        # Create Tool with clean schema (no db/user parameters exposed)
+        return Tool.from_function(
+            func=injected_tool,
+            name=tool_name,
+            description=getattr(original_tool, 'description', original_tool.__doc__ or f"{tool_name} tool"),
+            args_schema=get_clean_tool_schema(original_tool)
+        )
+    else:
+        # Tool doesn't need injection, return as-is
+        return Tool.from_function(
+            func=original_tool,
+            name=tool_name, 
+            description=getattr(original_tool, 'description', original_tool.__doc__ or f"{tool_name} tool")
+        )
+
+def create_tools_with_dependencies(tool_functions: list, db_session: AsyncSession, current_user: User) -> list:
+    """Create all tools with dependencies pre-injected."""
+    injected_tools = []
+    
+    for tool_func in tool_functions:
+        try:
+            injected_tool = create_dependency_injected_tool(tool_func, db_session, current_user)
+            injected_tools.append(injected_tool)
+            log.info(f"Successfully created tool: {getattr(tool_func, 'name', tool_func.__name__)}")
+        except Exception as e:
+            log.error(f"Failed to create tool {getattr(tool_func, 'name', tool_func.__name__)}: {e}")
+            # Continue with other tools rather than failing completely
+            continue
+    
+    return injected_tools
 
 def create_agent_node(tools: list, system_prompt: str):
     """Create an agent node that can decide to call tools."""
@@ -235,11 +297,10 @@ def create_agent_node(tools: list, system_prompt: str):
     return agent_node
 
 def create_tool_node(tools: list):
-    """Create a ToolNode for tool execution."""
-    wrapped_tools = wrap_tools_with_state_injection(tools)
+    """Create a ToolNode for tool execution with guaranteed UI completion events."""
     
     async def tool_execution_node(state: AgentState):
-        """Execute tools with state injection and reasoning streams."""
+        """Execute tools with guaranteed reasoning stream completion."""
         log.info(f"--- 🔧 TOOL NODE ---")
         
         agent_outcome = state.get("agent_outcome", {})
@@ -247,8 +308,15 @@ def create_tool_node(tools: list):
         reasoning_events = []
         
         if not tool_calls:
-            # No tools to execute, return current state
-            return state
+            # No tools to execute, still send completion event for UI
+            reasoning_events.append({
+                "type": "reasoning_complete",
+                "content": "✨ Analysis complete - no tools needed",
+                "step": "direct_response"
+            })
+            return {
+                "reasoning_events": reasoning_events
+            }
         
         # Stream tool execution start
         reasoning_events.append({
@@ -259,6 +327,9 @@ def create_tool_node(tools: list):
         })
         
         tool_results = []
+        successful_tools = 0
+        
+        # Execute each tool with error recovery
         for i, tool_call in enumerate(tool_calls, 1):
             tool_name = tool_call["name"]
             tool_args = tool_call["args"]
@@ -272,17 +343,19 @@ def create_tool_node(tools: list):
                 "progress": f"{i}/{len(tool_calls)}"
             })
             
-            # Find the matching tool
+            # Find the matching tool (tools are now pre-created with dependencies)
             matching_tool = None
-            for tool in wrapped_tools:
+            for tool in tools:
                 if getattr(tool, 'name', tool.__name__) == tool_name:
                     matching_tool = tool
                     break
             
             if matching_tool:
                 try:
-                    result = await matching_tool(**tool_args, state=state)
+                    # Execute tool - dependencies are already injected
+                    result = await matching_tool.func(**tool_args)
                     tool_results.append(f"Tool {tool_name}: {result}")
+                    successful_tools += 1
                     
                     # Stream tool success
                     reasoning_events.append({
@@ -291,21 +364,22 @@ def create_tool_node(tools: list):
                         "step": "tool_success",
                         "tool_name": tool_name
                     })
+                    
                 except Exception as e:
-                    error_msg = f"Tool {tool_name} failed: {str(e)}"
-                    log.error(f"Tool execution error for {tool_name}: {e}")
+                    error_msg = f"⚠️ {tool_name} had an issue but I'll continue with your request: {str(e)}"
+                    log.error(f"Tool execution error for {tool_name}: {e}", exc_info=True)
                     tool_results.append(error_msg)
                     
-                    # Stream tool error
+                    # Stream tool error with recovery message
                     reasoning_events.append({
-                        "type": "reasoning_chunk", 
-                        "content": f"❌ {tool_name} encountered an error",
+                        "type": "reasoning_chunk",
+                        "content": f"⚠️ {tool_name} had an issue, but continuing",
                         "step": "tool_error",
                         "tool_name": tool_name,
-                        "error": str(e)
+                        "recovery": "continuing_with_fallback"
                     })
             else:
-                error_msg = f"Tool {tool_name} not found"
+                error_msg = f"⚠️ {tool_name} tool is not available right now"
                 tool_results.append(error_msg)
                 reasoning_events.append({
                     "type": "reasoning_chunk",
@@ -314,15 +388,23 @@ def create_tool_node(tools: list):
                     "tool_name": tool_name
                 })
         
-        # Stream completion
-        reasoning_events.append({
-            "type": "reasoning_chunk",
-            "content": "🎯 Tool execution complete - preparing response",
-            "step": "tool_execution_complete"
-        })
+        # ALWAYS send completion event for UI consistency
+        if successful_tools > 0:
+            reasoning_events.append({
+                "type": "reasoning_complete",
+                "content": f"🎯 Successfully completed {successful_tools}/{len(tool_calls)} tools",
+                "step": "tool_execution_complete",
+                "success_rate": f"{successful_tools}/{len(tool_calls)}"
+            })
+        else:
+            reasoning_events.append({
+                "type": "reasoning_complete", 
+                "content": "🎯 Tool execution completed with issues - providing fallback response",
+                "step": "tool_execution_complete_with_fallback"
+            })
         
         # Combine tool results into final response
-        final_response = "\n".join(tool_results)
+        final_response = "\n\n".join(tool_results) if tool_results else "I encountered some technical difficulties but I'm here to help. Please try rephrasing your request."
         
         return {
             "agent_outcome": {"output": final_response},
@@ -409,10 +491,10 @@ async def orchestrator_websocket(
     await websocket.accept()
     log.info(f"WebSocket connected for user: {user.id}")
 
-    # --- Tool Setup without functools.partial ---
-    # Dependencies will be injected through state at runtime
+    # --- Tool Setup with dependency injection ---
+    # Create tools with pre-injected dependencies for clean LangChain compatibility
     
-    profile_tools = [
+    profile_tool_functions = [
         update_personal_information,
         add_work_experience,
         add_education,
@@ -421,13 +503,13 @@ async def orchestrator_websocket(
         add_projects,
         add_certification,
     ]
-    document_tools = [
+    document_tool_functions = [
         list_documents,
         read_document,
         enhanced_document_search,
         analyze_specific_document,
     ]
-    resume_cv_tools = [
+    resume_cv_tool_functions = [
         create_resume_from_scratch,
         generate_tailored_resume,
         refine_cv_for_role,
@@ -435,8 +517,8 @@ async def orchestrator_websocket(
         generate_resume_pdf,
         show_resume_download_options,
     ]
-    job_search_tools = [search_jobs_linkedin_api, browse_web_with_langchain]
-    career_guidance_tools = [
+    job_search_tool_functions = [search_jobs_linkedin_api, browse_web_with_langchain]
+    career_guidance_tool_functions = [
         get_interview_preparation_guide,
         get_salary_negotiation_advice,
         create_career_development_plan,
@@ -444,10 +526,19 @@ async def orchestrator_websocket(
         get_ats_optimization_tips,
         analyze_skills_gap,
     ]
-    cover_letter_tools = [
+    cover_letter_tool_functions = [
         generate_cover_letter,
         refine_cover_letter_from_url,
     ]
+
+    # Create injected tools for each specialist (this is where dependencies are injected)
+    log.info(f"Creating tools with dependencies for user {user.id}")
+    
+    profile_tools = create_tools_with_dependencies(profile_tool_functions, db, user)
+    document_tools = create_tools_with_dependencies(document_tool_functions, db, user)
+    resume_cv_tools = create_tools_with_dependencies(resume_cv_tool_functions + cover_letter_tool_functions, db, user)
+    job_search_tools = create_tools_with_dependencies(job_search_tool_functions, db, user)
+    career_guidance_tools = create_tools_with_dependencies(career_guidance_tool_functions, db, user)
 
     # --- Worker Definitions ---
     # Load the specific prompt for the conversational agent
@@ -460,7 +551,7 @@ async def orchestrator_websocket(
     specialist_configs = {
         "profile_management": (profile_tools, MAIN_SYSTEM_PROMPT),
         "document_interaction": (document_tools, MAIN_SYSTEM_PROMPT),
-        "resume_cv": (resume_cv_tools + cover_letter_tools, MAIN_SYSTEM_PROMPT),
+        "resume_cv": (resume_cv_tools, MAIN_SYSTEM_PROMPT),
         "job_search": (job_search_tools, MAIN_SYSTEM_PROMPT),
         "career_guidance": (career_guidance_tools, MAIN_SYSTEM_PROMPT),
         "general_conversation": ([], general_prompt),
@@ -469,6 +560,7 @@ async def orchestrator_websocket(
     for route_name, (tools, system_prompt) in specialist_configs.items():
         agent_nodes[route_name] = create_agent_node(tools, system_prompt)
         tool_nodes[route_name] = create_tool_node(tools)
+        log.info(f"Created {route_name} specialist with {len(tools)} tools")
 
     # --- Graph Construction ---
     workflow = StateGraph(AgentState)
@@ -590,8 +682,7 @@ async def orchestrator_websocket(
                 initial_state = {
                     "input": message_content, 
                     "chat_history": chat_history,
-                    "db_session": db,
-                    "current_user": user
+                    # Dependencies are now pre-injected into tools, no need to pass in state
                 }
                 
                 # Invoke Graph and stream intermediate steps
