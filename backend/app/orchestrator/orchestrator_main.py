@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode, tools_condition
+from langchain_core.tools import Tool
 
 from app.db import get_db
 from app.models_db import User, ChatMessage, Document, Page
@@ -163,29 +164,38 @@ async def orchestrator_websocket(
     await websocket.accept()
     log.info(f"WebSocket connected for user: {user.id}")
 
-    # --- Tool Definitions and Dependency Injection ---
+    # --- Tool Setup with Dependency Injection ---
+    
+    # Helper function to convert a partial to a LangChain Tool
+    def create_tool_from_partial(p_func, name, description):
+        return Tool(
+            name=name,
+            func=p_func,
+            description=description
+        )
+
     profile_tools = [
-        partial(update_personal_information, db=db, user=user),
-        partial(add_work_experience, db=db, user=user),
-        partial(add_education, db=db, user=user),
-        partial(set_skills, db=db, user=user),
-        partial(manage_skills_comprehensive, db=db, user=user),
-        partial(add_projects, db=db, user=user),
-        partial(add_certification, db=db, user=user),
+        create_tool_from_partial(partial(update_personal_information, db=db, user=user), "update_personal_information", update_personal_information.__doc__),
+        create_tool_from_partial(partial(add_work_experience, db=db, user=user), "add_work_experience", add_work_experience.__doc__),
+        create_tool_from_partial(partial(add_education, db=db, user=user), "add_education", add_education.__doc__),
+        create_tool_from_partial(partial(set_skills, db=db, user=user), "set_skills", set_skills.__doc__),
+        create_tool_from_partial(partial(manage_skills_comprehensive, db=db, user=user), "manage_skills_comprehensive", manage_skills_comprehensive.__doc__),
+        create_tool_from_partial(partial(add_projects, db=db, user=user), "add_projects", add_projects.__doc__),
+        create_tool_from_partial(partial(add_certification, db=db, user=user), "add_certification", add_certification.__doc__),
     ]
     document_tools = [
-        partial(list_documents, db=db, user=user),
-        partial(read_document, db=db, user=user),
-        partial(enhanced_document_search, db=db, user=user),
-        partial(analyze_specific_document, db=db, user=user),
+        create_tool_from_partial(partial(list_documents, db=db, user=user), "list_documents", list_documents.__doc__),
+        create_tool_from_partial(partial(read_document, db=db, user=user), "read_document", read_document.__doc__),
+        create_tool_from_partial(partial(enhanced_document_search, db=db, user=user), "enhanced_document_search", enhanced_document_search.__doc__),
+        create_tool_from_partial(partial(analyze_specific_document, db=db, user=user), "analyze_specific_document", analyze_specific_document.__doc__),
     ]
     resume_cv_tools = [
-        partial(create_resume_from_scratch, db=db, user=user),
-        partial(generate_tailored_resume, db=db, user=user),
-        partial(refine_cv_for_role, db=db, user=user),
-        partial(enhance_resume_section, db=db, user=user),
-        partial(generate_resume_pdf, db=db, user=user),
-        partial(show_resume_download_options, db=db, user=user),
+        create_tool_from_partial(partial(create_resume_from_scratch, db=db, user=user), "create_resume_from_scratch", create_resume_from_scratch.__doc__),
+        create_tool_from_partial(partial(generate_tailored_resume, db=db, user=user), "generate_tailored_resume", generate_tailored_resume.__doc__),
+        create_tool_from_partial(partial(refine_cv_for_role, db=db, user=user), "refine_cv_for_role", refine_cv_for_role.__doc__),
+        create_tool_from_partial(partial(enhance_resume_section, db=db, user=user), "enhance_resume_section", enhance_resume_section.__doc__),
+        create_tool_from_partial(partial(generate_resume_pdf, db=db, user=user), "generate_resume_pdf", generate_resume_pdf.__doc__),
+        create_tool_from_partial(partial(show_resume_download_options, db=db, user=user), "show_resume_download_options", show_resume_download_options.__doc__),
     ]
     job_search_tools = [search_jobs_linkedin_api, browse_web_with_langchain]
     career_guidance_tools = [
@@ -194,12 +204,15 @@ async def orchestrator_websocket(
         create_career_development_plan,
         get_cv_best_practices,
         get_ats_optimization_tips,
-        partial(analyze_skills_gap, db=db, user=user),
+        create_tool_from_partial(partial(analyze_skills_gap, db=db, user=user), "analyze_skills_gap", analyze_skills_gap.__doc__),
     ]
     cover_letter_tools = [
-        partial(generate_cover_letter, db=db, user=user),
-        partial(refine_cover_letter_from_url, db=db, user=user),
+        create_tool_from_partial(partial(generate_cover_letter, db=db, user=user), "generate_cover_letter", generate_cover_letter.__doc__),
+        create_tool_from_partial(partial(refine_cover_letter_from_url, db=db, user=user), "refine_cover_letter_from_url", refine_cover_letter_from_url.__doc__),
     ]
+    
+    # Tools that don't need db/user can be added directly if they have the @tool decorator
+    # The helper function handles those that do need it.
 
     # --- Worker Definitions ---
     workers = {
