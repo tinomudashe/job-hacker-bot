@@ -29,8 +29,8 @@ async def refine_cover_letter_from_url(job_url: str, db: AsyncSession, user: Use
         """
         log.info(f"Attempting to generate cover letter from URL: {job_url}")
         try:
-        user_id = user.id
-        if not user_id:
+            user_id = user.id
+            if not user_id:
                 return "Authentication failed. Could not identify user."
 
             # Step 1: Scrape the job description from the URL
@@ -95,8 +95,8 @@ async def refine_cover_letter_from_url(job_url: str, db: AsyncSession, user: Use
             return "I have successfully generated the cover letter based on the URL. You can view and download it now. [DOWNLOADABLE_COVER_LETTER]"
 
         except Exception as e:
-        log.error(f"An unexpected error occurred in refine_cover_letter_from_url: {e}", exc_info=True)
-        if db.in_transaction():
-            await db.rollback()
+            log.error(f"An unexpected error occurred in refine_cover_letter_from_url: {e}", exc_info=True)
+            if db.in_transaction():
+                await db.rollback()
             return f"An unexpected error occurred while generating the cover letter from the URL: {str(e)}"
         
