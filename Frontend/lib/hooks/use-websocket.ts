@@ -109,6 +109,7 @@ export const useWebSocket = (currentPageId?: string) => {
     newSocket.onopen = () => {
       setIsConnected(true);
       isConnecting.current = false;
+      setError(null); // Clear any previous connection errors
       console.log("WebSocket connection established");
       // Immediately send switch_page for initial context sync
       if (currentPageIdRef.current) {
@@ -246,10 +247,20 @@ export const useWebSocket = (currentPageId?: string) => {
       }
     };
 
-    newSocket.onclose = () => {
+    newSocket.onclose = (event) => {
       setIsConnected(false);
       isConnecting.current = false;
-      console.log("WebSocket connection closed");
+      console.log(`WebSocket connection closed with code: ${event.code}, reason: ${event.reason}`);
+      
+      // Auto-reconnect if the connection was closed unexpectedly (not by user action)
+      if (event.code !== 1000 && event.code !== 1001) {
+        console.log("Attempting to reconnect in 2 seconds...");
+        setTimeout(() => {
+          if (isLoaded && isSignedIn) {
+            connect();
+          }
+        }, 2000);
+      }
     };
     newSocket.onerror = (error) => {
       setError(
@@ -329,6 +340,11 @@ export const useWebSocket = (currentPageId?: string) => {
 
       if (socketRef.current?.readyState !== WebSocket.OPEN) {
         console.warn("WebSocket is not connected. Message not sent.");
+        setError("Connection lost. Reconnecting...");
+        // Attempt to reconnect
+        if (isLoaded && isSignedIn) {
+          connect();
+        }
         return;
       }
       const messageData = {
@@ -345,7 +361,7 @@ export const useWebSocket = (currentPageId?: string) => {
       };
       setMessages((prevMessages) => [...prevMessages, userMessage]);
     },
-    [currentPageIdRef]
+    [currentPageIdRef, isLoaded, isSignedIn, connect]
   );
 
   const deleteMessage = useCallback(
@@ -625,7 +641,7 @@ export const useWebSocket = (currentPageId?: string) => {
         }
       }
     },
-    [messages]
+    [messages, connect]
   );
 
   const startNewChat = React.useCallback((newPageId?: string) => {

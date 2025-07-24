@@ -514,15 +514,34 @@ async def orchestrator_websocket(
     # This outer try/except is for connection-level errors (e.g., the client disconnects)
     try:
         while True:
-            # --- NEW: Inner try/except for message-level errors ---
+            # Receive message - this should be outside inner try/catch to properly handle WebSocket disconnects
+            data = await websocket.receive_text()
+            
+            # --- Inner try/except for message-level errors ---
             # This ensures that an error processing one message does not kill the entire connection.
             try:
-                data = await websocket.receive_text()
-                message_data = json.loads(data)
+                try:
+                    message_data = json.loads(data)
+                except json.JSONDecodeError as e:
+                    log.error(f"Invalid JSON received from user {user.id}: {data[:100]}")
+                    await websocket.send_json({"type": "error", "message": "Invalid message format."})
+                    continue
+                message_type = message_data.get("type")
                 message_content = message_data.get("content")
                 page_id = message_data.get("page_id")
 
-                # 1. Validate incoming user message
+                # Handle different message types
+                if message_type == "switch_page":
+                    log.info(f"User {user.id} switched to page: {page_id}")
+                    continue
+                elif message_type == "stop_generation":
+                    log.info(f"User {user.id} requested to stop generation")
+                    continue
+                elif message_type == "clear_context":
+                    log.info(f"User {user.id} cleared context")
+                    continue
+
+                # 1. Validate incoming user message (for regular chat messages)
                 if not message_content or not message_content.strip():
                     log.warning(f"User {user.id} sent an empty message. Ignoring.")
                     await websocket.send_json({"type": "error", "message": "Cannot process an empty message."})
