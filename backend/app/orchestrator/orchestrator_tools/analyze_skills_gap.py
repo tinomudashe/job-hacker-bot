@@ -10,6 +10,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
 from sqlalchemy.future import select
 from app.models_db import User, Resume
+from pydantic import BaseModel, Field
 
 log = logging.getLogger(__name__)
 

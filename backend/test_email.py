@@ -1,79 +1,51 @@
 import asyncio
 import os
+import sys
 from dotenv import load_dotenv
-from fastapi_mail import FastMail, MessageSchema, ConnectionConfig
-import logging
 
-# --- Basic Configuration ---
-# Configure logging to see detailed output
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# --- STEP 1: Set up the environment FIRST ---
 
-# Load environment variables from your .env file
-load_dotenv()
+# Get the absolute path to the 'backend' directory
+backend_dir = os.path.dirname(os.path.abspath(__file__))
+# Get the project root (one level up from 'backend') and add it to the path
+project_root = os.path.dirname(backend_dir)
+sys.path.append(project_root)
 
-# --- Main Test Function ---
+# CORRECTED: The .env file is in the 'backend' directory.
+dotenv_path = os.path.join(backend_dir, '.env')
+
+print(f"--- Loading environment variables from: {dotenv_path} ---")
+if os.path.exists(dotenv_path):
+    load_dotenv(dotenv_path=dotenv_path)
+else:
+    print(f"\n❌ ERROR: .env file not found at '{dotenv_path}'.")
+    print("Please ensure your .env file is in the backend/ directory.")
+    sys.exit(1) # Exit if .env is not found
+
+# --- STEP 2: Now that the environment is loaded, import the app code ---
+
+# This import must happen AFTER load_dotenv()
+from app.email_service import send_welcome_email
+
 async def send_test_email():
     """
-    Initializes FastAPI-Mail and attempts to send a single test email.
+    Sends a single test email using the loaded environment variables.
     """
-    logger.info("--- Starting Email Service Test ---")
-    
-    # 1. Load configuration from environment variables
-    mail_username = os.getenv("MAIL_USERNAME")
-    mail_password = os.getenv("MAIL_PASSWORD")
-    mail_from = os.getenv("MAIL_FROM")
-    mail_port = int(os.getenv("MAIL_PORT", 587))
-    mail_server = os.getenv("MAIL_SERVER")
-    mail_starttls = str(os.getenv("MAIL_STARTTLS", "True")).lower() == 'true'
-    mail_ssl_tls = str(os.getenv("MAIL_SSL_TLS", "False")).lower() == 'true'
-
-    # Log the loaded configuration to verify it's correct
-    logger.info(f"Loaded configuration:")
-    logger.info(f"  - MAIL_USERNAME: {mail_username}")
-    logger.info(f"  - MAIL_FROM: {mail_from}")
-    logger.info(f"  - MAIL_SERVER: {mail_server}:{mail_port}")
-    logger.info(f"  - MAIL_STARTTLS: {mail_starttls}")
-    logger.info(f"  - MAIL_SSL_TLS: {mail_ssl_tls}")
-
-    if not all([mail_username, mail_password, mail_from, mail_server]):
-        logger.error("One or more required environment variables are missing.")
+    # We can now be confident the environment variables are loaded
+    if not os.getenv("MAIL_USERNAME") or not os.getenv("MAIL_PASSWORD"):
+        print("\n❌ ERROR: Email service credentials not found even after loading .env file.")
+        print("Please double-check your backend/.env file for correct MAIL_USERNAME and MAIL_PASSWORD.")
         return
 
-    # 2. Create the ConnectionConfig
-    conf = ConnectionConfig(
-        MAIL_USERNAME=mail_username,
-        MAIL_PASSWORD=mail_password,
-        MAIL_FROM=mail_from,
-        MAIL_PORT=mail_port,
-        MAIL_SERVER=mail_server,
-        MAIL_STARTTLS=mail_starttls,
-        MAIL_SSL_TLS=mail_ssl_tls,
-        USE_CREDENTIALS=True,
-        VALIDATE_CERTS=True,
-        TIMEOUT=60  # Increased timeout for debugging
-    )
-
-    # 3. Create the email message
-    recipient_email = "jnrhapson@yahoo.com"
+    test_recipient = "jnrhapson@yahoo.com"
+    print(f"\n🚀 Attempting to send a test welcome email to: {test_recipient}")
     
-    message = MessageSchema(
-        subject="FastAPI-Mail Test",
-        recipients=[recipient_email],
-        body="This is a test email sent from the FastAPI-Mail test script.",
-        subtype="html"
-    )
-
-    # 4. Send the email
-    fm = FastMail(conf)
     try:
-        logger.info(f"Attempting to send a test email to {recipient_email}...")
-        await fm.send_message(message)
-        logger.info("✅ --- Test SUCCEEDED: Email sent successfully! ---")
-        logger.info("Please check your inbox (and spam folder) to confirm.")
+        await send_welcome_email(recipient=test_recipient, name="Test User")
+        print(f"\n✅ Success! The test email has been sent to {test_recipient}.")
+        print("Please check your inbox (and spam folder).")
     except Exception as e:
-        logger.error(f"❌ --- Test FAILED: An error occurred ---")
-        logger.error(f"Error details: {e}", exc_info=True)
+        print(f"\n❌ An error occurred while sending the email: {e}")
 
 if __name__ == "__main__":
     asyncio.run(send_test_email()) 

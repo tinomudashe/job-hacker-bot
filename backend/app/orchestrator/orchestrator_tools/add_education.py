@@ -4,6 +4,7 @@ import logging
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
+from pydantic import BaseModel, Field
 
 from app.models_db import User
 from .get_or_create_resume import get_or_create_resume
@@ -11,28 +12,27 @@ from ..education_input import Education, Dates
 
 log = logging.getLogger(__name__)
 
-def parse_date_range(date_range_str: str) -> Dict[str, Optional[str]]:
-    """Parses a date range string into start and end dates."""
-    parts = [p.strip() for p in date_range_str.split('-')]
-    start_date = parts[0] if parts else None
-    end_date = parts[1] if len(parts) > 1 else None
-    return {"start_date": start_date, "end_date": end_date}
+class AddEducationInput(BaseModel):
+    """Input for adding an education entry to the user's resume."""
+    institution: str = Field(description="The name of the educational institution.")
+    degree: str = Field(description="The degree or field of study.")
+    start_date: str = Field(description="The start date of the education, e.g., 'YYYY-MM-DD'.")
+    end_date: Optional[str] = Field(None, description="The end date of the education. Can be 'Present' or a date.")
+    gpa: Optional[float] = Field(None, description="The user's Grade Point Average.")
 
-@tool
+def parse_date_range(start_date: str, end_date: Optional[str]) -> Dates:
+    """Parses a date range string into start and end dates."""
+    return Dates(start_date=start_date, end_date=end_date or "Present")
+
+@tool(args_schema=AddEducationInput)
 async def add_education(
-    degree: str,
+    db: AsyncSession,
+    user: User,
     institution: str,
-    start_year: str,
-    end_year: Optional[str] = None,
-    location: Optional[str] = None,
-    field_of_study: Optional[str] = None,
-    gpa: Optional[str] = None,
-    honors: Optional[str] = None,
-    relevant_coursework: Optional[str] = None,
-    thesis_project: Optional[str] = None,
-    is_current: bool = False,
-    db: AsyncSession = None,
-    user: User = None
+    degree: str,
+    start_date: str,
+    end_date: Optional[str] = None,
+    gpa: Optional[float] = None,
 ) -> str:
     """
     Add comprehensive education entry to resume with detailed variables.
@@ -63,32 +63,30 @@ async def add_education(
             return "❌ Error: Could not find or create a resume for the user."
 
         # Format dates
-        if is_current:
-            if "expected" not in (end_year or "").lower():
-                end_year = f"Expected {end_year}" if end_year else "Present"
+        if end_date and "expected" not in (end_date or "").lower():
+            end_date = f"Expected {end_date}"
         
-        date_range_str = f"{start_year} - {end_year}" if end_year else start_year
-        parsed_dates = parse_date_range(date_range_str)
+        parsed_dates = parse_date_range(start_date, end_date)
         
         # Build degree title with field of study
         full_degree = degree
-        if field_of_study:
-            full_degree += f" in {field_of_study}"
+        # if field_of_study: # This line was removed from the new_education definition, so it's removed here.
+        #     full_degree += f" in {field_of_study}"
         
         # Build comprehensive description
         description_parts = []
-        if location: description_parts.append(f"Location: {location}")
+        # if location: description_parts.append(f"Location: {location}") # This line was removed from the new_education definition, so it's removed here.
         if gpa: description_parts.append(f"GPA: {gpa}")
-        if honors: description_parts.append(f"Honors: {honors}")
-        if relevant_coursework: description_parts.append(f"Relevant Coursework: {relevant_coursework}")
-        if thesis_project: description_parts.append(f"Thesis/Project: {thesis_project}")
+        # if honors: description_parts.append(f"Honors: {honors}") # This line was removed from the new_education definition, so it's removed here.
+        # if relevant_coursework: description_parts.append(f"Relevant Coursework: {relevant_coursework}") # This line was removed from the new_education definition, so it's removed here.
+        # if thesis_project: description_parts.append(f"Thesis/Project: {thesis_project}") # This line was removed from the new_education definition, so it's removed here.
         full_description = "\n".join(description_parts)
 
         new_education = Education(
             id=str(uuid.uuid4()),
             degree=full_degree,
             institution=institution,
-            dates=Dates(**parsed_dates),
+            dates=parsed_dates,
             description=full_description
         )
                 

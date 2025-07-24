@@ -1,30 +1,38 @@
+import logging
+from typing import Dict, Any
+from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.tools import tool
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from app.models_db import Resume, User
 from app.resume import ResumeData, fix_resume_data_structure
-import logging
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
+from pydantic import BaseModel, Field
 
 log = logging.getLogger(__name__)
 
-@tool
+class CreateCareerDevelopmentPlanInput(BaseModel):
+    """Input for creating a career development plan."""
+    current_role: str = Field(description="The user's current job role or title.")
+    target_role: str = Field(description="The desired future job role or title.")
+    timeframe_years: int = Field(5, description="The timeframe in years for the career plan, e.g., 5.")
+
+@tool(args_schema=CreateCareerDevelopmentPlanInput)
 async def create_career_development_plan(
     db: AsyncSession,
     user: User,
-    current_role: str = "",
-    target_role: str = "",
-    timeline: str = "2 years"
+    current_role: str,
+    target_role: str,
+    timeframe_years: int = 5,
 ) -> str:
     """Create a comprehensive career development plan with specific steps and milestones.
     
     Args:
         current_role: Your current position/role
         target_role: Where you want to be in your career
-        timeline: Timeframe for achieving your goal (e.g., "1 year", "3 years", "5 years")
+        timeframe_years: Timeframe for achieving your goal in years
     
     Returns:
         Detailed career development roadmap with actionable steps
@@ -186,14 +194,7 @@ Provide specific, time-bound, measurable actions that create a clear path to the
         chain = prompt | llm | StrOutputParser()
         
         # Calculate timeline phases for the prompt
-        timeline_months = 24  # Default to 2 years
-        if "1 year" in timeline.lower():
-            timeline_months = 12
-        elif "3 year" in timeline.lower():
-            timeline_months = 36
-        elif "5 year" in timeline.lower():
-            timeline_months = 60
-        
+        timeline_months = timeframe_years * 12
         first_third = timeline_months // 3
         middle = f"{first_third + 1}-{timeline_months * 2 // 3}"
         
@@ -201,14 +202,14 @@ Provide specific, time-bound, measurable actions that create a clear path to the
             "user_context": user_context,
             "current_role": current_role or "current position",
             "target_role": target_role or "target career goal",
-            "timeline": timeline,
+            "timeline": f"{timeframe_years} years",
             "timeline_first_third": first_third,
             "timeline_middle": middle
         })
         
         return f"""## 🚀 **Career Development Plan**
 
-**Journey:** {current_role or 'Current Role'} → {target_role or 'Target Role'} | **Timeline:** {timeline}
+**Journey:** {current_role or 'Current Role'} → {target_role or 'Target Role'} | **Timeline:** {timeframe_years} years
 
 {plan}
 

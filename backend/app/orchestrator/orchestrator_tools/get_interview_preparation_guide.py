@@ -11,43 +11,46 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
 
+import logging
+from typing import Optional
+from sqlalchemy.ext.asyncio import AsyncSession
+from langchain_core.tools import tool
+from app.models_db import User
+from ._try_browser_extraction import _try_browser_extraction
+from ._try_basic_extraction import _try_basic_extraction
+from pydantic import BaseModel, Field
+
 log = logging.getLogger(__name__)
 
+class GetInterviewPreparationGuideInput(BaseModel):
+    """Input for getting an interview preparation guide."""
+    job_title: str = Field(description="The job title for the interview.")
+    company_name: Optional[str] = Field(None, description="The name of the company.")
+    job_description_url: Optional[str] = Field(None, description="A URL to the job description for more context.")
 
-@tool
+@tool(args_schema=GetInterviewPreparationGuideInput)
 async def get_interview_preparation_guide(
     db: AsyncSession,
     user: User,
-    job_title: str = "",
-    company_name: str = "",
-    interview_type: str = "general",
-    job_url: str = ""
+    job_title: str,
+    company_name: Optional[str] = None,
+    job_description_url: Optional[str] = None,
 ) -> str:
-    """Get comprehensive interview preparation guidance based on your CV and target role.
-    
-    Args:
-        job_title: Position you're interviewing for (optional if job_url provided)
-        company_name: Target company (optional if job_url provided)
-        interview_type: Type of interview (behavioral, technical, panel, phone, video)
-        job_url: URL of the job posting to analyze (optional, will extract job details)
-    
-    Returns:
-        Personalized interview preparation guide with questions and strategies
-    """
+    """Provides a tailored interview preparation guide based on job details."""
     try:
         # Extract job details from URL if provided
         extracted_job_title = job_title
         extracted_company_name = company_name
         job_description = ""
         
-        if job_url:
-            log.info(f"Extracting job details from URL: {job_url}")
+        if job_description_url:
+            log.info(f"Extracting job details from URL: {job_description_url}")
             try:
                 # Simplified logic: Always try browser extraction first, then fall back.
-                success, extracted_data = await _try_browser_extraction(job_url)
+                success, extracted_data = await _try_browser_extraction(job_description_url)
                 if not success or not extracted_data:
                     log.warning("Browser extraction failed, falling back to basic extraction.")
-                    success, extracted_data = await _try_basic_extraction(job_url)
+                    success, extracted_data = await _try_basic_extraction(job_description_url)
 
                 if success and extracted_data:
                     extracted_job_title = extracted_data.get("job_title", job_title)
@@ -210,7 +213,7 @@ Provide specific, actionable advice tailored to this role and the user's backgro
             "user_context": user_context,
             "job_title": final_job_title,
             "company_name": final_company_name or "the target company",
-            "interview_type": interview_type,
+            "interview_type": "general", # Default interview type
             "job_description": job_description or "No specific job description provided"
         })
         
@@ -266,7 +269,7 @@ Include this mix:
             "user_context": user_context,
             "job_title": final_job_title,
             "company_name": final_company_name or "the target company",
-            "interview_type": interview_type,
+            "interview_type": "general", # Default interview type
             "job_description": job_description or "No specific job description provided"
         })
 
