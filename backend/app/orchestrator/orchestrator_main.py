@@ -2,6 +2,7 @@ import os
 import logging
 import uuid
 import json
+import asyncio
 from pathlib import Path
 from datetime import datetime
 from typing import List, Literal, Optional, Any, Dict, TypedDict
@@ -131,8 +132,8 @@ def get_clean_tool_schema(original_tool):
     else:
         return None
     
-    # Remove db and user parameters from schema
-    clean_fields = {k: v for k, v in fields.items() if k not in ['db', 'user']}
+    # Remove db, user, and lock parameters from schema
+    clean_fields = {k: v for k, v in fields.items() if k not in ['db', 'user', 'resume_modification_lock']}
     
     if not clean_fields:
         return None
@@ -168,13 +169,15 @@ def check_tool_needs_injection(original_tool):
         try:
             sig = inspect.signature(original_tool)
             param_names = list(sig.parameters.keys())
-            return len(param_names) >= 2 and param_names[0] == 'db' and param_names[1] == 'user'
+            # Check for db/user injection (first 2 params) or db/user/lock injection (first 3 params)
+            return (len(param_names) >= 2 and param_names[0] == 'db' and param_names[1] == 'user') or \
+                   (len(param_names) >= 3 and param_names[0] == 'db' and param_names[1] == 'user' and 'lock' in param_names[2])
         except (ValueError, TypeError):
             return False
     
     return False
 
-def create_dependency_injected_tool(original_tool, db_session: AsyncSession, current_user: User):
+def create_dependency_injected_tool(original_tool, db_session: AsyncSession, current_user: User, resume_lock: asyncio.Lock = None):
     """Create a tool with dependencies pre-injected using closures."""
     
     needs_injection = check_tool_needs_injection(original_tool)
@@ -186,7 +189,12 @@ def create_dependency_injected_tool(original_tool, db_session: AsyncSession, cur
         async def injected_tool(**kwargs):
             try:
                 log.info(f"Executing tool {tool_name} with injected dependencies")
-                result = await original_tool(db_session, current_user, **kwargs)
+                
+                # Check if tool needs lock parameter (for refine_cv_for_role)
+                if tool_name == 'refine_cv_for_role' and resume_lock is not None:
+                    result = await original_tool(db_session, current_user, resume_lock, **kwargs)
+                else:
+                    result = await original_tool(db_session, current_user, **kwargs)
                 
                 # Add UI data validation for specific tools
                 if tool_name == 'generate_cover_letter':
@@ -234,9 +242,12 @@ def create_tools_with_dependencies(tool_functions: list, db_session: AsyncSessio
     """Create all tools with dependencies pre-injected."""
     injected_tools = []
     
+    # Create asyncio.Lock for tools that need it (like refine_cv_for_role)
+    resume_lock = asyncio.Lock()
+    
     for tool_func in tool_functions:
         try:
-            injected_tool = create_dependency_injected_tool(tool_func, db_session, current_user)
+            injected_tool = create_dependency_injected_tool(tool_func, db_session, current_user, resume_lock)
             injected_tools.append(injected_tool)
             log.info(f"Successfully created tool: {getattr(tool_func, 'name', getattr(tool_func, '__name__', 'unknown_tool'))}")
         except Exception as e:
