@@ -215,11 +215,7 @@ def create_dependency_injected_tool(original_tool, db_session: AsyncSession, cur
         )
     else:
         # Tool doesn't need injection, return as-is
-        return Tool.from_function(
-            func=original_tool,
-            name=tool_name, 
-            description=getattr(original_tool, 'description', original_tool.__doc__ or f"{tool_name} tool")
-        )
+        return original_tool
 
 def create_tools_with_dependencies(tool_functions: list, db_session: AsyncSession, current_user: User) -> list:
     """Create all tools with dependencies pre-injected."""
@@ -364,8 +360,16 @@ def create_tool_node(tools: list):
             
             if matching_tool:
                 try:
-                    # Execute tool - dependencies are already injected
-                    result = await matching_tool.func(**tool_args)
+                    # Execute tool - handle both injected tools and original StructuredTools
+                    if hasattr(matching_tool, 'func') and callable(matching_tool.func):
+                        # Injected tool (Tool.from_function wrapper) - use .func
+                        result = await matching_tool.func(**tool_args)
+                    elif hasattr(matching_tool, 'ainvoke'):
+                        # Original StructuredTool - use ainvoke method
+                        result = await matching_tool.ainvoke(tool_args)
+                    else:
+                        # Fallback for other tool types
+                        result = await matching_tool(**tool_args)
                     tool_results.append(f"Tool {tool_name}: {result}")
                     successful_tools += 1
                     
