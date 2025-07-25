@@ -91,12 +91,19 @@ class AdvancedMemoryManager:
     async def search_memories(self, query: str, k: int = 5) -> List[str]:
         """Search for relevant memories using semantic similarity"""
         try:
-            # Search vector store for relevant memories
-            results = self.memory_store.similarity_search(
-                query,
-                k=k,
-                filter=lambda doc: doc.metadata.get("user_id") == self.user_id
-            )
+            # --- BUG FIX ---
+            # The `filter` parameter for in-memory FAISS is not reliably supported.
+            # The robust solution is to fetch all results and then filter them manually.
+
+            # 1. Get all similarity search results from the vector store first.
+            all_results = self.memory_store.similarity_search(query, k=k)
+
+            # 2. Manually filter the results to ensure they belong to the current user.
+            # This is safer and avoids the internal bug in the FAISS filter implementation.
+            results = [
+                doc for doc in all_results 
+                if isinstance(doc, Document) and doc.metadata.get("user_id") == self.user_id
+            ]
             
             memories = []
             for result in results:

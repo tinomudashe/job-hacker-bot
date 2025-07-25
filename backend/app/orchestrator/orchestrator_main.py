@@ -77,7 +77,15 @@ def load_prompt_from_file(file_name: str) -> Optional[str]:
         return None
 
 # Load the main prompt, and if it fails, load the fallback.
-MAIN_SYSTEM_PROMPT = load_prompt_from_file("system_prompt.txt")
+MAIN_SYSTEM_PROMPT = """You are Job Hacker Bot, an expert AI career assistant. Your primary goal is to provide specific, actionable, and personalized advice based on the user's documents and profile.
+
+**Your Core Directives:**
+1.  **ALWAYS Check for User Documents First:** Before answering any question about a user's CV, resume, skills, or experience, you MUST use the `list_documents` or `enhanced_document_search` tools to see if you have access to their files.
+2.  **NEVER Say "I haven't seen your CV":** If you have access to documents, state that you have found them. If you cannot find any documents, politely ask the user to upload one first.
+3.  **Be Proactive, Not Passive:** Instead of waiting for the user to ask, suggest actions. For example: "I found your resume. It seems to be focused on backend development. Would you like me to help you tailor it for a DevOps role?"
+4.  **Use Tools to Answer Questions:** When asked to analyze something, use your document analysis tools. When asked about jobs, use your job search tools. Your answers should be based on the information retrieved from your tools.
+5.  **Provide Specific, Concrete Feedback:** Avoid generic advice. Instead of "Use quantifiable achievements," say "In your experience at Acme Corp, you mentioned you 'developed a new feature.' Let's refine that. Can you estimate how much it improved performance or user engagement?"
+"""
 if not MAIN_SYSTEM_PROMPT:
     MAIN_SYSTEM_PROMPT = load_prompt_from_file("fallback_system_prompt.txt")
     if not MAIN_SYSTEM_PROMPT:
@@ -234,8 +242,9 @@ def check_tool_needs_injection(original_tool):
         try:
             sig = inspect.signature(original_tool)
             param_names = list(sig.parameters.keys())
-            # SIMPLIFIED: Only check for db/user injection. Locking is now handled transparently by the wrapper.
-            return (len(param_names) >= 2 and param_names[0] == 'db' and param_names[1] == 'user')
+            # Restore the check for the lock parameter to correctly identify tools that need it.
+            return (len(param_names) >= 2 and param_names[0] == 'db' and param_names[1] == 'user') or \
+                   (len(param_names) >= 3 and param_names[0] == 'db' and param_names[1] == 'user' and 'resume_modification_lock' in param_names[2])
         except (ValueError, TypeError):
             return False
     
@@ -263,20 +272,30 @@ def create_dependency_injected_tool(
             try:
                 log.info(f"Executing tool {tool_name}. Needs lock: {needs_lock}")
 
-                # Define the core execution function
+                # --- BUG FIX ---
+                # This now correctly handles the special case for `refine_cv_for_role`
+                # by passing the lock as a direct argument, while also using the lock
+                # context manager for all other critical tools.
+                
                 async def execute_tool():
-                    # The original tool is called here without the lock parameter
-                    return await original_tool(db_session, current_user, **kwargs)
+                    # Special case: If the tool is 'refine_cv_for_role', it requires
+                    # the lock to be passed as a direct argument to its function signature.
+                    if tool_name == 'refine_cv_for_role':
+                        return await original_tool(db_session, current_user, resume_lock, **kwargs)
+                    else:
+                        # For all other tools, the lock is handled by the context manager
+                        # and the original tool is called without the lock parameter.
+                        return await original_tool(db_session, current_user, **kwargs)
 
-                # If the tool needs a lock, wrap its execution in the lock context
-                if needs_lock:
+                if needs_lock and tool_name != 'refine_cv_for_role':
                     log.info(f"Acquiring lock for tool: {tool_name}")
                     async with resume_lock:
                         log.info(f"Lock acquired for tool: {tool_name}")
                         result = await execute_tool()
                     log.info(f"Lock released for tool: {tool_name}")
                 else:
-                    # Execute without a lock
+                    # Execute directly for non-locking tools or for refine_cv_for_role
+                    # (which handles its own lock internally).
                     result = await execute_tool()
                 
                 # Add UI data validation for specific tools
@@ -874,41 +893,31 @@ async def orchestrator_websocket(
                 # Invoke Graph and stream intermediate steps
                 final_response = None # Start with None
                 async for event in graph.astream(initial_state):
-                    log.info(f"Graph event: {list(event.keys())}")  # Debug logging
+                    # --- BUG FIX ---
+                    # The previous logic for streaming events was flawed.
+                    # This new, simplified logic correctly handles the event stream from LangGraph.
+                    log.debug(f"--- Graph Stream Event ---")
+                    log.debug(f"Event Keys: {list(event.keys())}")
+
+                    # The event dictionary has one key, which is the name of the node that just ran.
+                    node_name = list(event.keys())[0]
+                    node_data = event[node_name]
+                    log.debug(f"Node '{node_name}' finished with data: {node_data}")
+
+                    # Check if this node's output contains reasoning events and stream them.
+                    if isinstance(node_data, dict) and "reasoning_events" in node_data:
+                        log.info(f"Streaming {len(node_data['reasoning_events'])} reasoning events from node '{node_name}'")
+                        for reasoning_event in node_data["reasoning_events"]:
+                            await websocket.send_json({
+                                "type": reasoning_event["type"],
+                                "data": reasoning_event,
+                                "timestamp": datetime.now().isoformat()
+                            })
                     
-                    if "router" in event:
-                        await websocket.send_json({"type": "info", "message": f"Routing to {event['router']['route']} specialist..."})
-                    
-                    if "validator" in event:
-                        if event['validator'].get('critique'):
-                            await websocket.send_json({"type": "info", "message": f"Refining response... Critique: {event['validator']['critique']}"})
-                        else:
-                            await websocket.send_json({"type": "info", "message": "Validating response..."})
-                    
-                    # Handle agent responses (both with and without tools)
-                    for node_name, node_data in event.items():
-                        if node_name.endswith("_agent") or node_name.endswith("_tools"):
-                            await websocket.send_json({"type": "info", "message": f"Processing with {node_name}..."})
-                        
-                        # Stream reasoning events
-                        if isinstance(node_data, dict) and node_data.get("reasoning_events"):
-                            for reasoning_event in node_data["reasoning_events"]:
-                                await websocket.send_json({
-                                    "type": reasoning_event["type"],
-                                    "data": reasoning_event,
-                                    "timestamp": datetime.now().isoformat()
-                                })
-                        
-                        # Check for final response in any node
-                        if isinstance(node_data, dict) and node_data.get("final_response"):
-                            final_response = node_data["final_response"]
-                            log.info(f"Found final_response in {node_name}: {final_response[:100]}...")
-                    
-                    # Check END event
-                    if END in event:
-                        final_response = event[END].get("final_response")
-                        if final_response:
-                            log.info(f"Found final_response in END: {final_response[:100]}...")
+                    # Check for the final response to send at the end.
+                    if isinstance(node_data, dict) and "final_response" in node_data:
+                        final_response = node_data["final_response"]
+                        log.info(f"Captured final response from node '{node_name}': {final_response[:100]}...")
 
                 # 2. Validate the final AI response before sending and saving
                 if not final_response or not final_response.strip():

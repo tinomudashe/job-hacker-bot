@@ -14,8 +14,7 @@ log = logging.getLogger(__name__)
 async def analyze_specific_document(
     document_name: str,
     db: AsyncSession,
-    user: User,
-    memory_manager: EnhancedMemoryManager
+    user: User
 ) -> str:
     """Analyze a specific document by name and provide detailed feedback.
     
@@ -44,6 +43,9 @@ async def analyze_specific_document(
             return f"📄 **Multiple Documents Found**\n\nFound {len(documents)} documents matching '{document_name}':\n\n{doc_list}\n\nPlease be more specific with the document name."
         
         document = documents[0]
+        
+        # Create an ad-hoc memory manager for this specific task
+        memory_manager = EnhancedMemoryManager(db=db, user=user)
         
         # Get detailed analysis using enhanced memory system
         user_profile_dict = {
