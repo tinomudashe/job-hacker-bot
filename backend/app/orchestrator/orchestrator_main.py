@@ -3,6 +3,7 @@ import logging
 import uuid
 import json
 import asyncio
+import re
 from pathlib import Path
 from datetime import datetime
 from typing import List, Literal, Optional, Any, Dict, TypedDict
@@ -26,6 +27,8 @@ from app.dependencies import get_current_active_user_ws
 from app.vector_store import get_user_vector_store
 from langchain.tools.retriever import create_retriever_tool
 from app.enhanced_memory import EnhancedMemoryManager
+from app.simple_memory import SimpleMemoryManager
+from app.advanced_memory import AdvancedMemoryManager, create_memory_tools
 
 # --- All Tool Imports ---
 from .orchestrator_tools.add_certification import add_certification
@@ -81,6 +84,68 @@ if not MAIN_SYSTEM_PROMPT:
         # If both fail, use a hardcoded, basic prompt to prevent a crash.
         log.error("CRITICAL: Both main and fallback prompts are missing. Agent will be unreliable.")
         MAIN_SYSTEM_PROMPT = "You are a helpful assistant."
+
+
+def _redact_pii(text: str) -> str:
+    """Redacts common PII patterns from a string for safe memory processing."""
+    if not isinstance(text, str):
+        return text
+
+    # Simple regex for emails
+    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b'
+    # Simple regex for phone numbers (covers many common formats)
+    phone_pattern = r'\(?\b\d{3}\b\)?[-.\s]?\d{3}[-.\s]?\d{4}\b'
+    
+    text = re.sub(email_pattern, '[REDACTED_EMAIL]', text, flags=re.IGNORECASE)
+    text = re.sub(phone_pattern, '[REDACTED_PHONE]', text)
+    
+    return text
+
+
+async def _get_unified_context_summary(
+    simple_memory: SimpleMemoryManager,
+    enhanced_memory: EnhancedMemoryManager,
+    advanced_memory: AdvancedMemoryManager,
+    user_message: str,
+    page_id: Optional[str]
+) -> str:
+    """
+    Fetches context from all memory managers and creates a unified summary string
+    for the agent. This context is NOT shown to the user.
+    """
+    summary_parts = []
+    try:
+        # Use asyncio.gather to fetch contexts concurrently for efficiency
+        enhanced_ctx_task = enhanced_memory.get_conversation_context(page_id=page_id, include_user_learning=True)
+        advanced_ctx_task = advanced_memory.load_relevant_context(current_message=user_message)
+        
+        enhanced_context, advanced_context = await asyncio.gather(
+            enhanced_ctx_task,
+            advanced_ctx_task
+        )
+
+        # 1. Add long-term memories from AdvancedMemoryManager
+        if advanced_context and advanced_context.relevant_memories:
+            memories_text = "\n".join([f"- {memory}" for memory in advanced_context.relevant_memories])
+            summary_parts.append(f"Here is what I remember about you:\n{memories_text}")
+
+        # 2. Add conversation summary from EnhancedMemoryManager
+        if enhanced_context and enhanced_context.summary and "New conversation" not in enhanced_context.summary:
+            summary_parts.append(f"Here is a summary of our recent conversation:\n{enhanced_context.summary}")
+        
+        # 3. Add key topics from EnhancedMemoryManager
+        if enhanced_context and enhanced_context.key_topics:
+            summary_parts.append(f"Key topics we discussed: {', '.join(enhanced_context.key_topics)}")
+
+        if not summary_parts:
+            return ""
+
+        final_summary = "INTERNAL CONTEXT FOR AI (User does not see this):\n\n" + "\n\n".join(summary_parts)
+        return final_summary
+
+    except Exception as e:
+        log.error(f"Error getting unified context summary: {e}", exc_info=True)
+        return "" # Return empty string on error to not break the flow
 
 
 # --- 1. State & Pydantic Models ---
@@ -169,32 +234,50 @@ def check_tool_needs_injection(original_tool):
         try:
             sig = inspect.signature(original_tool)
             param_names = list(sig.parameters.keys())
-            # Check for db/user injection (first 2 params) or db/user/lock injection (first 3 params)
-            return (len(param_names) >= 2 and param_names[0] == 'db' and param_names[1] == 'user') or \
-                   (len(param_names) >= 3 and param_names[0] == 'db' and param_names[1] == 'user' and 'lock' in param_names[2])
+            # SIMPLIFIED: Only check for db/user injection. Locking is now handled transparently by the wrapper.
+            return (len(param_names) >= 2 and param_names[0] == 'db' and param_names[1] == 'user')
         except (ValueError, TypeError):
             return False
     
     return False
 
-def create_dependency_injected_tool(original_tool, db_session: AsyncSession, current_user: User, resume_lock: asyncio.Lock = None):
-    """Create a tool with dependencies pre-injected using closures."""
+def create_dependency_injected_tool(
+    original_tool, 
+    db_session: AsyncSession, 
+    current_user: User, 
+    resume_lock: asyncio.Lock,
+    tools_that_need_lock: List[str]
+):
+    """Create a tool with dependencies and optional locking pre-injected."""
     
     needs_injection = check_tool_needs_injection(original_tool)
     tool_name = getattr(original_tool, 'name', getattr(original_tool, '__name__', 'unknown_tool'))
     
+    # Check if this specific tool's execution should be locked
+    needs_lock = tool_name in tools_that_need_lock
+
     if needs_injection:
-        # Create wrapper that injects dependencies
+        # Create wrapper that injects dependencies and handles locking
         @wraps(original_tool)
         async def injected_tool(**kwargs):
             try:
-                log.info(f"Executing tool {tool_name} with injected dependencies")
-                
-                # Check if tool needs lock parameter (for refine_cv_for_role)
-                if tool_name == 'refine_cv_for_role' and resume_lock is not None:
-                    result = await original_tool(db_session, current_user, resume_lock, **kwargs)
+                log.info(f"Executing tool {tool_name}. Needs lock: {needs_lock}")
+
+                # Define the core execution function
+                async def execute_tool():
+                    # The original tool is called here without the lock parameter
+                    return await original_tool(db_session, current_user, **kwargs)
+
+                # If the tool needs a lock, wrap its execution in the lock context
+                if needs_lock:
+                    log.info(f"Acquiring lock for tool: {tool_name}")
+                    async with resume_lock:
+                        log.info(f"Lock acquired for tool: {tool_name}")
+                        result = await execute_tool()
+                    log.info(f"Lock released for tool: {tool_name}")
                 else:
-                    result = await original_tool(db_session, current_user, **kwargs)
+                    # Execute without a lock
+                    result = await execute_tool()
                 
                 # Add UI data validation for specific tools
                 if tool_name == 'generate_cover_letter':
@@ -259,16 +342,21 @@ def create_dependency_injected_tool(original_tool, db_session: AsyncSession, cur
         # Tool doesn't have db/user params or no cleaning needed, return as-is
         return original_tool
 
-def create_tools_with_dependencies(tool_functions: list, db_session: AsyncSession, current_user: User) -> list:
+def create_tools_with_dependencies(
+    tool_functions: list, 
+    db_session: AsyncSession, 
+    current_user: User,
+    resume_lock: asyncio.Lock,
+    tools_that_need_lock: List[str]
+) -> list:
     """Create all tools with dependencies pre-injected."""
     injected_tools = []
     
-    # Create asyncio.Lock for tools that need it (like refine_cv_for_role)
-    resume_lock = asyncio.Lock()
-    
     for tool_func in tool_functions:
         try:
-            injected_tool = create_dependency_injected_tool(tool_func, db_session, current_user, resume_lock)
+            injected_tool = create_dependency_injected_tool(
+                tool_func, db_session, current_user, resume_lock, tools_that_need_lock
+            )
             injected_tools.append(injected_tool)
             log.info(f"Successfully created tool: {getattr(tool_func, 'name', getattr(tool_func, '__name__', 'unknown_tool'))}")
         except Exception as e:
@@ -553,7 +641,26 @@ async def orchestrator_websocket(
     await websocket.accept()
     log.info(f"WebSocket connected for user: {user.id}")
 
+    # --- Memory Manager Instantiation ---
+    simple_memory = SimpleMemoryManager(db=db, user=user)
+    enhanced_memory = EnhancedMemoryManager(db=db, user=user)
+    advanced_memory = AdvancedMemoryManager(user=user)
+    memory_tools = create_memory_tools(advanced_memory)
+
     # --- Tool Setup with dependency injection ---
+    # Create a single lock for all resume/document modification tools
+    resume_modification_lock = asyncio.Lock()
+
+    # Define which tools need to be protected by the lock to prevent race conditions
+    critical_write_tools = [
+        "refine_cv_for_role",
+        "generate_cover_letter",
+        "create_resume_from_scratch",
+        "generate_tailored_resume",
+        "enhance_resume_section",
+        "refine_cover_letter_from_url",
+    ]
+
     # Create tools with pre-injected dependencies for clean LangChain compatibility
     
     profile_tool_functions = [
@@ -596,11 +703,11 @@ async def orchestrator_websocket(
     # Create injected tools for each specialist (this is where dependencies are injected)
     log.info(f"Creating tools with dependencies for user {user.id}")
     
-    profile_tools = create_tools_with_dependencies(profile_tool_functions, db, user)
-    document_tools = create_tools_with_dependencies(document_tool_functions, db, user)
-    resume_cv_tools = create_tools_with_dependencies(resume_cv_tool_functions + cover_letter_tool_functions, db, user)
-    job_search_tools = create_tools_with_dependencies(job_search_tool_functions, db, user)
-    career_guidance_tools = create_tools_with_dependencies(career_guidance_tool_functions, db, user)
+    profile_tools = create_tools_with_dependencies(profile_tool_functions, db, user, resume_modification_lock, critical_write_tools)
+    document_tools = create_tools_with_dependencies(document_tool_functions, db, user, resume_modification_lock, critical_write_tools)
+    resume_cv_tools = create_tools_with_dependencies(resume_cv_tool_functions + cover_letter_tool_functions, db, user, resume_modification_lock, critical_write_tools)
+    job_search_tools = create_tools_with_dependencies(job_search_tool_functions, db, user, resume_modification_lock, critical_write_tools)
+    career_guidance_tools = create_tools_with_dependencies(career_guidance_tool_functions, db, user, resume_modification_lock, critical_write_tools)
 
     # --- Worker Definitions ---
     # Load the specific prompt for the conversational agent
@@ -663,7 +770,8 @@ async def orchestrator_websocket(
     graph = workflow.compile()
     
     # --- Main WebSocket Loop ---
-    memory_manager = EnhancedMemoryManager(db, user)
+    # DEPRECATING: The EnhancedMemoryManager is now part of the unified context.
+    # memory_manager = EnhancedMemoryManager(db, user)
     
     # This outer try/except is for connection-level errors (e.g., the client disconnects)
     try:
@@ -723,28 +831,44 @@ async def orchestrator_websocket(
                         page_id = new_page.id
                         await websocket.send_json({"type": "page_created", "page_id": page_id, "title": new_page.title})
 
-                # Save user message (already validated)
+                # Save user message with robust transaction handling
                 try:
-                    db.add(ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, message=message_content, is_user_message=True))
+                    user_message_id = str(uuid.uuid4())
+                    db.add(ChatMessage(id=user_message_id, user_id=user.id, page_id=page_id, message=message_content, is_user_message=True))
                     await db.commit()
+                    log.info(f"Saved user message {user_message_id} to DB.")
                 except Exception as db_error:
-                    log.error(f"Failed to save user message to database for user {user.id}, page {page_id}: {db_error}")
+                    log.error(f"Failed to save user message to database for user {user.id}, page {page_id}: {db_error}", exc_info=True)
                     await db.rollback()
-                    # Send error to user and continue
                     await websocket.send_json({
                         "type": "error", 
-                        "message": "Failed to save your message. Please try again."
+                        "message": "A database error occurred while saving your message. Please try again."
                     })
                     continue
                 
-                # Load history
-                context = await memory_manager.get_conversation_context(page_id)
-                chat_history = [HumanMessage(content=msg["content"]) if msg["role"] == "user" else AIMessage(content=msg["content"]) for msg in context.recent_messages]
+                # Sanitize the user message for PII before memory processing.
+                sanitized_message_content = _redact_pii(message_content)
+
+                # 1. Get unified context summary from all memory managers.
+                context_summary = await _get_unified_context_summary(
+                    simple_memory, enhanced_memory, advanced_memory, sanitized_message_content, page_id
+                )
+
+                # 2. Get recent chat history from simple memory.
+                simple_context = await simple_memory.get_conversation_context(page_id=page_id, limit=20)
+                chat_history = [
+                    HumanMessage(content=msg["content"]) if msg["role"] == "user" else AIMessage(content=msg["content"]) 
+                    for msg in simple_context.conversation_history
+                ]
+
+                # 3. Prepare input for the agent graph, prepending the context to the user message.
+                final_input = message_content
+                if context_summary:
+                    final_input = f"{context_summary}\n\nUSER QUERY:\n{message_content}"
 
                 initial_state = {
-                    "input": message_content, 
+                    "input": final_input, 
                     "chat_history": chat_history,
-                    # Dependencies are now pre-injected into tools, no need to pass in state
                 }
                 
                 # Invoke Graph and stream intermediate steps
@@ -809,14 +933,16 @@ async def orchestrator_websocket(
                 # Send final response
                 await websocket.send_json({"type": "message", "message": final_response})
                 
-                # Save AI message (already validated)
+                # Save AI message with robust transaction handling
                 try:
-                    db.add(ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, message=final_response, is_user_message=False))
+                    ai_message_id = str(uuid.uuid4())
+                    db.add(ChatMessage(id=ai_message_id, user_id=user.id, page_id=page_id, message=final_response, is_user_message=False))
                     await db.commit()
+                    log.info(f"Saved AI message {ai_message_id} to DB.")
                 except Exception as db_error:
-                    log.error(f"Failed to save AI message to database for user {user.id}, page {page_id}: {db_error}")
+                    log.error(f"Failed to save AI message to database for user {user.id}, page {page_id}: {db_error}", exc_info=True)
                     await db.rollback()
-                    # Continue anyway - user got the response via WebSocket
+                    # We don't need to send another WebSocket error here, as the user has already received the response.
 
             except Exception as e:
                 # This block catches errors for a single message, logs them, and informs the user.
