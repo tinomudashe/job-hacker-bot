@@ -893,9 +893,9 @@ async def orchestrator_websocket(
                 # Validate or create page
                 if not page_id:
                     new_page = Page(user_id=user.id, title=message_content[:50])
-                    await db.add(new_page)
-                    await db.commit()
-                    await db.refresh(new_page)
+                    db.add(new_page) # This is synchronous
+                    await db.commit() # This must be awaited
+                    await db.refresh(new_page) # This must be awaited
                     page_id = new_page.id
                     await websocket.send_json({"type": "page_created", "page_id": page_id, "title": new_page.title})
                 else:
@@ -906,16 +906,14 @@ async def orchestrator_websocket(
                     if not existing_page.scalar_one_or_none():
                         log.warning(f"Page {page_id} not found for user {user.id}, creating new page")
                         new_page = Page(user_id=user.id, title=message_content[:50])
-                        db.add(new_page)
-                        await db.commit()
-                        await db.refresh(new_page)
+                        db.add(new_page) # This is synchronous
+                        await db.commit() # This must be awaited
+                        await db.refresh(new_page) # This must be awaited
                         page_id = new_page.id
                         await websocket.send_json({"type": "page_created", "page_id": page_id, "title": new_page.title})
 
                 # --- ATOMIC TRANSACTION FIX ---
                 # Create the user message object in memory first.
-                # It will be saved later in the same transaction as the AI's response
-                # to ensure the conversation history is never left in a partial state.
                 user_message_obj = ChatMessage(
                     id=str(uuid.uuid4()), 
                     user_id=user.id, 
@@ -923,6 +921,20 @@ async def orchestrator_websocket(
                     message=message_content, 
                     is_user_message=True
                 )
+
+                # --- REVERTED TO CORRECT SESSION HANDLING ---
+                # Save the user message using the main session to keep it valid for subsequent operations.
+                try:
+                    db.add(user_message_obj)
+                    await db.commit()
+                    await db.refresh(user_message_obj)
+                    log.info(f"Saved user message {user_message_obj.id} for page {page_id}")
+                except Exception as e:
+                    await db.rollback()
+                    log.error(f"Failed to save user message: {e}")
+                    # Optionally send an error to the user and continue
+                    await websocket.send_json({"type": "error", "message": "Failed to save your message."})
+                    continue
                 
                 # Sanitize the user message for PII before memory processing.
                 sanitized_message_content = _redact_pii(message_content)
