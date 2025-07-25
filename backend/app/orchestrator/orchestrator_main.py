@@ -22,7 +22,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_core.tools import Tool
 
-from app.db import get_db, SessionLocal # Import the session factory
+from app.db import get_db, async_session_maker # Corrected import
 from app.models_db import User, ChatMessage, Document, Page
 from app.dependencies import get_current_active_user_ws
 from app.vector_store import get_user_vector_store
@@ -1009,24 +1009,41 @@ async def orchestrator_websocket(
                 # Send final response
                 await websocket.send_json({"type": "message", "message": final_response})
                 
-                # 7. Save the final AI response to the database
-                if final_response:
-                    try:
-                        async with db.begin():
-                            ai_message = ChatMessage(
-                                id=str(uuid.uuid4()),
-                                user_id=user.id,
-                                page_id=page_id,
-                                content=final_response,
-                                is_user_message=False,
-                                created_at=datetime.utcnow(),
-                            )
-                            db.add(ai_message)
-                            await db.flush()
-                            await db.refresh(ai_message)
-                        log.info(f"Saved AI message {ai_message.id} for page {page_id}")
-                    except Exception as e:
-                        log.error(f"Failed to save AI response: {e}")
+                # --- THE CORRECT FIX FOR DISAPPEARING MESSAGES ---
+                # Save the AI message using a NEW, FRESH database session from the session maker.
+                # This prevents errors from the original, potentially stale session
+                # that was held open during the long-running agent process.
+                try:
+                    async with async_session_maker() as fresh_db:
+                        ai_message_id = str(uuid.uuid4())
+                        ai_message_to_save = ChatMessage(
+                            id=ai_message_id, 
+                            user_id=user.id, 
+                            page_id=page_id, 
+                            message=final_response, # Uses the correct 'message' column
+                            is_user_message=False
+                        )
+                        fresh_db.add(ai_message_to_save)
+                        await fresh_db.commit()
+                        log.info(f"Saved AI message {ai_message_id} to DB with fresh session.")
+                except Exception as db_error:
+                    log.error(f"Failed to save AI message to database for user {user.id}, page {page_id}: {db_error}", exc_info=True)
+                    # The 'async with' block handles rollback automatically.
+                    # We don't need to send another WebSocket error here, as the user has already received the response.
 
-                # 8. Send a final "complete" message
-                await websocket.send_json(
+            except Exception as e:
+                # This block catches errors for a single message, logs them, and informs the user.
+                log.error(f"Error processing message for user {user.id}: {e}", exc_info=True)
+                # Send a user-friendly error message over the WebSocket
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "An unexpected error occurred. Please try sending your message again."
+                })
+                # The 'continue' statement is implicit here; the loop will proceed to the next iteration.
+
+    except WebSocketDisconnect:
+        log.info(f"WebSocket disconnected for user {user.id}")
+    except Exception as e:
+        # This catches errors that happen outside the message loop (e.g., initial connection).
+        log.error(f"A critical WebSocket error occurred for user {user.id}: {e}", exc_info=True)
+        # The connection will close, which is appropriate for a critical failure.
