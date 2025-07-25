@@ -358,7 +358,7 @@ def create_tool_node(tools: list):
             # Find the matching tool (tools are now pre-created with dependencies)
             matching_tool = None
             for tool in tools:
-                if getattr(tool, 'name', tool.__name__) == tool_name:
+                if getattr(tool, 'name', getattr(tool, '__name__', 'unknown_tool')) == tool_name:
                     matching_tool = tool
                     break
             
