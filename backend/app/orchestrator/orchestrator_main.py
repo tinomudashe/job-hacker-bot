@@ -214,7 +214,20 @@ def create_dependency_injected_tool(original_tool, db_session: AsyncSession, cur
             args_schema=get_clean_tool_schema(original_tool)
         )
     else:
-        # Tool doesn't need injection, return as-is
+        # Tool doesn't need injection, but create a clean tool for AI model compatibility
+        # Check if tool has db/user in schema that needs cleaning
+        if hasattr(original_tool, 'args_schema') and original_tool.args_schema:
+            clean_schema = get_clean_tool_schema(original_tool)
+            if clean_schema:
+                # Tool schema had db/user params, create clean version
+                return Tool.from_function(
+                    func=original_tool,
+                    name=tool_name,
+                    description=getattr(original_tool, 'description', original_tool.__doc__ or f"{tool_name} tool"),
+                    args_schema=clean_schema
+                )
+        
+        # Tool doesn't have db/user params, return as-is
         return original_tool
 
 def create_tools_with_dependencies(tool_functions: list, db_session: AsyncSession, current_user: User) -> list:
