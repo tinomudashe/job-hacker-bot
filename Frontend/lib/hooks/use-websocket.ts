@@ -17,7 +17,7 @@ interface Message {
 }
 
 interface ReasoningStep {
-  type: 'reasoning_start' | 'reasoning_chunk' | 'reasoning_complete';
+  type: "reasoning_start" | "reasoning_chunk" | "reasoning_complete";
   content: string;
   step?: string;
   specialist?: string;
@@ -42,6 +42,7 @@ interface WebSocketMessage {
 export const useWebSocket = (currentPageId?: string) => {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
+  const [reasoningSteps, setReasoningSteps] = useState<ReasoningStep[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isHistoryLoading, setIsHistoryLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -187,60 +188,52 @@ export const useWebSocket = (currentPageId?: string) => {
           return newMessages;
         });
         setIsLoading(false);
-      } else if (parsedData.type === "reasoning_start" || parsedData.type === "reasoning_chunk" || parsedData.type === "reasoning_complete") {
-        // Handle reasoning stream events
-        console.log(`🧠 [WebSocket Reasoning]: ${parsedData.type}`, parsedData.data);
-        
-        // Check if we have the required data
-        if (!parsedData.data) {
-          console.warn("Reasoning event missing data:", parsedData);
-          return;
-        }
-        
-        const reasoningType = parsedData.type as 'reasoning_start' | 'reasoning_chunk' | 'reasoning_complete';
-        
-        setMessages((prev) => {
-          const lastMessage = prev[prev.length - 1];
-          
-          // If the last message is from AI and doesn't have reasoning steps yet, add them
-          if (lastMessage && !lastMessage.isUser) {
-            const updatedMessage: Message = {
-              ...lastMessage,
-              reasoningSteps: [
-                ...(lastMessage.reasoningSteps || []),
-                {
-                  type: reasoningType,
-                  content: parsedData.data!.content,
-                  step: parsedData.data!.step,
-                  specialist: parsedData.data!.specialist,
-                  tool_name: parsedData.data!.tool_name,
-                  progress: parsedData.data!.progress,
-                  timestamp: parsedData.timestamp || new Date().toISOString()
-                }
-              ]
-            };
-            
-            return [...prev.slice(0, -1), updatedMessage];
-          } else {
-            // Create a new message for reasoning if no AI message exists
-            const reasoningMessage: Message = {
-              id: uuidv4(),
-              content: "Processing your request...",
-              isUser: false,
-              reasoningSteps: [{
-                type: reasoningType,
-                content: parsedData.data!.content,
-                step: parsedData.data!.step,
-                specialist: parsedData.data!.specialist,
-                tool_name: parsedData.data!.tool_name,
-                progress: parsedData.data!.progress,
-                timestamp: parsedData.timestamp || new Date().toISOString()
-              }]
-            };
-            
-            return [...prev, reasoningMessage];
-          }
-        });
+        setReasoningSteps([]); // Clear the reasoning steps on final message
+      } else if (parsedData.type === "reasoning_start") {
+        const reasoningData = parsedData.data;
+        if (!reasoningData) return;
+
+        // When reasoning starts, clear any old steps and add the new one.
+        setReasoningSteps([
+          {
+            type: "reasoning_start",
+            content: reasoningData.content,
+            step: reasoningData.step,
+            specialist: reasoningData.specialist,
+            timestamp: parsedData.timestamp || new Date().toISOString(),
+          },
+        ]);
+      } else if (parsedData.type === "reasoning_chunk") {
+        const reasoningData = parsedData.data;
+        if (!reasoningData) return;
+
+        // For each chunk, append it to the reasoningSteps state.
+        setReasoningSteps((prev) => [
+          ...prev,
+          {
+            type: "reasoning_chunk",
+            content: reasoningData.content,
+            step: reasoningData.step,
+            specialist: reasoningData.specialist,
+            tool_name: reasoningData.tool_name,
+            progress: reasoningData.progress,
+            timestamp: parsedData.timestamp || new Date().toISOString(),
+          },
+        ]);
+      } else if (parsedData.type === "reasoning_complete") {
+        // This event now signals the end, but the final message will clear the steps.
+        // We can optionally add the final step for a brief moment.
+        const reasoningData = parsedData.data;
+        if (!reasoningData) return;
+
+        setReasoningSteps((prev) => [
+          ...prev,
+          {
+            type: "reasoning_complete",
+            content: reasoningData.content,
+            timestamp: parsedData.timestamp || new Date().toISOString(),
+          },
+        ]);
       } else if (parsedData.type === "info") {
         // Handle info messages (e.g., "Loading...", "Searching...")
         // You might want to display these as temporary status updates rather than full messages
@@ -260,9 +253,9 @@ export const useWebSocket = (currentPageId?: string) => {
         // Default to adding as a regular AI message if type is unknown but has a message field
         if (parsedData.message) {
           const messageContent: Message = {
-            id: uuidv4(), 
-            content: parsedData.message as string, 
-            isUser: false
+            id: uuidv4(),
+            content: parsedData.message as string,
+            isUser: false,
           };
           setMessages((prev) => [...prev, messageContent]);
           setIsLoading(false);
@@ -273,8 +266,10 @@ export const useWebSocket = (currentPageId?: string) => {
     newSocket.onclose = (event) => {
       setIsConnected(false);
       isConnecting.current = false;
-      console.log(`WebSocket connection closed with code: ${event.code}, reason: ${event.reason}`);
-      
+      console.log(
+        `WebSocket connection closed with code: ${event.code}, reason: ${event.reason}`
+      );
+
       // Auto-reconnect if the connection was closed unexpectedly (not by user action)
       if (event.code !== 1000 && event.code !== 1001) {
         console.log("Attempting to reconnect in 2 seconds...");
@@ -709,6 +704,7 @@ export const useWebSocket = (currentPageId?: string) => {
 
   return {
     messages,
+    reasoningSteps, // Return the new state
     sendMessage,
     deleteMessage,
     editMessage,

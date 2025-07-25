@@ -3,6 +3,19 @@
 import { Logo } from "../ui/logo";
 import { AIProgressIndicator } from "./ai-progress-indicator";
 
+type ProgressType =
+  | "thinking"
+  | "searching"
+  | "generating"
+  | "processing"
+  | "downloading"
+  | "calling tool"
+  | "reasoning"
+  | "calling api"
+  | "browser_automation"
+  | "job_search"
+  | "linkedin_api";
+
 interface ReasoningStep {
   type: "reasoning_start" | "reasoning_chunk" | "reasoning_complete";
   content: string;
@@ -15,27 +28,29 @@ interface ReasoningStep {
 
 interface LoadingMessageProps {
   reasoningSteps?: ReasoningStep[];
-  progressType?:
-    | "thinking"
-    | "searching"
-    | "generating"
-    | "processing"
-    | "downloading"
-    | "calling tool"
-    | "reasoning"
-    | "calling api"
-    | "browser_automation"
-    | "job_search"
-    | "linkedin_api";
+  progressType?: ProgressType;
   customMessage?: string;
   onCancel?: () => void;
 }
 
 export function LoadingMessage({
+  reasoningSteps,
   progressType = "thinking",
   customMessage,
   onCancel,
 }: LoadingMessageProps) {
+  // Find the last, most recent reasoning step to display.
+  const lastStep =
+    reasoningSteps && reasoningSteps.length > 0
+      ? reasoningSteps[reasoningSteps.length - 1]
+      : null;
+
+  // Use the live content from the stream if it exists.
+  const displayText = lastStep ? lastStep.content : customMessage;
+  const displayType: ProgressType = lastStep
+    ? (lastStep.step as ProgressType) || "thinking"
+    : progressType;
+
   return (
     <div className="flex items-start gap-3 py-2">
       {/* Premium AI Avatar with Logo */}
@@ -47,8 +62,8 @@ export function LoadingMessage({
       <div className="flex-1 min-w-0 mt-1">
         <AIProgressIndicator
           isLoading={true}
-          progressType={progressType}
-          progressText={customMessage}
+          progressType={displayType}
+          progressText={displayText}
           onCancel={onCancel}
         />
       </div>

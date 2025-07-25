@@ -856,7 +856,8 @@ async def orchestrator_websocket(
     # This outer try/except is for connection-level errors (e.g., the client disconnects)
     try:
         while True:
-            # Receive message - this should be outside inner try/catch to properly handle WebSocket disconnects
+            # This is the line that waits for a message.
+            # If the client disconnects here, it raises an exception.
             data = await websocket.receive_text()
             
             # --- Inner try/except for message-level errors ---
@@ -950,8 +951,13 @@ async def orchestrator_websocket(
                 
                 # Invoke Graph and stream intermediate steps
                 final_response = None # Start with None
+                full_graph_trace = [] # Add this to store a trace
                 async for event in graph.astream(initial_state):
-                    # --- DEFINITIVE BUG FIX ---
+                    # --- ENHANCED DEBUGGING ---
+                    # Log the full event to get a complete picture of the graph's execution.
+                    log.info(f"GRAPH_TRACE: {event}")
+                    full_graph_trace.append(event) # Store every event
+
                     # This new, corrected logic properly handles the LangGraph event stream.
                     # It streams reasoning events from intermediate nodes and captures the
                     # final response ONLY from the designated END node.
@@ -983,7 +989,9 @@ async def orchestrator_websocket(
                 # 2. Validate the final AI response before sending and saving
                 if not final_response or not final_response.strip():
                     log.error(f"AI failed to generate a valid response for user {user.id} on page {page_id}.")
-                    log.error(f"Final state debug: {list(initial_state.keys())}")
+                    # --- ENHANCED DEBUGGING ---
+                    # Log the full trace to see exactly where the graph failed.
+                    log.error(f"FULL GRAPH TRACE on FAILURE: {json.dumps(full_graph_trace, indent=2)}")
                     
                     # Try to extract any available output from the state
                     fallback_response = None
@@ -1046,6 +1054,9 @@ async def orchestrator_websocket(
                     log.warning(f"Could not send error message to a disconnected WebSocket: {send_error}")
 
     except WebSocketDisconnect:
+        # This block catches the disconnection exception.
+        # It logs that the user has left and cleans up the connection.
+        # This is the correct and expected behavior.
         log.info(f"WebSocket disconnected for user {user.id}")
     except Exception as e:
         # This catches errors that happen outside the message loop (e.g., initial connection).

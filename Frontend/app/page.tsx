@@ -18,6 +18,7 @@ export default function Home() {
 
   const {
     messages,
+    reasoningSteps,
     sendMessage,
     deleteMessage,
     editMessage,
@@ -204,6 +205,7 @@ export default function Home() {
               <ChatContainer
                 user={user}
                 messages={messages}
+                reasoningSteps={reasoningSteps}
                 onSendMessage={sendMessage}
                 onDeleteMessage={deleteMessage}
                 onEditMessage={editMessage}
