@@ -6,7 +6,6 @@ import { useEffect, useRef } from "react";
 import { EmptyScreen } from "../empty-screen";
 import { ChatMessage } from "./chat-message";
 import { ChatTextarea } from "./chat-textarea";
-import { LoadingMessage } from "./loading-message";
 
 interface ReasoningStep {
   type: 'reasoning_start' | 'reasoning_chunk' | 'reasoning_complete';
@@ -40,119 +39,6 @@ interface ChatContainerProps {
   className?: string;
 }
 
-// Helper function to detect what the AI is doing based on the conversation
-function getProgressType(
-  messages: any[]
-):
-  | "thinking"
-  | "searching"
-  | "generating"
-  | "processing"
-  | "downloading"
-  | "browser_automation"
-  | "job_search"
-  | "linkedin_api" {
-  if (messages.length === 0) return "thinking";
-
-  const lastUserMessage =
-    [...messages]
-      .reverse()
-      .find((m) => m.isUser)
-      ?.content?.toLowerCase() || "";
-  const lastFewMessages = [...messages]
-    .slice(-3)
-    .map((m) =>
-      typeof m.content === "string" ? m.content : JSON.stringify(m.content)
-    )
-    .join(" ")
-    .toLowerCase();
-
-  // LinkedIn API indicators - check for fast job search patterns (highest priority)
-  if (
-    lastUserMessage.includes("linkedin") ||
-    lastUserMessage.includes("software intern") ||
-    lastUserMessage.includes("intern") ||
-    lastFewMessages.includes("linkedin api") ||
-    lastFewMessages.includes("direct linkedin") ||
-    (lastUserMessage.includes("job") &&
-      (lastUserMessage.includes("search") ||
-        lastUserMessage.includes("find") ||
-        lastUserMessage.includes("software")))
-  ) {
-    return "linkedin_api";
-  }
-
-  // Browser automation indicators - check for comprehensive job search patterns
-  if (
-    lastUserMessage.includes("comprehensive") ||
-    lastUserMessage.includes("detailed job search") ||
-    lastUserMessage.includes("browser automation") ||
-    lastFewMessages.includes("browser use cloud") ||
-    lastFewMessages.includes("cloud browser") ||
-    lastFewMessages.includes("browser automation") ||
-    lastFewMessages.includes("live preview")
-  ) {
-    return "browser_automation";
-  }
-
-  // Regular job search indicators
-  if (
-    lastUserMessage.includes("job") ||
-    lastUserMessage.includes("search") ||
-    lastUserMessage.includes("find") ||
-    lastUserMessage.includes("employment") ||
-    lastUserMessage.includes("opportunities") ||
-    lastUserMessage.includes("career") ||
-    lastUserMessage.includes("position") ||
-    lastUserMessage.includes("work")
-  ) {
-    return "job_search";
-  }
-
-  // Content generation indicators
-  if (
-    lastUserMessage.includes("generate") ||
-    lastUserMessage.includes("create") ||
-    lastUserMessage.includes("write") ||
-    lastUserMessage.includes("cover letter") ||
-    lastUserMessage.includes("resume") ||
-    lastUserMessage.includes("cv") ||
-    lastUserMessage.includes("refine") ||
-    lastUserMessage.includes("enhance") ||
-    lastUserMessage.includes("improve") ||
-    lastUserMessage.includes("tailor")
-  ) {
-    return "generating";
-  }
-
-  // Document processing indicators
-  if (
-    lastUserMessage.includes("analyze") ||
-    lastUserMessage.includes("document") ||
-    lastUserMessage.includes("file") ||
-    lastUserMessage.includes("upload") ||
-    lastUserMessage.includes("extract") ||
-    lastUserMessage.includes("review")
-  ) {
-    return "processing";
-  }
-
-  // Download indicators
-  if (
-    lastUserMessage.includes("download") ||
-    lastUserMessage.includes("pdf") ||
-    lastUserMessage.includes("export") ||
-    lastUserMessage.includes("save")
-  ) {
-    return "downloading";
-  }
-
-  return "thinking";
-}
-
-function getCustomProgressMessage(messages: any[]): string | undefined {
-  return undefined;
-}
 
 export const ChatContainer = ({
   messages,
@@ -238,13 +124,6 @@ export const ChatContainer = ({
                 reasoningSteps={message.reasoningSteps}
               />
             ))}
-            {isLoading && (
-              <LoadingMessage
-                progressType={getProgressType(messages)}
-                customMessage={getCustomProgressMessage(messages)}
-                onCancel={onStopGeneration}
-              />
-            )}
             <div ref={messagesEndRef} className="h-4" />
           </div>
         ) : (
