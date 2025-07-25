@@ -26,6 +26,19 @@ interface ReasoningStep {
   timestamp: string;
 }
 
+interface WebSocketMessage {
+  type: string;
+  message?: string;
+  data?: {
+    content: string;
+    step?: string;
+    specialist?: string;
+    tool_name?: string;
+    progress?: string;
+  };
+  timestamp?: string;
+}
+
 export const useWebSocket = (currentPageId?: string) => {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -127,9 +140,9 @@ export const useWebSocket = (currentPageId?: string) => {
 
     newSocket.onmessage = (event) => {
       // Frontend expects JSON, backend sends JSON
-      let parsedData;
+      let parsedData: WebSocketMessage;
       try {
-        parsedData = JSON.parse(event.data);
+        parsedData = JSON.parse(event.data) as WebSocketMessage;
       } catch (e) {
         console.error(
           "Failed to parse WebSocket message as JSON:",
@@ -142,7 +155,7 @@ export const useWebSocket = (currentPageId?: string) => {
 
       // Handle different message types from backend
       if (parsedData.type === "message") {
-        const aiMessageContent = parsedData.message;
+        const aiMessageContent = parsedData.message || "";
 
         setMessages((prev) => {
           console.log(
@@ -178,22 +191,30 @@ export const useWebSocket = (currentPageId?: string) => {
         // Handle reasoning stream events
         console.log(`🧠 [WebSocket Reasoning]: ${parsedData.type}`, parsedData.data);
         
+        // Check if we have the required data
+        if (!parsedData.data) {
+          console.warn("Reasoning event missing data:", parsedData);
+          return;
+        }
+        
+        const reasoningType = parsedData.type as 'reasoning_start' | 'reasoning_chunk' | 'reasoning_complete';
+        
         setMessages((prev) => {
           const lastMessage = prev[prev.length - 1];
           
           // If the last message is from AI and doesn't have reasoning steps yet, add them
           if (lastMessage && !lastMessage.isUser) {
-            const updatedMessage = {
+            const updatedMessage: Message = {
               ...lastMessage,
               reasoningSteps: [
                 ...(lastMessage.reasoningSteps || []),
                 {
-                  type: parsedData.type,
-                  content: parsedData.data.content,
-                  step: parsedData.data.step,
-                  specialist: parsedData.data.specialist,
-                  tool_name: parsedData.data.tool_name,
-                  progress: parsedData.data.progress,
+                  type: reasoningType,
+                  content: parsedData.data!.content,
+                  step: parsedData.data!.step,
+                  specialist: parsedData.data!.specialist,
+                  tool_name: parsedData.data!.tool_name,
+                  progress: parsedData.data!.progress,
                   timestamp: parsedData.timestamp || new Date().toISOString()
                 }
               ]
@@ -202,17 +223,17 @@ export const useWebSocket = (currentPageId?: string) => {
             return [...prev.slice(0, -1), updatedMessage];
           } else {
             // Create a new message for reasoning if no AI message exists
-            const reasoningMessage = {
+            const reasoningMessage: Message = {
               id: uuidv4(),
               content: "Processing your request...",
               isUser: false,
               reasoningSteps: [{
-                type: parsedData.type,
-                content: parsedData.data.content,
-                step: parsedData.data.step,
-                specialist: parsedData.data.specialist,
-                tool_name: parsedData.data.tool_name,
-                progress: parsedData.data.progress,
+                type: reasoningType,
+                content: parsedData.data!.content,
+                step: parsedData.data!.step,
+                specialist: parsedData.data!.specialist,
+                tool_name: parsedData.data!.tool_name,
+                progress: parsedData.data!.progress,
                 timestamp: parsedData.timestamp || new Date().toISOString()
               }]
             };
@@ -229,7 +250,7 @@ export const useWebSocket = (currentPageId?: string) => {
         // If you want to show it, you'd add it to messages with a special type/styling
       } else if (parsedData.type === "error") {
         console.error(`❌ [WebSocket Error]: ${parsedData.message}`);
-        toast.error(parsedData.message);
+        toast.error(parsedData.message || "Unknown error occurred");
         setIsLoading(false);
       } else {
         console.warn(
@@ -238,10 +259,12 @@ export const useWebSocket = (currentPageId?: string) => {
         );
         // Default to adding as a regular AI message if type is unknown but has a message field
         if (parsedData.message) {
-          setMessages((prev) => [
-            ...prev,
-            { id: uuidv4(), content: parsedData.message, isUser: false },
-          ]);
+          const messageContent: Message = {
+            id: uuidv4(), 
+            content: parsedData.message as string, 
+            isUser: false
+          };
+          setMessages((prev) => [...prev, messageContent]);
           setIsLoading(false);
         }
       }
@@ -270,7 +293,7 @@ export const useWebSocket = (currentPageId?: string) => {
       isConnecting.current = false;
       console.error("WebSocket connection error:", error);
     };
-  }, [getToken, currentPageIdRef]);
+  }, [getToken, currentPageIdRef, isLoaded, isSignedIn]);
 
   // Effect to handle page changes
   useEffect(() => {
