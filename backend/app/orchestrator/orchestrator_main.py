@@ -385,12 +385,13 @@ def create_tool_node(tools: list):
             if matching_tool:
                 try:
                     # Execute tool - handle both injected tools and original StructuredTools
-                    if hasattr(matching_tool, 'func') and callable(matching_tool.func):
-                        # Injected tool (Tool.from_function wrapper) - use .func
-                        result = await matching_tool.func(**tool_args)
-                    elif hasattr(matching_tool, 'ainvoke'):
+                    # Check for StructuredTool first (has ainvoke and is from @tool decorator)
+                    if hasattr(matching_tool, 'ainvoke') and hasattr(matching_tool, '__class__') and 'StructuredTool' in str(matching_tool.__class__):
                         # Original StructuredTool - use ainvoke method
                         result = await matching_tool.ainvoke(tool_args)
+                    elif hasattr(matching_tool, 'func') and callable(matching_tool.func):
+                        # Injected tool (Tool.from_function wrapper) - use .func
+                        result = await matching_tool.func(**tool_args)
                     else:
                         # Fallback for other tool types
                         result = await matching_tool(**tool_args)
