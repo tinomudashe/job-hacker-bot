@@ -148,25 +148,37 @@ def get_clean_tool_schema(original_tool):
 
 def check_tool_needs_injection(original_tool):
     """Check if tool needs db/user injection by examining its parameters."""
-    if not hasattr(original_tool, 'args_schema') or not original_tool.args_schema:
-        return False
+    import inspect
     
-    # Get field names
-    if hasattr(original_tool.args_schema, 'model_fields'):
-        field_names = list(original_tool.args_schema.model_fields.keys())
-    elif hasattr(original_tool.args_schema, '__fields__'):
-        field_names = list(original_tool.args_schema.__fields__.keys())
-    else:
-        return False
+    # For StructuredTool objects, check args_schema
+    if hasattr(original_tool, 'args_schema') and original_tool.args_schema:
+        # Get field names
+        if hasattr(original_tool.args_schema, 'model_fields'):
+            field_names = list(original_tool.args_schema.model_fields.keys())
+        elif hasattr(original_tool.args_schema, '__fields__'):
+            field_names = list(original_tool.args_schema.__fields__.keys())
+        else:
+            field_names = []
+        
+        # Check if first two parameters are db and user
+        return len(field_names) >= 2 and field_names[0] == 'db' and field_names[1] == 'user'
     
-    # Check if first two parameters are db and user
-    return len(field_names) >= 2 and field_names[0] == 'db' and field_names[1] == 'user'
+    # For raw functions, check function signature
+    if callable(original_tool):
+        try:
+            sig = inspect.signature(original_tool)
+            param_names = list(sig.parameters.keys())
+            return len(param_names) >= 2 and param_names[0] == 'db' and param_names[1] == 'user'
+        except (ValueError, TypeError):
+            return False
+    
+    return False
 
 def create_dependency_injected_tool(original_tool, db_session: AsyncSession, current_user: User):
     """Create a tool with dependencies pre-injected using closures."""
     
     needs_injection = check_tool_needs_injection(original_tool)
-    tool_name = getattr(original_tool, 'name', original_tool.__name__)
+    tool_name = getattr(original_tool, 'name', getattr(original_tool, '__name__', 'unknown_tool'))
     
     if needs_injection:
         # Create wrapper that injects dependencies
@@ -217,9 +229,9 @@ def create_tools_with_dependencies(tool_functions: list, db_session: AsyncSessio
         try:
             injected_tool = create_dependency_injected_tool(tool_func, db_session, current_user)
             injected_tools.append(injected_tool)
-            log.info(f"Successfully created tool: {getattr(tool_func, 'name', tool_func.__name__)}")
+            log.info(f"Successfully created tool: {getattr(tool_func, 'name', getattr(tool_func, '__name__', 'unknown_tool'))}")
         except Exception as e:
-            log.error(f"Failed to create tool {getattr(tool_func, 'name', tool_func.__name__)}: {e}")
+            log.error(f"Failed to create tool {getattr(tool_func, 'name', getattr(tool_func, '__name__', 'unknown_tool'))}: {e}")
             # Continue with other tools rather than failing completely
             continue
     
