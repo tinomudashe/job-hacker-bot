@@ -1,14 +1,16 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { UserResource } from "@clerk/types";
 import { AlertCircle, ChevronDown, Loader2 } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { EmptyScreen } from "../empty-screen";
 import { ChatMessage } from "./chat-message";
 import { ChatTextarea } from "./chat-textarea";
+import { LoadingMessage } from "./loading-message";
 
 interface ReasoningStep {
-  type: 'reasoning_start' | 'reasoning_chunk' | 'reasoning_complete';
+  type: "reasoning_start" | "reasoning_chunk" | "reasoning_complete";
   content: string;
   step?: string;
   specialist?: string;
@@ -26,11 +28,12 @@ interface Message {
 
 interface ChatContainerProps {
   messages: Message[];
+  reasoningSteps?: ReasoningStep[];
   onSendMessage: (message: string) => void;
   onDeleteMessage?: (id: string) => void;
   onEditMessage: (id: string, newContent: string) => void;
   onRegenerateMessage: (id: string) => void;
-  user?: any;
+  user?: UserResource | null;
   onStopGeneration?: () => void;
   isLoading: boolean;
   isHistoryLoading: boolean;
@@ -39,9 +42,9 @@ interface ChatContainerProps {
   className?: string;
 }
 
-
 export const ChatContainer = ({
   messages,
+  reasoningSteps,
   onSendMessage,
   onDeleteMessage,
   onEditMessage,
@@ -121,9 +124,14 @@ export const ChatContainer = ({
                 onDelete={onDeleteMessage || (() => {})}
                 onEdit={onEditMessage}
                 onRegenerate={onRegenerateMessage}
-                reasoningSteps={message.reasoningSteps}
               />
             ))}
+            {isLoading && (
+              <LoadingMessage
+                reasoningSteps={reasoningSteps}
+                onCancel={onStopGeneration}
+              />
+            )}
             <div ref={messagesEndRef} className="h-4" />
           </div>
         ) : (

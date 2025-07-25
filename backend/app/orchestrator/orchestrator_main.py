@@ -905,29 +905,23 @@ async def orchestrator_websocket(
                     if not existing_page.scalar_one_or_none():
                         log.warning(f"Page {page_id} not found for user {user.id}, creating new page")
                         new_page = Page(user_id=user.id, title=message_content[:50])
-                        await db.add(new_page)
+                        db.add(new_page)
                         await db.commit()
                         await db.refresh(new_page)
                         page_id = new_page.id
                         await websocket.send_json({"type": "page_created", "page_id": page_id, "title": new_page.title})
 
-                # Save user message to the database
-                try:
-                    async with db.begin():
-                        user_message = ChatMessage(
-                            id=str(uuid.uuid4()),
-                            user_id=user.id,
-                            page_id=page_id,
-                            content=message_content,
-                            is_user_message=True,
-                            created_at=datetime.utcnow(),
-                        )
-                        db.add(user_message)
-                        await db.flush()
-                        await db.refresh(user_message)
-                    log.info(f"Saved user message {user_message.id} for page {page_id}")
-                except Exception as e:
-                    log.error(f"Failed to save user message: {e}")
+                # --- ATOMIC TRANSACTION FIX ---
+                # Create the user message object in memory first.
+                # It will be saved later in the same transaction as the AI's response
+                # to ensure the conversation history is never left in a partial state.
+                user_message_obj = ChatMessage(
+                    id=str(uuid.uuid4()), 
+                    user_id=user.id, 
+                    page_id=page_id, 
+                    message=message_content, 
+                    is_user_message=True
+                )
                 
                 # Sanitize the user message for PII before memory processing.
                 sanitized_message_content = _redact_pii(message_content)
@@ -1009,37 +1003,47 @@ async def orchestrator_websocket(
                 # Send final response
                 await websocket.send_json({"type": "message", "message": final_response})
                 
-                # --- THE CORRECT FIX FOR DISAPPEARING MESSAGES ---
-                # Save the AI message using a NEW, FRESH database session from the session maker.
-                # This prevents errors from the original, potentially stale session
-                # that was held open during the long-running agent process.
+                # --- ATOMIC TRANSACTION FIX ---
+                # Save BOTH the user's message and the AI's response in a single, atomic
+                # transaction using a fresh session to guarantee data integrity.
                 try:
                     async with async_session_maker() as fresh_db:
+                        # Add the user message object we created at the start of the turn.
+                        fresh_db.add(user_message_obj)
+
+                        # Create and add the AI message object.
                         ai_message_id = str(uuid.uuid4())
                         ai_message_to_save = ChatMessage(
                             id=ai_message_id, 
                             user_id=user.id, 
                             page_id=page_id, 
-                            message=final_response, # Uses the correct 'message' column
+                            message=final_response,
                             is_user_message=False
                         )
                         fresh_db.add(ai_message_to_save)
+                        
+                        # Commit both messages at once. If this fails, neither is saved.
                         await fresh_db.commit()
-                        log.info(f"Saved AI message {ai_message_id} to DB with fresh session.")
+                        log.info(f"Saved user message {user_message_obj.id} and AI message {ai_message_id} to DB in one transaction.")
                 except Exception as db_error:
-                    log.error(f"Failed to save AI message to database for user {user.id}, page {page_id}: {db_error}", exc_info=True)
+                    log.error(f"Failed to save message pair to database for user {user.id}, page {page_id}: {db_error}", exc_info=True)
                     # The 'async with' block handles rollback automatically.
                     # We don't need to send another WebSocket error here, as the user has already received the response.
 
             except Exception as e:
                 # This block catches errors for a single message, logs them, and informs the user.
                 log.error(f"Error processing message for user {user.id}: {e}", exc_info=True)
-                # Send a user-friendly error message over the WebSocket
-                await websocket.send_json({
-                    "type": "error",
-                    "message": "An unexpected error occurred. Please try sending your message again."
-                })
-                # The 'continue' statement is implicit here; the loop will proceed to the next iteration.
+                
+                # --- THIS IS THE VERIFIED FIX ---
+                # Attempt to send an error message, but wrap it in a try/except
+                # to prevent a crash if the client has already disconnected.
+                try:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "An unexpected error occurred. Please try sending your message again."
+                    })
+                except RuntimeError as send_error:
+                    log.warning(f"Could not send error message to a disconnected WebSocket: {send_error}")
 
     except WebSocketDisconnect:
         log.info(f"WebSocket disconnected for user {user.id}")

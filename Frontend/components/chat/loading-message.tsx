@@ -3,7 +3,18 @@
 import { Logo } from "../ui/logo";
 import { AIProgressIndicator } from "./ai-progress-indicator";
 
+interface ReasoningStep {
+  type: "reasoning_start" | "reasoning_chunk" | "reasoning_complete";
+  content: string;
+  step?: string;
+  specialist?: string;
+  tool_name?: string;
+  progress?: string;
+  timestamp: string;
+}
+
 interface LoadingMessageProps {
+  reasoningSteps?: ReasoningStep[];
   progressType?:
     | "thinking"
     | "searching"
