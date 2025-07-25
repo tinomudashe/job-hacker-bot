@@ -13,8 +13,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 log = logging.getLogger(__name__)
 
-@tool
-async def enhanced_document_search(
+# This tool needs to be wrapped by the dependency injector to get db and user
+async def enhanced_document_search_logic(
     query: str,
     db: AsyncSession,
     user: User,
@@ -143,3 +143,17 @@ async def enhanced_document_search(
     except Exception as e:
         log.error(f"Error in enhanced document search: {e}", exc_info=True)
         return f"❌ Sorry, I couldn't search your documents for '{query}' right now. Please try again or let me know if you need help with document analysis."
+
+# We create the tool from the logic function, but without the db and user parameters in the signature.
+# The dependency injector will handle passing them at runtime.
+@tool
+async def enhanced_document_search(
+    query: str,
+    doc_id: Optional[str] = None
+) -> str:
+    # This wrapper is what the AI agent sees. It has a clean signature.
+    # The actual implementation is in the _logic function, which will be called by the injector.
+    pass
+
+# Replace the original tool's function with our logic so the injector can find it.
+enhanced_document_search.func = enhanced_document_search_logic

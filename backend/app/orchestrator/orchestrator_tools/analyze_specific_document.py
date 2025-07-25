@@ -44,7 +44,8 @@ async def analyze_specific_document(
         
         document = documents[0]
         
-        # Create an ad-hoc memory manager for this specific task
+        # Create an ad-hoc memory manager for this specific task.
+        # This resolves the Pydantic schema error and aligns with the new architecture.
         memory_manager = EnhancedMemoryManager(db=db, user=user)
         
         # Get detailed analysis using enhanced memory system
