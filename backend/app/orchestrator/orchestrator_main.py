@@ -222,12 +222,33 @@ def create_dependency_injected_tool(original_tool, db_session: AsyncSession, cur
             args_schema=get_clean_tool_schema(original_tool)
         )
     else:
-        # Tool doesn't need injection, but create a clean tool for AI model compatibility
-        # Check if tool has db/user in schema that needs cleaning
+        # Tool doesn't need injection, but check if schema needs cleaning
         if hasattr(original_tool, 'args_schema') and original_tool.args_schema:
+            # Get original and clean schemas to compare
+            original_schema = original_tool.args_schema
             clean_schema = get_clean_tool_schema(original_tool)
+            
+            # Get field names for comparison
+            if hasattr(original_schema, 'model_fields'):
+                orig_fields = set(original_schema.model_fields.keys())
+            elif hasattr(original_schema, '__fields__'):
+                orig_fields = set(original_schema.__fields__.keys())
+            else:
+                orig_fields = set()
+            
             if clean_schema:
-                # Tool schema had db/user params, create clean version
+                if hasattr(clean_schema, 'model_fields'):
+                    clean_fields = set(clean_schema.model_fields.keys())
+                elif hasattr(clean_schema, '__fields__'):
+                    clean_fields = set(clean_schema.__fields__.keys())
+                else:
+                    clean_fields = set()
+            else:
+                clean_fields = set()
+            
+            # Only create wrapper if fields were actually removed
+            if orig_fields != clean_fields and clean_schema:
+                # Tool schema had db/user params that were removed, create clean version
                 return Tool.from_function(
                     func=original_tool,
                     name=tool_name,
@@ -235,7 +256,7 @@ def create_dependency_injected_tool(original_tool, db_session: AsyncSession, cur
                     args_schema=clean_schema
                 )
         
-        # Tool doesn't have db/user params, return as-is
+        # Tool doesn't have db/user params or no cleaning needed, return as-is
         return original_tool
 
 def create_tools_with_dependencies(tool_functions: list, db_session: AsyncSession, current_user: User) -> list:
