@@ -299,7 +299,7 @@ def create_agent_node(tools: list, system_prompt: str):
             ("human", "{input}\n{critique}"),
         ])
         
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro-latest", temperature=0.2)
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.2)
         llm_with_tools = llm.bind_tools(tools)
         
         # Stream thinking process
@@ -488,7 +488,7 @@ async def router_node(state: AgentState):
     {state['input']}"""
     
     # Use a faster, cheaper model for routing
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.0)
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.5)
     structured_llm = llm.with_structured_output(RouteQuery)
     response = await structured_llm.ainvoke(prompt)
     
@@ -530,7 +530,7 @@ async def validator_node(state: AgentState):
 
     Based on your evaluation, decide if the response is sufficient. If not, provide a concise, actionable critique for the agent to use on its next attempt.
     """
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.0)
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.5)
     structured_llm = llm.with_structured_output(Validation)
     response = await structured_llm.ainvoke(prompt)
 
