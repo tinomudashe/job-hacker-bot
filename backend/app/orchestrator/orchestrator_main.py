@@ -61,6 +61,46 @@ log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 router = APIRouter()
 
+async def _get_unified_context_summary(
+    simple_memory: SimpleMemoryManager,
+    enhanced_memory: EnhancedMemoryManager,
+    advanced_memory: AdvancedMemoryManager,
+    user_message: str,
+    page_id: Optional[str]
+) -> str:
+    """
+    Fetches context from all memory managers and creates a unified summary string
+    for the agent. This context is NOT shown to the user.
+    """
+    summary_parts = []
+    try:
+        enhanced_ctx_task = enhanced_memory.get_conversation_context(page_id=page_id, include_user_learning=True)
+        advanced_ctx_task = advanced_memory.load_relevant_context(current_message=user_message)
+        
+        enhanced_context, advanced_context = await asyncio.gather(
+            enhanced_ctx_task,
+            advanced_ctx_task
+        )
+
+        if advanced_context and advanced_context.relevant_memories:
+            memories_text = "\n".join([f"- {memory}" for memory in advanced_context.relevant_memories])
+            summary_parts.append(f"Here is what I remember about you:\n{memories_text}")
+
+        if enhanced_context and enhanced_context.summary and "New conversation" not in enhanced_context.summary:
+            summary_parts.append(f"Here is a summary of our recent conversation:\n{enhanced_context.summary}")
+        
+        if enhanced_context and enhanced_context.key_topics:
+            summary_parts.append(f"Key topics we discussed: {', '.join(enhanced_context.key_topics)}")
+
+        if not summary_parts:
+            return ""
+
+        return "INTERNAL CONTEXT FOR AI (User does not see this):\n\n" + "\n\n".join(summary_parts)
+
+    except Exception as e:
+        log.error(f"Error getting unified context summary: {e}", exc_info=True)
+        return ""
+
 # --- All functions are now at the top level for testability ---
 
 # --- 1. State & Pydantic Models ---
@@ -121,12 +161,18 @@ def create_agent_node(tools, system_prompt):
         llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.2).bind_tools(tools)
         response = await (prompt | llm).ainvoke(state)
         
-        reasoning_events = [{"type": "reasoning_start"}]
+        # --- FIX: Restore Detailed Reasoning Events ---
+        reasoning_events = [{"type": "reasoning_start", "content": "Analyzing request..."}]
         if response.tool_calls:
-            reasoning_events.append({"type": "reasoning_chunk", "content": "Planning to use tools..."})
+            tool_names = [call["name"] for call in response.tool_calls]
+            reasoning_events.append({
+                "type": "reasoning_chunk",
+                "content": f"Planning to use tools: {', '.join(tool_names)}",
+                "step": "tool_planning"
+            })
             return {"agent_outcome": response, "reasoning_events": reasoning_events}
         else:
-            reasoning_events.append({"type": "reasoning_complete"})
+            reasoning_events.append({"type": "reasoning_complete", "content": "Analysis complete."})
             return {"final_response": response.content, "reasoning_events": reasoning_events}
     return agent_node
 
@@ -134,15 +180,26 @@ def create_tool_node(tools):
     async def tool_node(state: AgentState):
         tool_calls = state["agent_outcome"].tool_calls
         tool_results = []
+        # --- FIX: Restore Detailed Reasoning Events ---
         reasoning_events = []
         for call in tool_calls:
             tool = {t.name: t for t in tools}[call["name"]]
-            reasoning_events.append({"type": "reasoning_chunk", "content": f"Using tool: {tool.name}"})
+            reasoning_events.append({
+                "type": "reasoning_chunk",
+                "content": f"Using tool: {tool.name}",
+                "step": "tool_execution"
+            })
             result = await tool.ainvoke(call["args"])
             tool_results.append(result)
+            reasoning_events.append({
+                "type": "reasoning_chunk",
+                "content": f"Finished using tool: {tool.name}",
+                "step": "tool_result"
+            })
         
-        reasoning_events.append({"type": "reasoning_complete"})
-        return {"messages": tool_results, "reasoning_events": reasoning_events} # This was the bug fix from before
+        reasoning_events.append({"type": "reasoning_complete", "content": "All tools finished."})
+        # This was the bug fix from before, ensuring events are returned.
+        return {"messages": tool_results, "reasoning_events": reasoning_events}
     return tool_node
 
 async def router_node(state: AgentState):
@@ -200,6 +257,9 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
     graph = create_master_agent_graph(db, user)
     
     simple_memory = SimpleMemoryManager(db=db, user=user)
+    # --- FIX: Re-instantiate the advanced memory managers ---
+    enhanced_memory = EnhancedMemoryManager(db=db, user=user)
+    advanced_memory = AdvancedMemoryManager(user=user)
     
     try:
         while True:
@@ -217,10 +277,26 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
 
             user_message = ChatMessage(user_id=user.id, page_id=page_id, message=user_message_content, is_user_message=True)
             
+            # --- FIX: Re-integrate the advanced memory context gathering ---
+            # 1. Get the long-term context from enhanced and advanced memory.
+            context_summary = await _get_unified_context_summary(
+                simple_memory, enhanced_memory, advanced_memory, user_message_content, page_id
+            )
+
+            # 2. Get the short-term, literal chat history.
             history = await simple_memory.get_conversation_context(page_id)
             chat_history = [HumanMessage(content=msg["content"]) if msg["role"] == "user" else AIMessage(content=msg["content"]) for msg in history.conversation_history]
             
-            initial_state = {"input": user_message_content, "chat_history": chat_history}
+            # 3. Prepend the long-term context to the user's input for the agent.
+            final_input = user_message_content
+            if context_summary:
+                final_input = f"{context_summary}\n\nUSER QUERY:\n{user_message_content}"
+
+            initial_state = {
+                "input": final_input, # Use the input with the prepended context
+                "chat_history": chat_history,
+                "critique": ""
+            }
             
             final_response = None
             async for event in graph.astream(initial_state):
