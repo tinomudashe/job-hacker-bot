@@ -33,6 +33,10 @@ export const useSubscription = () => {
     }
   }, [getToken]);
 
+  React.useEffect(() => {
+    fetchSubscription();
+  }, [fetchSubscription]);
+
   const createCheckoutSession = async () => {
     setLoading(true);
     try {
@@ -51,6 +55,7 @@ export const useSubscription = () => {
         toast.error("Failed to create checkout session.");
       }
     } catch (error) {
+      console.error("Failed to create checkout session:", error);
       toast.error("An error occurred. Please try again.");
     } finally {
       setLoading(false);
@@ -72,15 +77,12 @@ export const useSubscription = () => {
         toast.error("Could not open billing management.");
       }
     } catch (error) {
+      console.error("Failed to create portal session:", error);
       toast.error("An error occurred. Please try again.");
     } finally {
       setPortalLoading(false);
     }
   };
-
-  React.useEffect(() => {
-    fetchSubscription();
-  }, [fetchSubscription]);
 
   return {
     subscription,

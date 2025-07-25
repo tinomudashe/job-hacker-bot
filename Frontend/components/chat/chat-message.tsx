@@ -52,7 +52,7 @@ const safeGet = (obj: any, path: string[], defaultValue: any = undefined) => {
 };
 
 interface ReasoningStep {
-  type: 'reasoning_start' | 'reasoning_chunk' | 'reasoning_complete';
+  type: "reasoning_start" | "reasoning_chunk" | "reasoning_complete";
   content: string;
   step?: string;
   specialist?: string;
@@ -1535,9 +1535,11 @@ export function ChatMessage({
         >
           {/* Reasoning Stream - Only show for AI messages with reasoning steps */}
           {!isUser && reasoningSteps && reasoningSteps.length > 0 && (
-            <ReasoningStream 
-              steps={reasoningSteps} 
-              isComplete={reasoningSteps.some(step => step.type === 'reasoning_complete')}
+            <ReasoningStream
+              steps={reasoningSteps}
+              isComplete={reasoningSteps.some(
+                (step) => step.type === "reasoning_complete"
+              )}
               className="mb-3"
             />
           )}
