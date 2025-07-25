@@ -13,7 +13,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 log = logging.getLogger(__name__)
 
-# This tool needs to be wrapped by the dependency injector to get db and user
+# This is now the internal logic, and it no longer needs the docstring.
 async def enhanced_document_search_logic(
     query: str,
     db: AsyncSession,
@@ -151,7 +151,19 @@ async def enhanced_document_search(
     query: str,
     doc_id: Optional[str] = None
 ) -> str:
-    # This wrapper is what the AI agent sees. It has a clean signature.
+    """
+    Enhanced search across all user documents, including resumes, cover letters, and user profile.
+    Prioritizes the most recently uploaded documents in case of ambiguity.
+    If a file is mentioned in the query (e.g., "File Attached: resume.pdf"), it will be summarized directly.
+
+    Args:
+        query (str): The user's search query, which may include file attachment context.
+        doc_id (Optional[str]): The specific ID of a document to search within.
+
+    Returns:
+        A formatted string containing the most relevant search results or a direct summary of an attached file.
+    """
+    # This wrapper is what the AI agent sees. It has a clean signature and now has the required docstring.
     # The actual implementation is in the _logic function, which will be called by the injector.
     pass
 
