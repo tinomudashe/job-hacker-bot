@@ -251,74 +251,65 @@ def check_tool_needs_injection(original_tool):
     
     return False
 
-def create_dependency_injected_tool(
-    original_tool, 
-    db_session: AsyncSession, 
-    current_user: User, 
-    resume_lock: asyncio.Lock,
-    tools_that_need_lock: List[str]
-):
-    """Create a tool with dependencies and optional locking pre-injected."""
+def create_dependency_injected_tool(original_tool, db: AsyncSession, user: User, resume_modification_lock: asyncio.Lock):
+    """
+    Wraps a tool to inject db and user dependencies.
+    Handles tools that may or may not need the lock.
+    """
+    # Definitive fix: Add robust logging to identify the faulty tool.
+    if not original_tool or not hasattr(original_tool, 'name'):
+        log.error(f"CRITICAL: A tool is invalid or None before processing. Tool object: {original_tool}")
+        # We raise an error here to prevent the server from crashing on the next line
+        # and to make the root cause obvious in the logs.
+        raise ValueError(f"A tool object is invalid: {original_tool}")
     
-    needs_injection = check_tool_needs_injection(original_tool)
-    tool_name = getattr(original_tool, 'name', getattr(original_tool, '__name__', 'unknown_tool'))
+    log.info(f"Processing tool: {original_tool.name}")
+
+    # The rest of the function remains the same.
+    # We inspect the signature to see what it needs.
+    sig = inspect.signature(original_tool.func if hasattr(original_tool, 'func') else original_tool)
+    tool_params = sig.parameters
+
+    # Build the dictionary of arguments to pass to the original tool.
+    call_args = {}
+    if 'db' in tool_params:
+        call_args['db'] = db
+    if 'user' in tool_params:
+        call_args['user'] = user
+    if 'resume_modification_lock' in tool_params:
+        call_args['resume_modification_lock'] = resume_modification_lock
     
-    # Check if this specific tool's execution should be locked
+    # Add the keyword arguments from the AI's call.
+    call_args.update(kwargs)
+
+    # Define the core execution logic.
+    async def execute_tool():
+        return await (original_tool.func if hasattr(original_tool, 'func') else original_tool)(**call_args)
+
+    # Use the lock if needed, but the arguments are now always correct.
     needs_lock = tool_name in tools_that_need_lock
 
-    if needs_injection:
-        # Create wrapper that injects dependencies and handles locking
-        @wraps(original_tool)
-        async def injected_tool(**kwargs):
-            try:
-                log.info(f"Executing tool {tool_name} with injected dependencies. Needs lock: {needs_lock}")
-
-                # --- DEFINITIVE BUG FIX ---
-                # This new, robust logic uses `inspect` to dynamically build the
-                # argument list for any tool, ensuring all parameters are passed correctly.
-                
-                # Get the signature of the original tool function.
-                sig = inspect.signature(original_tool.func if hasattr(original_tool, 'func') else original_tool)
-                params = sig.parameters
-
-                # Build the dictionary of arguments to pass to the original tool.
-                call_args = {}
-                if 'db' in params:
-                    call_args['db'] = db_session
-                if 'user' in params:
-                    call_args['user'] = current_user
-                if 'resume_modification_lock' in params:
-                    call_args['resume_modification_lock'] = resume_lock
-                
-                # Add the keyword arguments from the AI's call.
-                call_args.update(kwargs)
-
-                # Define the core execution logic.
-                async def execute_tool():
-                    return await (original_tool.func if hasattr(original_tool, 'func') else original_tool)(**call_args)
-
-                # Use the lock if needed, but the arguments are now always correct.
-                if needs_lock:
-                    log.info(f"Acquiring lock for tool: {tool_name}")
-                    async with resume_lock:
-                        log.info(f"Lock acquired for tool: {tool_name}")
-                        result = await execute_tool()
-                    log.info(f"Lock released for tool: {tool_name}")
-                else:
-                    result = await execute_tool()
-                
-                # Add UI data validation for specific tools
-                if tool_name == 'generate_cover_letter':
-                    if result and '[DOWNLOADABLE_COVER_LETTER]' not in str(result):
-                        result = f"[DOWNLOADABLE_COVER_LETTER]\n{result}"
-                elif tool_name == 'create_resume_from_scratch' or tool_name == 'generate_tailored_resume':
-                    if result and '[DOWNLOADABLE_RESUME]' not in str(result):
-                        result = f"[DOWNLOADABLE_RESUME]\n{result}"
-                elif tool_name == 'get_interview_preparation_guide':
-                    if result and '[INTERVIEW_FLASHCARDS_AVAILABLE]' not in str(result):
-                        result = f"{result}\n\n[INTERVIEW_FLASHCARDS_AVAILABLE]"
-                
-                return result
+    if needs_lock:
+        log.info(f"Acquiring lock for tool: {tool_name}")
+        async with resume_modification_lock:
+            log.info(f"Lock acquired for tool: {tool_name}")
+            result = await execute_tool()
+        log.info(f"Lock released for tool: {tool_name}")
+    else:
+        result = await execute_tool()
+    
+    # Add UI data validation for specific tools
+    if tool_name == 'generate_cover_letter':
+        if result and '[DOWNLOADABLE_COVER_LETTER]' not in str(result):
+            result = f"[DOWNLOADABLE_COVER_LETTER]\n{result}"
+    elif tool_name == 'create_resume_from_scratch' or tool_name == 'generate_tailored_resume':
+        if result and '[DOWNLOADABLE_RESUME]' not in str(result):
+            result = f"[DOWNLOADABLE_RESUME]\n{result}"
+    elif tool_name == 'get_interview_preparation_guide':
+        if result and '[INTERVIEW_FLASHCARDS_AVAILABLE]' not in str(result):
+            result = f"{result}\n\n[INTERVIEW_FLASHCARDS_AVAILABLE]"
+    
+    return result
                 
             except Exception as e:
                 log.error(f"Tool {tool_name} execution failed: {e}", exc_info=True)
@@ -381,6 +372,13 @@ def create_tools_with_dependencies(
     injected_tools = []
     
     for tool_func in tool_functions:
+        # --- FIX FOR STARTUP CRASH ---
+        # Add a check to ensure the tool function is not None before processing.
+        # This prevents the server from crashing if an import fails.
+        if tool_func is None:
+            log.error("A tool function was found to be None during startup. Skipping it.")
+            continue
+        
         try:
             injected_tool = create_dependency_injected_tool(
                 tool_func, db_session, current_user, resume_lock, tools_that_need_lock
@@ -912,29 +910,17 @@ async def orchestrator_websocket(
                         page_id = new_page.id
                         await websocket.send_json({"type": "page_created", "page_id": page_id, "title": new_page.title})
 
-                # --- ATOMIC TRANSACTION FIX ---
-                # Create the user message object in memory first.
+                # --- DEFINITIVE FIX FOR DISAPPEARING MESSAGES ---
+                # 1. Create the user message object in memory but DO NOT save it yet.
+                #    We will save it later, together with the AI's response.
                 user_message_obj = ChatMessage(
                     id=str(uuid.uuid4()), 
                     user_id=user.id, 
                     page_id=page_id, 
                     message=message_content, 
-                    is_user_message=True
+                    is_user_message=True,
+                    timestamp=datetime.utcnow() # Set timestamp now
                 )
-
-                # --- REVERTED TO CORRECT SESSION HANDLING ---
-                # Save the user message using the main session to keep it valid for subsequent operations.
-                try:
-                    db.add(user_message_obj)
-                    await db.commit()
-                    await db.refresh(user_message_obj)
-                    log.info(f"Saved user message {user_message_obj.id} for page {page_id}")
-                except Exception as e:
-                    await db.rollback()
-                    log.error(f"Failed to save user message: {e}")
-                    # Optionally send an error to the user and continue
-                    await websocket.send_json({"type": "error", "message": "Failed to save your message."})
-                    continue
                 
                 # Sanitize the user message for PII before memory processing.
                 sanitized_message_content = _redact_pii(message_content)
@@ -1020,12 +1006,18 @@ async def orchestrator_websocket(
                     # We send this error message to the user, but we still save it to the history
                     # to maintain the conversation context.
 
-                # Send final response
-                await websocket.send_json({"type": "message", "message": final_response})
+                # Send final response to the user via WebSocket
+                # This is now separate from the database save.
+                await websocket.send_json({
+                    "type": "final_response",
+                    "content": final_response,
+                    "pageId": page_id,
+                    # We can add the message ID here if we want the frontend to use it
+                    # "messageId": ai_message_id 
+                })
                 
-                # --- ATOMIC TRANSACTION FIX ---
-                # Save BOTH the user's message and the AI's response in a single, atomic
-                # transaction using a fresh session to guarantee data integrity.
+                # 2. Save BOTH the user's message and the AI's response in a single, atomic
+                #    transaction. This guarantees data integrity and stops messages from disappearing.
                 try:
                     async with async_session_maker() as fresh_db:
                         # Add the user message object we created at the start of the turn.
@@ -1038,15 +1030,16 @@ async def orchestrator_websocket(
                             user_id=user.id, 
                             page_id=page_id, 
                             message=final_response,
-                            is_user_message=False
+                            is_user_message=False,
+                            timestamp=datetime.utcnow()
                         )
                         fresh_db.add(ai_message_to_save)
                         
                         # Commit both messages at once. If this fails, neither is saved.
                         await fresh_db.commit()
-                        log.info(f"Saved user message {user_message_obj.id} and AI message {ai_message_id} to DB in one transaction.")
+                        log.info(f"Successfully saved user message {user_message_obj.id} and AI message {ai_message_id} to DB.")
                 except Exception as db_error:
-                    log.error(f"Failed to save message pair to database for user {user.id}, page {page_id}: {db_error}", exc_info=True)
+                    log.error(f"CRITICAL: ATOMIC SAVE FAILED for user {user.id}, page {page_id}: {db_error}", exc_info=True)
                     # The 'async with' block handles rollback automatically.
                     # We don't need to send another WebSocket error here, as the user has already received the response.
 
