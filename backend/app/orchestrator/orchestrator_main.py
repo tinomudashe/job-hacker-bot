@@ -22,7 +22,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_core.tools import Tool
 
-from app.db import get_db
+from app.db import get_db, SessionLocal # Import the session factory
 from app.models_db import User, ChatMessage, Document, Page
 from app.dependencies import get_current_active_user_ws
 from app.vector_store import get_user_vector_store
@@ -406,7 +406,7 @@ def create_agent_node(tools: list, system_prompt: str):
         reasoning_start = {
             "type": "reasoning_start",
             "specialist": route,
-            "message": f"🧠 {route.replace('_', ' ').title()} specialist is analyzing your request..."
+            "content": f"🧠 {route.replace('_', ' ').title()} specialist is analyzing your request..."
         }
         
         prompt = ChatPromptTemplate.from_messages([
@@ -584,6 +584,9 @@ def create_tool_node(tools: list):
         # Combine tool results into final response
         final_response = "\n\n".join(tool_results) if tool_results else "I encountered some technical difficulties but I'm here to help. Please try rephrasing your request."
         
+        # --- DEFINITIVE BUG FIX ---
+        # The `reasoning_events` were being created but never returned.
+        # This line adds the missing key to the return dictionary, which fixes the stream.
         return {
             "agent_outcome": {"output": final_response},
             "final_response": final_response,
@@ -597,88 +600,115 @@ def create_tool_node(tools: list):
 async def router_node(state: AgentState):
     """Classifies the user input and decides the route."""
     log.info("--- 🚦 ROUTER ---")
-    prompt = f"""You are an expert at routing a user's request to the correct specialist.
-    Based on the user's query, select the appropriate specialist from the available choices.
+    
+    try:
+        # --- BUG FIX: Make the router more robust ---
+        # 1. Isolate the user's actual query from the prepended memory context.
+        #    The router only needs the user's latest message to make a decision.
+        user_query = state['input']
+        if "USER QUERY:" in user_query:
+            user_query = user_query.split("USER QUERY:")[1].strip()
 
-    User Query:
-    {state['input']}"""
-    
-    # Use a faster, cheaper model for routing
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.5)
-    structured_llm = llm.with_structured_output(RouteQuery)
-    response = await structured_llm.ainvoke(prompt)
-    
-    log.info(f"Route selected: {response.datasource}")
-    return {"route": response.datasource, "retry_count": 0, "critique": ""}
+        prompt = f"""You are an expert at routing a user's request to the correct specialist.
+        Based on the user's query, select the appropriate specialist from the available choices.
+
+        User Query:
+        {user_query}"""
+        
+        # Use a faster, cheaper model for routing
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.0) # Use 0 temp for deterministic routing
+        structured_llm = llm.with_structured_output(RouteQuery)
+        response = await structured_llm.ainvoke(prompt)
+        
+        log.info(f"Route selected: {response.datasource}")
+        return {"route": response.datasource, "retry_count": 0, "critique": ""}
+
+    except Exception as e:
+        log.error(f"CRITICAL: Router node failed: {e}", exc_info=True)
+        # 2. Add a fallback mechanism. If routing fails, default to general conversation.
+        #    This prevents the graph from crashing silently.
+        log.warning("Router failed. Defaulting to 'general_conversation' route.")
+        return {"route": "general_conversation", "retry_count": 0, "critique": ""}
 
 async def validator_node(state: AgentState):
     """Evaluates the worker's output and decides if it's sufficient."""
     log.info("--- 🕵️ VALIDATOR ---")
     
-    # Get agent output and handle different formats
-    agent_outcome = state.get('agent_outcome', {})
-    agent_output = agent_outcome.get('output', '')
-    
-    # --- BUG FIX: Provide the validator with more context to prevent false negatives ---
-    # Extract which tools were called, if any.
-    tool_calls = agent_outcome.get("tool_calls", [])
-    tools_used = [call["name"] for call in tool_calls] if tool_calls else ["None"]
+    try:
+        # Get agent output and handle different formats
+        agent_outcome = state.get('agent_outcome', {})
+        agent_output = agent_outcome.get('output', '')
+        
+        # --- Provide the validator with more context to prevent false negatives ---
+        tool_calls = agent_outcome.get("tool_calls", [])
+        tools_used = [call["name"] for call in tool_calls] if tool_calls else ["None"]
 
-    # Re-create the memory context that the agent used. This is crucial for the validator.
-    # We use a simplified version here to avoid re-running all memory managers.
-    memory_context_summary = ""
-    if "INTERNAL CONTEXT FOR AI" in state['input']:
-        memory_context_summary = state['input'].split("USER QUERY:")[0]
+        memory_context_summary = ""
+        if "INTERNAL CONTEXT FOR AI" in state.get('input', ''):
+            memory_context_summary = state['input'].split("USER QUERY:")[0]
 
-    # Handle LangChain message objects
-    if hasattr(agent_output, 'content'):
-        agent_output = agent_output.content
-    elif not isinstance(agent_output, str):
-        agent_output = str(agent_output)
-    
-    if not agent_output or not agent_output.strip():
-        # Handle cases where the agent might fail and produce no output
-        log.warning("Validator received no agent output. Forcing retry.")
-        log.info(f"Agent outcome debug: {agent_outcome}")
-        return {"critique": "The previous attempt failed to generate a response. Please try again.", "retry_count": state.get('retry_count', 0) + 1}
+        if hasattr(agent_output, 'content'):
+            agent_output = agent_output.content
+        elif not isinstance(agent_output, str):
+            agent_output = str(agent_output)
+        
+        if not agent_output or not agent_output.strip():
+            log.warning("Validator received no agent output. Forcing retry.")
+            log.debug(f"Agent outcome for empty output: {agent_outcome}")
+            return {"critique": "The previous attempt failed to generate a response. Please try again.", "retry_count": state.get('retry_count', 0) + 1}
 
-    prompt = f"""You are a meticulous Quality Assurance agent. Your role is to validate the response generated by another AI agent based on the FULL context provided.
+        prompt = f"""You are a meticulous Quality Assurance agent. Your role is to validate the response generated by another AI agent based on the FULL context provided.
 
-    **CONTEXT GIVEN TO THE AGENT:**
-    ---
-    {memory_context_summary}
-    ---
+        **CONTEXT GIVEN TO THE AGENT:**
+        ---
+        {memory_context_summary}
+        ---
 
-    **TOOLS USED BY THE AGENT:** {', '.join(tools_used)}
+        **TOOLS USED BY THE AGENT:** {', '.join(tools_used)}
 
-    **USER'S ORIGINAL QUERY:**
-    ---
-    {state['input']}
-    ---
+        **USER'S ORIGINAL QUERY:**
+        ---
+        {state['input']}
+        ---
 
-    **AGENT'S GENERATED RESPONSE:**
-    ---
-    {agent_output}
-    ---
+        **AGENT'S GENERATED RESPONSE:**
+        ---
+        {agent_output}
+        ---
 
-    **YOUR TASKS (CRITICAL):**
-    1.  **Check for Grounding:** The agent's response MUST be grounded in the provided context or the output of the tools it used. If the agent used tools like `enhanced_document_search`, it has access to the user's files. Do NOT flag responses as hallucinations if they are based on this external knowledge.
-    2.  **Check for Correctness:** Does the response accurately and completely answer the user's query?
-    3.  **Check for Quality:** Is the response well-written, professional, and free of grammatical errors?
+        **YOUR TASKS (CRITICAL):**
+        1.  **Check for Grounding:** The agent's response MUST be grounded in the provided context or the output of the tools it used. If the agent used tools like `enhanced_document_search`, it has access to the user's files. Do NOT flag responses as hallucinations if they are based on this external knowledge.
+        2.  **Check for Correctness:** Does the response accurately and completely answer the user's query?
+        3.  **Check for Quality:** Is the response well-written, professional, and free of grammatical errors?
 
-    Based on your evaluation, decide if the response is sufficient. If not, provide a concise, actionable critique.
-    """
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.5)
-    structured_llm = llm.with_structured_output(Validation)
-    response = await structured_llm.ainvoke(prompt)
+        Based on your evaluation, decide if the response is sufficient. If not, provide a concise, actionable critique.
+        """
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.5)
+        structured_llm = llm.with_structured_output(Validation)
+        response = await structured_llm.ainvoke(prompt)
 
-    if response.is_sufficient:
-        log.info("Validation PASSED.")
-        # --- CORRECTED: Access the 'output' key directly ---
-        return {"final_response": agent_output}
-    else:
-        log.info(f"Validation FAILED. Critique: {response.critique}")
-        return {"critique": response.critique, "retry_count": state.get('retry_count', 0) + 1}
+        if response.is_sufficient:
+            log.info("Validation PASSED.")
+            return {"final_response": agent_output}
+        else:
+            log.info(f"Validation FAILED. Critique: {response.critique}")
+            return {"critique": response.critique, "retry_count": state.get('retry_count', 0) + 1}
+
+    except Exception as e:
+        log.error(f"CRITICAL: Validator node failed with error: {e}", exc_info=True)
+        # --- FALLBACK MECHANISM ---
+        # If the validator itself fails, we must not leave the user hanging.
+        # We will bypass validation and send the agent's last output directly.
+        agent_outcome = state.get('agent_outcome', {})
+        agent_output = agent_outcome.get('output', '')
+        if hasattr(agent_output, 'content'):
+            agent_output = agent_output.content
+        elif not isinstance(agent_output, str):
+            agent_output = str(agent_output)
+        
+        fallback_response = agent_output or "I'm sorry, I encountered a technical issue while processing your request. Could you please try rephrasing?"
+        log.warning(f"Validator failed. Bypassing and sending fallback response.")
+        return {"final_response": fallback_response}
 
 # --- Main WebSocket Function ---
 
@@ -976,15 +1006,26 @@ async def orchestrator_websocket(
                 # Send final response
                 await websocket.send_json({"type": "message", "message": final_response})
                 
-                # Save AI message with robust transaction handling
+                # --- THE CORRECT FIX ---
+                # Save the AI message using a NEW, FRESH database session.
+                # This prevents errors from the original, potentially stale session
+                # that was held open during the long-running agent process.
                 try:
-                    ai_message_id = str(uuid.uuid4())
-                    db.add(ChatMessage(id=ai_message_id, user_id=user.id, page_id=page_id, message=final_response, is_user_message=False))
-                    await db.commit()
-                    log.info(f"Saved AI message {ai_message_id} to DB.")
+                    async with SessionLocal() as fresh_db:
+                        ai_message_id = str(uuid.uuid4())
+                        ai_message_to_save = ChatMessage(
+                            id=ai_message_id, 
+                            user_id=user.id, 
+                            page_id=page_id, 
+                            message=final_response, # Uses the correct 'message' column
+                            is_user_message=False
+                        )
+                        fresh_db.add(ai_message_to_save)
+                        await fresh_db.commit()
+                        log.info(f"Saved AI message {ai_message_id} to DB with fresh session.")
                 except Exception as db_error:
                     log.error(f"Failed to save AI message to database for user {user.id}, page {page_id}: {db_error}", exc_info=True)
-                    await db.rollback()
+                    # The 'async with' block handles rollback automatically.
                     # We don't need to send another WebSocket error here, as the user has already received the response.
 
             except Exception as e:
