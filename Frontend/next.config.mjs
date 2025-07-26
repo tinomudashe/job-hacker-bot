@@ -51,23 +51,15 @@ const nextConfig = {
             key: "X-Content-Type-Options",
             value: "nosniff",
           },
-        ],
-      },
-      {
-        source: "/:path*(?:js|css|html)",
-        headers: [
           {
             key: "Cache-Control",
-            value: "no-store, max-age=0",
+            value: "public, max-age=0, must-revalidate",
           },
-        ],
-      },
-      {
-        source: "/:path*(?:jpg|jpeg|gif|png|svg|ico|webp|mp4)",
-        headers: [
+          // Safari-specific headers
           {
-            key: "Cache-control",
-            value: "public, max-age=31536000, immutable",
+            key: "X-WebKit-CSP",
+            value:
+              "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https:",
           },
         ],
       },
