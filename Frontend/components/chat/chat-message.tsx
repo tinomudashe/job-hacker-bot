@@ -1567,7 +1567,7 @@ export function ChatMessage({
             )}
             style={
               isEditing && originalWidth
-                ? { width: `${originalWidth}px` }
+                ? { minWidth: `${originalWidth}px` }
                 : undefined
             }
           >
