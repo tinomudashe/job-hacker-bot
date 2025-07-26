@@ -259,7 +259,7 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
     simple_memory = SimpleMemoryManager(db=db, user=user)
     # --- FIX: Re-instantiate the advanced memory managers ---
     enhanced_memory = EnhancedMemoryManager(db=db, user=user)
-    advanced_memory = AdvancedMemoryManager(user=user)
+    advanced_memory = AdvancedMemoryManager(user=user, db=db) # Pass the db session here
     
     try:
         while True:

@@ -83,28 +83,15 @@ You must only extract one memory at a time. Focus on the most important new piec
             return None
 
 class AdvancedMemoryManager:
-    """Advanced memory manager using vector store and knowledge graphs"""
-    
-    def __init__(self, user: User, db: Optional[AsyncSession] = None):
+    """Manages long-term, semantic memory using a vector store."""
+    def __init__(self, user: User, db: AsyncSession): # Accept the db session here
+        """Initializes the AdvancedMemoryManager."""
         self.user = user
-        self.user_id = user.id
-        
-        # Initialize embeddings and vector store
-        self.embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-        self.memory_store = FAISS.from_texts(
-            ["Initial memory store"], 
-            self.embeddings,
-            metadatas=[{"user_id": self.user_id, "type": "system"}]
-        )
-        
-        self.db = db
-        self.vector_store = get_user_vector_store(user.id)
+        self.db = db # Store the db session
+        self.vector_store = get_user_vector_store(user.id, db=db) # Pass the db session here
         self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.1)
-        # 2. Initialize the new, structured extraction chain.
         self.extraction_chain = MemoryExtractionChain(self.llm)
-        
-        logger.info(f"Advanced memory manager initialized for user {self.user_id}")
-    
+
     async def save_memories(self, memories: List[KnowledgeTriple]) -> str:
         """Save structured memories to vector store"""
         try:
