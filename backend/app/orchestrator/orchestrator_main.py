@@ -291,59 +291,70 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
         while True:
             data = await websocket.receive_text()
             message_data = json.loads(data)
-            user_message_content = message_data.get("content")
-            page_id = message_data.get("page_id")
 
-            if not page_id:
-                # Simplified page creation
-                page = Page(user_id=user.id, title=user_message_content[:50])
-                db.add(page)
-                await db.commit()
-                page_id = page.id
+            # This block expects a "type" field to route the message
+            message_type = message_data.get("type", "message") # Default to "message" for robustness
 
-            user_message = ChatMessage(user_id=user.id, page_id=page_id, message=user_message_content, is_user_message=True)
-            
-            # --- FIX: Re-integrate the advanced memory context gathering ---
-            # 1. Get the long-term context from enhanced and advanced memory.
-            context_summary = await _get_unified_context_summary(
-                simple_memory, enhanced_memory, advanced_memory, user_message_content, page_id
-            )
+            if message_type == "message":
+                user_message_content = message_data.get("content")
+                page_id = message_data.get("page_id")
 
-            # 2. Get the short-term, literal chat history.
-            history = await simple_memory.get_conversation_context(page_id)
-            chat_history = [HumanMessage(content=msg["content"]) if msg["role"] == "user" else AIMessage(content=msg["content"]) for msg in history.conversation_history]
-            
-            # 3. Prepend the long-term context to the user's input for the agent.
-            final_input = user_message_content
-            if context_summary:
-                final_input = f"{context_summary}\n\nUSER QUERY:\n{user_message_content}"
+                if not page_id:
+                    # Simplified page creation
+                    page = Page(user_id=user.id, title=user_message_content[:50])
+                    db.add(page)
+                    await db.commit()
+                    page_id = page.id
 
-            initial_state = {
-                "input": final_input, # Use the input with the prepended context
-                "chat_history": chat_history,
-                "critique": ""
-            }
-            
-            final_response = None
-            async for event in graph.astream(initial_state):
-                if END in event:
-                    final_response = event[END].get("final_response", "Sorry, I encountered an error.")
+                user_message = ChatMessage(user_id=user.id, page_id=page_id, message=user_message_content, is_user_message=True)
                 
-                # Simplified streaming for now
-                if "reasoning_events" in event.get(list(event.keys())[0], {}):
-                    await websocket.send_json({"type": "reasoning", "data": event})
+                # --- FIX: Re-integrate the advanced memory context gathering ---
+                # 1. Get the long-term context from enhanced and advanced memory.
+                context_summary = await _get_unified_context_summary(
+                    simple_memory, enhanced_memory, advanced_memory, user_message_content, page_id
+                )
 
-            ai_message = ChatMessage(user_id=user.id, page_id=page_id, message=final_response, is_user_message=False)
+                # 2. Get the short-term, literal chat history.
+                history = await simple_memory.get_conversation_context(page_id)
+                chat_history = [HumanMessage(content=msg["content"]) if msg["role"] == "user" else AIMessage(content=msg["content"]) for msg in history.conversation_history]
+                
+                # 3. Prepend the long-term context to the user's input for the agent.
+                final_input = user_message_content
+                if context_summary:
+                    final_input = f"{context_summary}\n\nUSER QUERY:\n{user_message_content}"
 
-            try:
-                async with async_session_maker() as fresh_db:
-                    fresh_db.add(user_message)
-                    fresh_db.add(ai_message)
-                    await fresh_db.commit()
-            except Exception as e:
-                log.error(f"Atomic save failed: {e}")
+                initial_state = {
+                    "input": final_input, # Use the input with the prepended context
+                    "chat_history": chat_history,
+                    "critique": ""
+                }
+                
+                final_response = None
+                async for event in graph.astream(initial_state):
+                    if END in event:
+                        final_response = event[END].get("final_response", "Sorry, I encountered an error.")
+                    
+                    # Simplified streaming for now
+                    if "reasoning_events" in event.get(list(event.keys())[0], {}):
+                        await websocket.send_json({"type": "reasoning", "data": event})
 
-            await websocket.send_json({"type": "final_response", "content": final_response})
+                ai_message = ChatMessage(user_id=user.id, page_id=page_id, message=final_response, is_user_message=False)
+
+                try:
+                    async with async_session_maker() as fresh_db:
+                        fresh_db.add(user_message)
+                        fresh_db.add(ai_message)
+                        await fresh_db.commit()
+                except Exception as e:
+                    log.error(f"Atomic save failed: {e}")
+
+                await websocket.send_json({"type": "final_response", "content": final_response})
+
+            elif message_type == "switch_page":
+                page_id = message_data.get("page_id")
+                # ... (page switching logic)
+            
+            # ... (other message types)
 
     except WebSocketDisconnect:
         log.info("WebSocket disconnected.")

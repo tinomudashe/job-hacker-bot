@@ -404,6 +404,7 @@ export const useWebSocket = (currentPageId?: string) => {
         return;
       }
       const messageData = {
+        type: "message",
         content: message.trim(),
         page_id: currentPageIdRef.current,
       };
