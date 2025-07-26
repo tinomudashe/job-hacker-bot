@@ -52,50 +52,55 @@ async def get_subscription_status(
     db_user: User = Depends(get_current_active_user)
 ):
     """
-    Retrieves the current user's subscription status.
+    Retrieves the current user's subscription status using Stripe as the single source of truth.
     """
-    subscription = await get_subscription(db, str(db_user.id))
+    logger.info(f"Fetching subscription status for user: {db_user.id}")
+    subscription_db = await get_subscription(db, str(db_user.id))
 
-    if not subscription or not subscription.stripe_subscription_id:
-        return {"plan": "free", "status": "inactive"}
+    if not subscription_db or not subscription_db.stripe_subscription_id:
+        logger.info(f"No active subscription found in DB for user {db_user.id}.")
+        return {"plan": "free", "status": "inactive", "is_active": False}
 
     try:
-        stripe_sub = stripe.Subscription.retrieve(subscription.stripe_subscription_id)
-        
-        period_end_timestamp = None
-        # First, check the subscription's live status from Stripe.
-        # If it's a trial, we must use the trial_end date.
-        if getattr(stripe_sub, 'status', None) == 'trialing':
-            # Safely get the trial_end timestamp.
-            period_end_timestamp = getattr(stripe_sub, 'trial_end', None)
+        logger.info(f"Retrieving Stripe subscription {subscription_db.stripe_subscription_id} for user {db_user.id}")
+        stripe_sub = stripe.Subscription.retrieve(subscription_db.stripe_subscription_id)
+        status = stripe_sub.status
+        plan = "free" # Default plan
+        is_active = status in ['trialing', 'active']
+
+        # Determine the plan based on the price ID from Stripe
+        price_id = stripe_sub.items.data[0].price.id
+        if price_id == os.getenv("STRIPE_PRICE_ID"):
+             plan = "pro"
+
+        # Override plan to 'trial' if the status is 'trialing'
+        if status == 'trialing':
+            plan = 'trial'
+
+        # Determine period_end based on status
+        if status == 'trialing':
+            period_end_timestamp = stripe_sub.trial_end
         else:
-            # For all other statuses (like 'active'), safely get the renewal date.
-            # This use of getattr() prevents the KeyError crash if the key is missing.
-            period_end_timestamp = getattr(stripe_sub, 'current_period_end', None)
+            period_end_timestamp = stripe_sub.current_period_end
 
         period_end = datetime.utcfromtimestamp(period_end_timestamp) if period_end_timestamp else None
-
-        # Correctly identify and label the subscription plan.
-        display_plan = "free"  # Default to free
-        if subscription.plan:
-            plan_lower = subscription.plan.lower()
-            if "pro-trial" in plan_lower:
-                display_plan = "trial"
-            elif "pro" in plan_lower:
-                display_plan = "pro"
+        
+        logger.info(f"Subscription status for user {db_user.id}: plan={plan}, status={status}, is_active={is_active}")
 
         return {
-            "plan": display_plan,
-            "status": stripe_sub.status,
+            "plan": plan,
+            "status": status,
+            "is_active": is_active,
             "period_end": period_end.isoformat() if period_end else None
         }
+        
     except stripe.error.StripeError as e:
-        logger.error(f"Stripe error fetching subscription for user {db_user.id}: {e}")
-        # Fallback to DB status, but log the error
-        return {"plan": subscription.plan, "status": subscription.status}
+        logger.error(f"Stripe API error for user {db_user.id}: {e}", exc_info=True)
+        # Fallback to DB state only if Stripe fails, but mark as inactive
+        return {"plan": subscription_db.plan, "status": "error", "is_active": False}
     except Exception as e:
-        logger.error(f"An unexpected error occurred in get_subscription_status for user {db_user.id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to retrieve subscription details.")
+        logger.error(f"Unexpected error fetching subscription for user {db_user.id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred.")
 
 
 @router.post("/create-portal-session")
