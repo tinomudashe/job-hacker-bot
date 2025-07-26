@@ -56,6 +56,9 @@ def get_master_email_template(context: Dict[str, Any]) -> str:
         logger.error("CRITICAL: APP_URL environment variable is not set. Email links will be broken.")
         production_url = "https://jobhackerbot.com" # Hardcoded fallback
 
+    # --- FIX: Add the logo URL ---
+    logo_url = f"{production_url}/jobhackerbot-logo.png"
+
     current_year = datetime.now().year
     name = context.get("name", "User")
     title = context.get("title", "A message from Job Hacker Bot")
@@ -66,6 +69,7 @@ def get_master_email_template(context: Dict[str, Any]) -> str:
 
     cta_button_html = ""
     if cta_text and cta_link_path:
+        # This correctly uses the APP_URL environment variable via production_url
         full_cta_link = f"{production_url}{cta_link_path}"
         cta_button_html = f"""
         <tr>
@@ -80,12 +84,6 @@ def get_master_email_template(context: Dict[str, Any]) -> str:
             </td>
         </tr>
         """
-
-    logo_html = """
-    <div style="width: 52px; height: 52px; border-radius: 14px; color: white; font-family: Arial, sans-serif; font-weight: 900; font-size: 28px; line-height: 52px; text-align: center; background-color: #2563eb; background: linear-gradient(135deg, #3b82f6 0%, #4338ca 100%);">
-        <span style="letter-spacing: -0.09em;">j<span style="display: inline-block; font-size: 85%; vertical-align: 0.12em; margin-left: -0.1em;">H</span></span>
-    </div>
-    """
 
     return f"""
     <!DOCTYPE html>
@@ -114,7 +112,7 @@ def get_master_email_template(context: Dict[str, Any]) -> str:
                                         <td style="padding-bottom: 25px;">
                                             <table width="100%" border="0" cellpadding="0" cellspacing="0">
                                                 <tr>
-                                                    <td width="52" valign="middle">{logo_html}</td>
+                                                    <td width="52" valign="middle">{logo_url}</td>
                                                     <td style="padding-left: 15px;" valign="middle">
                                                         <h1 style="margin: 0; font-size: 22px; color: #1a1a1a; font-weight: bold;">Job Hacker Bot</h1>
                                                         <p style="margin: 0; font-size: 15px; color: #666666;">Your career co-pilot</p>
@@ -125,25 +123,44 @@ def get_master_email_template(context: Dict[str, Any]) -> str:
                                     </tr>
                                     <!-- Content -->
                                     <tr>
-                                        <td>
-                                            <h2 style="font-size: 20px; color: #1a1a1a; margin-top: 10px; margin-bottom: 20px;">Hi {name},</h2>
-                                            <div style="font-size: 16px; line-height: 1.6; color: #4d5055;">{main_content}</div>
-                                            <table width="100%" border="0" cellspacing="0" cellpadding="0">{cta_button_html}</table>
-                                            <p style="font-size: 16px; line-height: 1.6; color: #4d5055; margin: 0;">Thank you,<br>The Job Hacker Bot Team</p>
+                                        <td class="wrapper" style="font-family: sans-serif; font-size: 14px; vertical-align: top; box-sizing: border-box; padding: 20px;" valign="top">
+                                            <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="border-collapse: separate; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 100%;" width="100%">
+                                                <tr>
+                                                    <td style="font-family: sans-serif; font-size: 14px; vertical-align: top;" valign="top">
+                                                        <!-- START LOGO (REPLACES TITLE) -->
+                                                        <div style="text-align: center; margin-bottom: 20px;">
+                                                            <a href="{production_url}" target="_blank">
+                                                                <img src="{logo_url}" alt="Job Hacker Bot Logo" height="40" style="border: none; -ms-interpolation-mode: bicubic; max-width: 100%; height: 40px;">
+                                                            </a>
+                                                        </div>
+                                                        <!-- END LOGO -->
+
+                                                        <p style="font-family: sans-serif; font-size: 16px; font-weight: normal; margin: 0; margin-bottom: 15px; font-weight: bold;">Hi {name},</p>
+                                                        
+                                                        <h1 style="font-family: sans-serif; font-size: 24px; font-weight: bold; margin: 0; margin-bottom: 15px;">{title}</h1>
+                                                        
+                                                        <!-- This is where the main content of the email goes -->
+                                                        {main_content}
+                                                        
+                                                        <table width="100%" border="0" cellspacing="0" cellpadding="0">{cta_button_html}</table>
+                                                        <p style="font-size: 16px; line-height: 1.6; color: #4d5055; margin: 0;">Thank you,<br>The Job Hacker Bot Team</p>
+                                                    </td>
+                                                </tr>
+                                            </table>
+                                        </td>
+                                    </tr>
+                                    <!-- Footer -->
+                                    <tr>
+                                        <td style="padding: 30px 20px; text-align: center; font-size: 12px; color: #a8a8a8;">
+                                            <p style="margin: 0 0 5px 0;">&copy; {current_year} Job Hacker Bot. All rights reserved.</p>
+                                            <p style="margin: 0;">
+                                                <a href="mailto:bot@jobhackerbot.com" target="_blank" style="color: #666a73; text-decoration: underline;">Contact Support</a> &bull; 
+                                                <a href="{production_url}/settings" target="_blank" style="color: #666a73; text-decoration: underline;">Preferences</a> &bull; 
+                                                <a href="#" target="_blank" style="color: #666a73; text-decoration: underline;">Unsubscribe</a>
+                                            </p>
                                         </td>
                                     </tr>
                                 </table>
-                            </td>
-                        </tr>
-                        <!-- Footer -->
-                        <tr>
-                            <td style="padding: 30px 20px; text-align: center; font-size: 12px; color: #a8a8a8;">
-                                <p style="margin: 0 0 5px 0;">&copy; {current_year} Job Hacker Bot. All rights reserved.</p>
-                                <p style="margin: 0;">
-                                    <a href="mailto:bot@jobhackerbot.com" target="_blank" style="color: #666a73; text-decoration: underline;">Contact Support</a> &bull; 
-                                    <a href="{production_url}/settings" target="_blank" style="color: #666a73; text-decoration: underline;">Preferences</a> &bull; 
-                                    <a href="#" target="_blank" style="color: #666a73; text-decoration: underline;">Unsubscribe</a>
-                                </p>
                             </td>
                         </tr>
                     </table>
