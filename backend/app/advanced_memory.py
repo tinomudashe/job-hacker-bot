@@ -88,7 +88,7 @@ class AdvancedMemoryManager:
         """Initializes the AdvancedMemoryManager."""
         self.user = user
         self.db = db # Store the db session
-        self.vector_store = get_user_vector_store(user.id, db=db) # Pass the db session here
+        self.memory_store = get_user_vector_store(user.id, db=db) # Pass the db session here
         self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.1)
         self.extraction_chain = MemoryExtractionChain(self.llm)
 

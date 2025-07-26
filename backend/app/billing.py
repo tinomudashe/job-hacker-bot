@@ -65,15 +65,17 @@ async def get_subscription_status(
         logger.info(f"Retrieving Stripe subscription {subscription_db.stripe_subscription_id} for user {db_user.id}")
         stripe_sub = stripe.Subscription.retrieve(subscription_db.stripe_subscription_id)
         status = stripe_sub.status
-        plan = "free" # Default plan
+        plan = "free" # Default to free
         is_active = status in ['trialing', 'active']
 
-        # Determine the plan based on the price ID from Stripe
-        price_id = stripe_sub.items.data[0].price.id
-        if price_id == os.getenv("STRIPE_PRICE_ID"):
-             plan = "pro"
+        # Call items() as a method, which is what the traceback indicates.
+        items_list = stripe_sub.items()
+        if items_list and items_list.data:
+            price_id = items_list.data[0].price.id
+            if price_id == os.getenv("STRIPE_PRICE_ID"):
+                plan = "pro"
 
-        # Override plan to 'trial' if the status is 'trialing'
+        # The status is the most reliable source for trial information
         if status == 'trialing':
             plan = 'trial'
 
