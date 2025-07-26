@@ -38,6 +38,7 @@ interface WebSocketMessage {
     progress?: string;
   };
   timestamp?: string;
+  page_id?: string;
 }
 
 export const useWebSocket = (
