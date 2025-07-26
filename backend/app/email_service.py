@@ -112,7 +112,9 @@ def get_master_email_template(context: Dict[str, Any]) -> str:
                                         <td style="padding-bottom: 25px;">
                                             <table width="100%" border="0" cellpadding="0" cellspacing="0">
                                                 <tr>
-                                                    <td width="52" valign="middle">{logo_url}</td>
+                                                    <td width="52" valign="middle">
+                                                        <img src="{logo_url}" alt="Job Hacker Bot Logo" height="40" style="border: none; -ms-interpolation-mode: bicubic; max-width: 100%; height: 40px;">
+                                                    </td>
                                                     <td style="padding-left: 15px;" valign="middle">
                                                         <h1 style="margin: 0; font-size: 22px; color: #1a1a1a; font-weight: bold;">Job Hacker Bot</h1>
                                                         <p style="margin: 0; font-size: 15px; color: #666666;">Your career co-pilot</p>
@@ -127,14 +129,6 @@ def get_master_email_template(context: Dict[str, Any]) -> str:
                                             <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="border-collapse: separate; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 100%;" width="100%">
                                                 <tr>
                                                     <td style="font-family: sans-serif; font-size: 14px; vertical-align: top;" valign="top">
-                                                        <!-- START LOGO (REPLACES TITLE) -->
-                                                        <div style="text-align: center; margin-bottom: 20px;">
-                                                            <a href="{production_url}" target="_blank">
-                                                                <img src="{logo_url}" alt="Job Hacker Bot Logo" height="40" style="border: none; -ms-interpolation-mode: bicubic; max-width: 100%; height: 40px;">
-                                                            </a>
-                                                        </div>
-                                                        <!-- END LOGO -->
-
                                                         <p style="font-family: sans-serif; font-size: 16px; font-weight: normal; margin: 0; margin-bottom: 15px; font-weight: bold;">Hi {name},</p>
                                                         
                                                         <h1 style="font-family: sans-serif; font-size: 24px; font-weight: bold; margin: 0; margin-bottom: 15px;">{title}</h1>

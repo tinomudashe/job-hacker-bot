@@ -75,8 +75,14 @@ async def get_subscription_status(
 
         period_end = datetime.utcfromtimestamp(period_end_timestamp) if period_end_timestamp else None
 
-        # Standardize the plan name to "Pro" for consistency in the UI.
-        display_plan = "Pro" if subscription.plan and "pro" in subscription.plan.lower() else "Free"
+        # Correctly identify and label the subscription plan.
+        display_plan = "free"  # Default to free
+        if subscription.plan:
+            plan_lower = subscription.plan.lower()
+            if "pro-trial" in plan_lower:
+                display_plan = "trial"
+            elif "pro" in plan_lower:
+                display_plan = "pro"
 
         return {
             "plan": display_plan,
