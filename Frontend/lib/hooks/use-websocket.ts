@@ -1,5 +1,6 @@
 "use client";
 
+import { useSubscriptionStore } from "@/lib/stores/useSubscriptionStore"; // Import the new store
 import { toast } from "@/lib/toast";
 import { useAuth } from "@clerk/nextjs";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -50,6 +51,7 @@ export const useWebSocket = (currentPageId?: string) => {
   const socketRef = useRef<WebSocket | null>(null);
   const isConnecting = useRef(false);
   const currentPageIdRef = useRef(currentPageId);
+  const { triggerRefetch } = useSubscriptionStore(); // Get the trigger function
 
   // Update the ref when currentPageId changes
   useEffect(() => {
@@ -259,6 +261,13 @@ export const useWebSocket = (currentPageId?: string) => {
             timestamp: parsedData.timestamp || new Date().toISOString(),
           },
         ]);
+      } else if (parsedData.type === "subscription_updated") {
+        console.log(
+          "Subscription status received, triggering refetch:",
+          parsedData
+        );
+        triggerRefetch(); // Trigger a refetch via the store
+        toast.success("Your subscription has been updated!");
       } else if (parsedData.type === "subscription_status") {
         console.log("Subscription status received:", parsedData);
         // This event now signals the end, but the final message will clear the steps.
@@ -317,7 +326,7 @@ export const useWebSocket = (currentPageId?: string) => {
       isConnecting.current = false;
       console.error("WebSocket connection error:", error);
     };
-  }, [getToken, currentPageIdRef, isLoaded, isSignedIn]);
+  }, [getToken, currentPageIdRef, isLoaded, isSignedIn, triggerRefetch]);
 
   // Effect to handle page changes
   useEffect(() => {

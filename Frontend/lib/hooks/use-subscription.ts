@@ -1,3 +1,4 @@
+import { useSubscriptionStore } from "@/lib/stores/useSubscriptionStore"; // Import the new store
 import { useAuth } from "@clerk/nextjs";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -14,6 +15,7 @@ export function useSubscription() {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [loading, setLoading] = useState(true);
   const [portalLoading, setPortalLoading] = useState(false);
+  const { refetchFlag } = useSubscriptionStore(); // Get the refetch flag from the store
 
   const fetchSubscription = useCallback(async () => {
     setLoading(true);
@@ -37,7 +39,7 @@ export function useSubscription() {
 
   useEffect(() => {
     fetchSubscription();
-  }, [fetchSubscription]);
+  }, [fetchSubscription, getToken, refetchFlag]); // Add refetchFlag to dependency array
 
   // --- DEFINITIVE FIX: This function will be passed to the WebSocket hook ---
   // It allows the WebSocket to directly update this central state.
