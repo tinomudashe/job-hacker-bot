@@ -68,10 +68,10 @@ async def get_subscription_status(
         plan = "free" # Default to free
         is_active = status in ['trialing', 'active']
 
-        # Call items() as a method, which is what the traceback indicates.
-        items_list = stripe_sub.items()
-        if items_list and items_list.data:
-            price_id = items_list.data[0].price.id
+        # Definitive Fix: Access 'items' like a dictionary key, which is what the traceback indicates.
+        items_list_object = stripe_sub.get('items')
+        if items_list_object and items_list_object.data:
+            price_id = items_list_object.data[0].price.id
             if price_id == os.getenv("STRIPE_PRICE_ID"):
                 plan = "pro"
 
@@ -81,9 +81,9 @@ async def get_subscription_status(
 
         # Determine period_end based on status
         if status == 'trialing':
-            period_end_timestamp = stripe_sub.trial_end
+            period_end_timestamp = stripe_sub.get('trial_end')
         else:
-            period_end_timestamp = stripe_sub.current_period_end
+            period_end_timestamp = stripe_sub.get('current_period_end')
 
         period_end = datetime.utcfromtimestamp(period_end_timestamp) if period_end_timestamp else None
         
