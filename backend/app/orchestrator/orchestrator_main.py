@@ -159,7 +159,7 @@ def create_agent_node(tools, system_prompt):
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}\n{critique}"),
         ])
-        llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.2).bind_tools(tools)
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.2).bind_tools(tools)
         response = await (prompt | llm).ainvoke(state)
         
         # --- FIX: Restore Detailed Reasoning Events ---
