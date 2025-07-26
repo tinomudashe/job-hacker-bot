@@ -245,6 +245,35 @@ export const useWebSocket = (currentPageId?: string) => {
         console.error(`❌ [WebSocket Error]: ${parsedData.message}`);
         toast.error(parsedData.message || "Unknown error occurred");
         setIsLoading(false);
+      } else if (parsedData.type === "final_response") {
+        // This event now signals the end, but the final message will clear the steps.
+        // We can optionally add the final step for a brief moment.
+        const reasoningData = parsedData.data;
+        if (!reasoningData) return;
+
+        setReasoningSteps((prev) => [
+          ...prev,
+          {
+            type: "reasoning_complete",
+            content: reasoningData.content,
+            timestamp: parsedData.timestamp || new Date().toISOString(),
+          },
+        ]);
+      } else if (parsedData.type === "subscription_status") {
+        console.log("Subscription status received:", parsedData);
+        // This event now signals the end, but the final message will clear the steps.
+        // We can optionally add the final step for a brief moment.
+        const reasoningData = parsedData.data;
+        if (!reasoningData) return;
+
+        setReasoningSteps((prev) => [
+          ...prev,
+          {
+            type: "reasoning_complete",
+            content: reasoningData.content,
+            timestamp: parsedData.timestamp || new Date().toISOString(),
+          },
+        ]);
       } else {
         console.warn(
           `⁉️ [WebSocket] Unknown message type: ${parsedData.type}`,

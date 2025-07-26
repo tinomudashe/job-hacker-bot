@@ -18,9 +18,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from langgraph.graph import StateGraph, END
 from langchain_core.tools import Tool
+from sqlalchemy import select
 
 from app.db import get_db, async_session_maker
-from app.models_db import User, ChatMessage, Page
+from app.models_db import User, ChatMessage, Page, Subscription # Import Subscription model
 from app.dependencies import get_current_active_user_ws
 from app.simple_memory import SimpleMemoryManager
 from app.enhanced_memory import EnhancedMemoryManager
@@ -254,6 +255,31 @@ def create_master_agent_graph(db: AsyncSession, user: User):
 @router.websocket("/ws/orchestrator")
 async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_current_active_user_ws), db: AsyncSession = Depends(get_db)):
     await websocket.accept()
+    log.info(f"WebSocket connected for user: {user.id}")
+
+    # --- DEFINITIVE FIX: Check subscription status on connect and send to client ---
+    try:
+        # Use the exact same logic as the UsageManager for consistency.
+        sub_result = await db.execute(select(Subscription).where(Subscription.user_id == user.id))
+        subscription = sub_result.scalar_one_or_none()
+        
+        is_active = False
+        plan = "free"
+        if subscription and subscription.plan == 'premium' and subscription.status == 'active':
+            is_active = True
+            plan = "premium"
+
+        await websocket.send_json({
+            "type": "subscription_status",
+            "isActive": is_active,
+            "plan": plan
+        })
+        log.info(f"Sent initial subscription status to user {user.id}: plan={plan}, isActive={is_active}")
+    except Exception as e:
+        log.error(f"Failed to send initial subscription status for user {user.id}: {e}")
+        # Send a default inactive status if the check fails for any reason.
+        await websocket.send_json({"type": "subscription_status", "isActive": False, "plan": "free"})
+
     graph = create_master_agent_graph(db, user)
     
     simple_memory = SimpleMemoryManager(db=db, user=user)

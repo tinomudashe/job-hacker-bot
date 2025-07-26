@@ -1,43 +1,57 @@
 import { useAuth } from "@clerk/nextjs";
-import * as React from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
-export interface SubscriptionState {
+interface Subscription {
   plan: string;
-  status: string;
-  period_end?: string;
+  is_active: boolean;
 }
 
-export const useSubscription = () => {
+export function useSubscription() {
   const { getToken } = useAuth();
-  const [subscription, setSubscription] =
-    React.useState<SubscriptionState | null>(null);
-  const [loading, setLoading] = React.useState(true);
-  const [portalLoading, setPortalLoading] = React.useState(false);
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [portalLoading, setPortalLoading] = useState(false);
 
-  const fetchSubscription = React.useCallback(async () => {
+  const fetchSubscription = useCallback(async () => {
     setLoading(true);
     try {
       const token = await getToken();
       const response = await fetch("/api/billing/subscription", {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!response.ok) throw new Error("Could not fetch subscription status");
+      if (!response.ok) {
+        throw new Error("Failed to fetch subscription status");
+      }
       const data = await response.json();
       setSubscription(data);
     } catch (error) {
-      console.error("Failed to fetch subscription", error);
-      setSubscription(null);
+      console.error("Failed to fetch subscription:", error);
+      setSubscription({ plan: "free", is_active: false });
     } finally {
       setLoading(false);
     }
   }, [getToken]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     fetchSubscription();
   }, [fetchSubscription]);
 
-  const createCheckoutSession = async () => {
+  // --- DEFINITIVE FIX: This function will be passed to the WebSocket hook ---
+  // It allows the WebSocket to directly update this central state.
+  const updateSubscription = useCallback((isActive: boolean, plan: string) => {
+    console.log("Updating subscription state from WebSocket:", {
+      isActive,
+      plan,
+    });
+    setSubscription({ is_active: isActive, plan: plan });
+  }, []);
+
+  const createCheckoutSession = useCallback(async () => {
+    if (subscription?.plan === "premium" && subscription?.is_active) {
+      toast.info("You are already subscribed to the premium plan.");
+      return;
+    }
     setLoading(true);
     try {
       const token = await getToken();
@@ -60,7 +74,7 @@ export const useSubscription = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [getToken, subscription]);
 
   const createPortalSession = async () => {
     setPortalLoading(true);
@@ -87,9 +101,9 @@ export const useSubscription = () => {
   return {
     subscription,
     loading,
-    fetchSubscription,
+    portalLoading,
     createCheckoutSession,
     createPortalSession,
-    portalLoading,
+    updateSubscription, // Expose the new update function
   };
-};
+}
