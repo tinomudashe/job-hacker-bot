@@ -105,5 +105,6 @@ export function useSubscription() {
     createCheckoutSession,
     createPortalSession,
     updateSubscription, // Expose the new update function
+    fetchSubscription, // --- FIX: Expose the fetch function ---
   };
 }
