@@ -5,6 +5,8 @@ import { toast } from "sonner";
 interface Subscription {
   plan: string;
   is_active: boolean;
+  status: string;
+  period_end?: string;
 }
 
 export function useSubscription() {
@@ -27,7 +29,7 @@ export function useSubscription() {
       setSubscription(data);
     } catch (error) {
       console.error("Failed to fetch subscription:", error);
-      setSubscription({ plan: "free", is_active: false });
+      setSubscription({ plan: "free", is_active: false, status: "inactive" });
     } finally {
       setLoading(false);
     }
@@ -44,7 +46,15 @@ export function useSubscription() {
       isActive,
       plan,
     });
-    setSubscription({ is_active: isActive, plan: plan });
+    setSubscription({
+      is_active: isActive,
+      plan: plan,
+      status: isActive
+        ? plan === "trial"
+          ? "trialing"
+          : "active"
+        : "inactive",
+    });
   }, []);
 
   const createCheckoutSession = useCallback(async () => {

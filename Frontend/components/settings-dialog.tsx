@@ -38,15 +38,6 @@ import * as React from "react";
 import { toast } from "sonner";
 
 // Types
-interface Document {
-  id: string;
-  name: string;
-  type: string;
-  size: string;
-  uploadDate: string;
-  url?: string;
-}
-
 interface UserProfile {
   first_name: string;
   last_name: string;
@@ -72,20 +63,6 @@ interface UserPreferences {
   dataCollection: boolean;
 }
 
-const formatUTCDate = (dateString: string | null | undefined): string => {
-  if (!dateString) return "";
-  const date = new Date(dateString);
-  const userTimezoneOffset = date.getTimezoneOffset() * 60000;
-  const dateInUTC = new Date(date.getTime() + userTimezoneOffset);
-  return format(dateInUTC, "MMMM d, yyyy");
-};
-
-interface SubscriptionState {
-  plan: string;
-  status: string;
-  period_end?: string;
-}
-
 interface SettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -93,99 +70,6 @@ interface SettingsDialogProps {
 }
 
 // Custom hooks for API calls
-const useDocuments = () => {
-  const [documents, setDocuments] = React.useState<Document[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
-  const { getToken } = useAuth();
-
-  const fetchDocuments = React.useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const token = await getToken();
-
-      const response = await fetch("/api/documents", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      });
-
-      // Handle specific HTTP status codes
-      if (response.status === 401 || response.status === 403) {
-        console.log("Documents endpoint not available or not authorized");
-        setDocuments([]);
-        setError("Document management is not available yet");
-        return;
-      }
-
-      if (response.status === 404) {
-        console.log("Documents endpoint not found");
-        setDocuments([]);
-        setError("Document management feature is coming soon");
-        return;
-      }
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch documents: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      setDocuments(data.documents || []);
-    } catch (err) {
-      // Handle network errors or other fetch failures
-      if (err instanceof TypeError && err.message.includes("fetch")) {
-        console.log("Documents API endpoint not available");
-        setDocuments([]);
-        setError("Document management feature is coming soon");
-        return;
-      }
-
-      const errorMessage =
-        err instanceof Error ? err.message : "Failed to load documents";
-      setError(errorMessage);
-      console.error("Error fetching documents:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [getToken]);
-
-  const deleteDocument = React.useCallback(
-    async (documentId: string) => {
-      try {
-        const token = await getToken();
-
-        const response = await fetch(`/api/documents/${documentId}`, {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to delete document: ${response.statusText}`);
-        }
-
-        setDocuments((prev) => prev.filter((doc) => doc.id !== documentId));
-        toast.success("Document deleted successfully");
-      } catch (err) {
-        const errorMessage =
-          err instanceof Error ? err.message : "Failed to delete document";
-        toast.error(errorMessage);
-        throw err;
-      }
-    },
-    [getToken]
-  );
-
-  React.useEffect(() => {
-    fetchDocuments();
-  }, [fetchDocuments]);
-
-  return { documents, loading, error, deleteDocument, refetch: fetchDocuments };
-};
-
 const useUserPreferences = () => {
   const [preferences, setPreferences] = React.useState<UserPreferences>({
     emailNotifications: true,
@@ -291,12 +175,6 @@ export function SettingsDialog({
 
   // Custom hooks
   const {
-    documents,
-    loading: documentsLoading,
-    error: documentsError,
-    deleteDocument,
-  } = useDocuments();
-  const {
     preferences,
     updatePreferences,
     loading: preferencesLoading,
@@ -329,6 +207,7 @@ export function SettingsDialog({
           const profileData = await profileResponse.json();
           setProfileData(profileData);
         } catch (error) {
+          console.error("Could not load profile data:", error);
           toast.error("Could not load your profile data.");
           if (user) {
             setProfileData({
@@ -378,20 +257,6 @@ export function SettingsDialog({
       toast.error(errorMessage);
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const handleDeleteDocument = async (documentId: string) => {
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this document? This action cannot be undone."
-    );
-
-    if (!confirmed) return;
-
-    try {
-      await deleteDocument(documentId);
-    } catch (error) {
-      // Error handling is done in the hook
     }
   };
 
@@ -912,13 +777,10 @@ export function SettingsDialog({
                       </div>
                     ) : (
                       (() => {
-                        const activeStatuses = ["active", "trialing"];
                         const failedStatuses = ["past_due", "unpaid"];
 
-                        if (
-                          subscription &&
-                          activeStatuses.includes(subscription.status)
-                        ) {
+                        if (subscription?.is_active) {
+                          const isPro = subscription.plan === "pro";
                           return (
                             <Card className="!bg-white !border !border-gray-200 dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 dark:!border-white/8 rounded-lg sm:rounded-xl p-4 sm:p-6 shadow-lg">
                               <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
@@ -929,10 +791,10 @@ export function SettingsDialog({
                                 <div className="flex justify-between items-center">
                                   <div>
                                     <h3 className="font-semibold text-base">
-                                      Pro Plan
+                                      {isPro ? "Pro Plan" : "Trial Plan"}
                                     </h3>
                                     <p className="text-sm text-muted-foreground">
-                                      Renews on{" "}
+                                      {isPro ? "Renews on " : "Trial ends on "}
                                       {subscription.period_end
                                         ? format(
                                             new Date(subscription.period_end),
@@ -941,36 +803,49 @@ export function SettingsDialog({
                                         : "N/A"}
                                     </p>
                                   </div>
-                                  <Badge
-                                    variant={
-                                      subscription.status === "trialing"
-                                        ? "secondary"
-                                        : "default"
-                                    }
-                                  >
-                                    {subscription.status
-                                      .charAt(0)
-                                      .toUpperCase() +
-                                      subscription.status.slice(1)}
+                                  <Badge variant={isPro ? "pro" : "trial"}>
+                                    Active
                                   </Badge>
                                 </div>
                               </div>
-                              <Button
-                                className="w-full"
-                                onClick={createPortalSession}
-                                disabled={portalLoading}
-                              >
-                                {portalLoading ? (
-                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                ) : (
-                                  <CreditCard className="mr-2 h-4 w-4" />
-                                )}
-                                Manage Billing & Subscription
-                              </Button>
-                              <p className="text-xs text-muted-foreground mt-2 text-center">
-                                You will be redirected to Stripe to manage your
-                                subscription.
-                              </p>
+
+                              {isPro ? (
+                                <>
+                                  <Button
+                                    className="w-full"
+                                    onClick={createPortalSession}
+                                    disabled={portalLoading}
+                                  >
+                                    {portalLoading ? (
+                                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <CreditCard className="mr-2 h-4 w-4" />
+                                    )}
+                                    Manage Billing & Subscription
+                                  </Button>
+                                  <p className="text-xs text-muted-foreground mt-2 text-center">
+                                    You will be redirected to Stripe to manage
+                                    your subscription.
+                                  </p>
+                                </>
+                              ) : (
+                                <>
+                                  <Button
+                                    className="w-full"
+                                    onClick={() => createCheckoutSession()}
+                                    disabled={subscriptionLoading}
+                                  >
+                                    {subscriptionLoading ? (
+                                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    ) : null}
+                                    Upgrade to Pro
+                                  </Button>
+                                  <p className="text-xs text-muted-foreground mt-2 text-center">
+                                    Your trial is active. Upgrade now to keep
+                                    your premium features.
+                                  </p>
+                                </>
+                              )}
                             </Card>
                           );
                         } else if (

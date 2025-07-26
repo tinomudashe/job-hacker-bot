@@ -82,12 +82,6 @@ export const ChatContainer = ({
     }
   }, [messages, isHistoryLoading]);
 
-  const handleSelectJob = (job: any) => {
-    onSendMessage(
-      `I'm interested in the ${job.title} position at ${job.company}.`
-    );
-  };
-
   return (
     <div
       className={cn(

@@ -2,13 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { useSubscription } from "@/lib/hooks/use-subscription";
-import {
-  SignedIn,
-  SignedOut,
-  SignInButton,
-  useAuth,
-  UserButton,
-} from "@clerk/nextjs";
+import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
 import { Menu, MessageSquare, Plus, Settings, X } from "lucide-react";
 import { usePathname } from "next/navigation";
 import * as React from "react";
@@ -35,17 +29,11 @@ export function Header({
   onSelectPage,
   isLoginPage = false,
 }: HeaderProps) {
-  const { getToken } = useAuth();
   const [showPagesDialog, setShowPagesDialog] = React.useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = React.useState(false);
   const [showMobileMenu, setShowMobileMenu] = React.useState(false);
   const [isMounted, setIsMounted] = React.useState(false);
   const { subscription } = useSubscription();
-  const [settingsOpen, setSettingsOpen] = React.useState(false);
-  const [confirmationOpen, setConfirmationOpen] = React.useState(false);
-  const [confirmationAction, setConfirmationAction] = React.useState<
-    () => void
-  >(() => {});
   const pathname = usePathname();
   const [showPricingDialog, setShowPricingDialog] = React.useState(false);
 
@@ -65,30 +53,6 @@ export function Header({
       window.history.replaceState(null, "", window.location.pathname);
     }
   }, [setShowSettingsDialog]);
-
-  const handleClearChat = async () => {
-    try {
-      const token = await getToken();
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/clear-chat`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-      if (!response.ok) {
-        throw new Error("Failed to clear chat");
-      }
-      toast.success("Chat history cleared!");
-      onClearChat?.();
-    } catch (error) {
-      console.error("Error clearing chat:", error);
-      toast.error("Failed to clear chat.");
-    }
-  };
 
   return (
     <>
@@ -136,7 +100,7 @@ export function Header({
                   </Button>
                   <SignedIn>
                     {subscription && (
-                      <SubscriptionBadge status={subscription.status} />
+                      <SubscriptionBadge subscription={subscription} />
                     )}
                   </SignedIn>
                   <div className="h-6 w-px bg-border/50 mx-1" />
@@ -177,7 +141,7 @@ export function Header({
             <div className="flex md:hidden items-center space-x-1.5 sm:space-x-2">
               <SignedIn>
                 {subscription && (
-                  <SubscriptionBadge status={subscription.status} />
+                  <SubscriptionBadge subscription={subscription} />
                 )}
                 <UserButton />
               </SignedIn>

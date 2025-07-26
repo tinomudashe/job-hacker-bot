@@ -1,28 +1,38 @@
 import { Badge } from "@/components/ui/badge";
-import { Crown, Star } from "lucide-react";
 
-interface SubscriptionBadgeProps {
-  status: "trialing" | "active" | string;
+interface Subscription {
+  plan: string;
+  is_active: boolean;
 }
 
-export const SubscriptionBadge = ({ status }: SubscriptionBadgeProps) => {
-  if (status !== "trialing" && status !== "active") {
+interface SubscriptionBadgeProps {
+  subscription: Subscription | null;
+}
+
+export function SubscriptionBadge({ subscription }: SubscriptionBadgeProps) {
+  if (!subscription) {
     return null;
   }
 
-  const isTrial = status === "trialing";
+  if (subscription.plan === "pro" && subscription.is_active) {
+    return (
+      <Badge variant="pro" className="ml-2">
+        Pro
+      </Badge>
+    );
+  }
+
+  if (subscription.plan === "trial" && subscription.is_active) {
+    return (
+      <Badge variant="trial" className="ml-2">
+        Trial
+      </Badge>
+    );
+  }
 
   return (
-    <Badge
-      variant="outline"
-      className="py-0.5 px-1.5 border-blue-400/30 bg-background/60 text-blue-400 backdrop-blur-xl backdrop-saturate-150 text-[10px] font-bold"
-    >
-      {isTrial ? (
-        <Star className="h-2.5 w-2.5 mr-1" />
-      ) : (
-        <Crown className="h-2.5 w-2.5 mr-1" />
-      )}
-      {isTrial ? "TRIAL" : "PRO"}
+    <Badge variant="destructive" className="ml-2">
+      Inactive
     </Badge>
   );
-};
+}
