@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Brain, Building, FileText, Sparkles } from "lucide-react";
+import { Brain, Building, FileText } from "lucide-react";
 
 const exampleMessages = [
   {
@@ -37,9 +37,6 @@ export function EmptyScreen({ onSendMessage }: EmptyScreenProps) {
     <div className="flex flex-col items-center justify-center h-full px-6 py-12">
       {/* Hero Section */}
       <div className="mb-12 text-center max-w-2xl">
-        <div className="inline-flex items-center justify-center w-16 h-16 mb-6 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-2xl">
-          <Sparkles className="w-8 h-8 text-white" />
-        </div>
         <h1 className="text-3xl font-bold bg-gradient-to-r from-foreground via-foreground/90 to-foreground/70 bg-clip-text text-transparent mb-4">
           Hello there!
         </h1>
