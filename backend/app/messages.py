@@ -187,7 +187,7 @@ async def update_message(
     if message.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to edit this message")
         
-    message.message = request.content
+    message.content = request.content
     await db.commit()
     await db.refresh(message)
     
