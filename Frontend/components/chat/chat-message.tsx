@@ -1547,7 +1547,7 @@ export function ChatMessage({
             ref={messageRef}
             className={cn(
               "relative rounded-2xl sm:rounded-3xl shadow-lg border transition-all duration-200 ease-out",
-              isEditing ? "w-full" : "w-fit min-w-[100px] max-w-full",
+              isEditing ? "" : "w-fit min-w-[100px] max-w-full",
               "px-4 py-3 sm:px-5 sm:py-4 md:px-6 md:py-5 lg:px-7 lg:py-6",
               "overflow-hidden break-words", // Ensure bubble content doesn't overflow
               isUser
@@ -1567,7 +1567,7 @@ export function ChatMessage({
             )}
             style={
               isEditing && originalWidth
-                ? { minWidth: `${originalWidth}px` }
+                ? { width: `${originalWidth}px` }
                 : undefined
             }
           >
