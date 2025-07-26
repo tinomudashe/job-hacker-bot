@@ -40,7 +40,10 @@ interface WebSocketMessage {
   timestamp?: string;
 }
 
-export const useWebSocket = (currentPageId?: string) => {
+export const useWebSocket = (
+  currentPageId?: string,
+  setCurrentPageId?: (id: string) => void
+) => {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [reasoningSteps, setReasoningSteps] = useState<ReasoningStep[]>([]);
@@ -268,6 +271,14 @@ export const useWebSocket = (currentPageId?: string) => {
         );
         triggerRefetch(); // Trigger a refetch via the store
         toast.success("Your subscription has been updated!");
+      } else if (parsedData.type === "page_created") {
+        const newPageId = parsedData.page_id as string;
+        if (newPageId && setCurrentPageId) {
+          console.log(`[WebSocket] New page created by backend: ${newPageId}`);
+          setCurrentPageId(newPageId);
+          currentPageIdRef.current = newPageId;
+          localStorage.setItem("lastConversationId", newPageId);
+        }
       } else if (parsedData.type === "subscription_status") {
         console.log("Subscription status received:", parsedData);
         // This event now signals the end, but the final message will clear the steps.
@@ -326,7 +337,14 @@ export const useWebSocket = (currentPageId?: string) => {
       isConnecting.current = false;
       console.error("WebSocket connection error:", error);
     };
-  }, [getToken, currentPageIdRef, isLoaded, isSignedIn, triggerRefetch]);
+  }, [
+    getToken,
+    currentPageIdRef,
+    isLoaded,
+    isSignedIn,
+    triggerRefetch,
+    setCurrentPageId,
+  ]);
 
   // Effect to handle page changes
   useEffect(() => {

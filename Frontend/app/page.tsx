@@ -30,7 +30,7 @@ export default function Home() {
     error,
     isConnected,
     isHistoryLoading,
-  } = useWebSocket(currentPageId);
+  } = useWebSocket(currentPageId, setCurrentPageId);
   const { user } = useUser();
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const {

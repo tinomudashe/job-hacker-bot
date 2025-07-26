@@ -292,24 +292,34 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
             data = await websocket.receive_text()
             message_data = json.loads(data)
 
-            # This block expects a "type" field to route the message
-            message_type = message_data.get("type", "message") # Default to "message" for robustness
+            # FIX: The original code didn't handle message types.
+            # This now correctly identifies and routes chat messages.
+            message_type = message_data.get("type")
+            if message_type != "message":
+                log.info(f"Received non-message type, skipping: {message_type}")
+                continue
 
-            if message_type == "message":
-                user_message_content = message_data.get("content")
-                page_id = message_data.get("page_id")
+            user_message_content = message_data.get("content")
+            page_id = message_data.get("page_id")
 
-                if not page_id:
-                    # Simplified page creation
-                    page = Page(user_id=user.id, title=user_message_content[:50])
-                    db.add(page)
-                    await db.commit()
-                    page_id = page.id
+            if not page_id:
+                # FIX: Correctly create and use the new page_id for the whole transaction.
+                page = Page(user_id=user.id, title=user_message_content[:50])
+                db.add(page)
+                await db.commit()
+                await db.refresh(page)
+                page_id = str(page.id)
+                # FIX: Notify the client of the newly created page ID so the conversation can continue.
+                await websocket.send_json({
+                    "type": "page_created",
+                    "page_id": page_id
+                })
 
-                user_message = ChatMessage(user_id=user.id, page_id=page_id, message=user_message_content, is_user_message=True)
-                
-                # --- FIX: Re-integrate the advanced memory context gathering ---
-                # 1. Get the long-term context from enhanced and advanced memory.
+            # FIX: The database model expects the field `content`, not `message`.
+            user_message = ChatMessage(user_id=user.id, page_id=page_id, content=user_message_content, is_user_message=True)
+            
+            # --- FIX: Re-integrate the advanced memory context gathering ---
+            # 1. Get the long-term context from enhanced and advanced memory.
                 context_summary = await _get_unified_context_summary(
                     simple_memory, enhanced_memory, advanced_memory, user_message_content, page_id
                 )
@@ -338,7 +348,8 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
                     if "reasoning_events" in event.get(list(event.keys())[0], {}):
                         await websocket.send_json({"type": "reasoning", "data": event})
 
-                ai_message = ChatMessage(user_id=user.id, page_id=page_id, message=final_response, is_user_message=False)
+                # FIX: The database model expects the field `content`, not `message`.
+                ai_message = ChatMessage(user_id=user.id, page_id=page_id, content=final_response, is_user_message=False)
 
                 try:
                     async with async_session_maker() as fresh_db:

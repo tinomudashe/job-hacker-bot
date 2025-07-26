@@ -531,6 +531,8 @@ export function ChatMessage({
   const [isFlashcardDialogOpen, setIsFlashcardDialogOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [originalWidth, setOriginalWidth] = useState<number | null>(null);
+  const [originalHeight, setOriginalHeight] = useState<number | null>(null);
+  const [minRows, setMinRows] = useState(3);
   const [isHovered, setIsHovered] = useState(false);
   const [showActions, setShowActions] = useState(false);
   const [mobileHideTimeout, setMobileHideTimeout] =
@@ -1136,10 +1138,22 @@ export function ChatMessage({
   };
 
   const handleEdit = () => {
-    // Capture original width before entering edit mode
-    if (messageRef.current) {
+    // Capture original dimensions before entering edit mode
+    if (messageRef.current && contentRef.current) {
       const rect = messageRef.current.getBoundingClientRect();
+      const contentRect = contentRef.current.getBoundingClientRect();
+
       setOriginalWidth(rect.width);
+      setOriginalHeight(contentRect.height);
+
+      // Calculate minimum rows needed to maintain original height
+      // Approximate line height for textarea (adjust if needed)
+      const lineHeight = 24; // This should match your CSS line-height
+      const calculatedRows = Math.max(
+        1,
+        Math.ceil(contentRect.height / lineHeight)
+      );
+      setMinRows(calculatedRows);
     }
     setIsEditing(true);
     setEditedContent(plainTextContent);
@@ -1149,6 +1163,8 @@ export function ChatMessage({
     setIsEditing(false);
     setEditedContent("");
     setOriginalWidth(null);
+    setOriginalHeight(null);
+    setMinRows(3);
   };
 
   const handleSaveEdit = () => {
@@ -1164,6 +1180,8 @@ export function ChatMessage({
     setIsEditing(false);
     setEditedContent("");
     setOriginalWidth(null);
+    setOriginalHeight(null);
+    setMinRows(3);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -1589,29 +1607,33 @@ export function ChatMessage({
                 className={cn(
                   "relative z-10 w-full bg-transparent border-none outline-none resize-none text-inherit font-inherit leading-relaxed",
                   "focus:ring-0 focus:outline-none placeholder:text-current/50",
-                  "scrollbar-thin scrollbar-thumb-current/20 scrollbar-track-transparent",
-                  "overflow-hidden" // Prevent scrollbar from showing unnecessarily
+                  "scrollbar-thin scrollbar-thumb-current/20 scrollbar-track-transparent"
                 )}
                 style={{
                   fontSize: "inherit",
-                  lineHeight: "inherit",
+                  lineHeight: "24px", // Fixed line height for consistent calculation
                   fontFamily: "inherit",
                   color: "inherit",
                   width: "100%",
-                  minHeight: originalWidth ? "auto" : "4rem",
+                  minHeight: originalHeight ? `${originalHeight}px` : "auto",
                   height: "auto",
                 }}
                 autoFocus
-                rows={Math.max(
-                  3,
-                  Math.min(20, editedContent.split("\n").length + 1)
-                )}
+                rows={minRows}
                 placeholder="Edit your message..."
                 onInput={(e) => {
-                  // Auto-resize textarea to content
                   const target = e.target as HTMLTextAreaElement;
+
+                  // Calculate the height needed for current content
                   target.style.height = "auto";
-                  target.style.height = `${target.scrollHeight}px`;
+                  const scrollHeight = target.scrollHeight;
+
+                  // Use the larger of: original height or content-required height
+                  const finalHeight = originalHeight
+                    ? Math.max(originalHeight, scrollHeight)
+                    : scrollHeight;
+
+                  target.style.height = `${finalHeight}px`;
                 }}
               />
             ) : isAttachment && attachmentInfo ? (
