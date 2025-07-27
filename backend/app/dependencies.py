@@ -79,63 +79,6 @@ def extract_token_from_request(request: Request, token_from_header: Optional[str
     return None
 
 
-async def get_user_from_token_data(token_data: ClerkUser, db: AsyncSession) -> User:
-    """
-    Given validated token data from Clerk, find or create the corresponding user in our database.
-    """
-    if not token_data or not token_data.sub:
-        raise ValueError("Invalid token data provided.")
-
-    user_result = await db.execute(select(User).where(User.external_id == token_data.sub))
-    user = user_result.scalar_one_or_none()
-    
-    # This logic is now unified here. It handles both creation and enrichment.
-    if user is None:
-        logger.info(f"User with external_id {token_data.sub} not found. Creating new user.")
-        user = User(
-            external_id=token_data.sub,
-            email=token_data.email,
-            name=f"{token_data.first_name or ''} {token_data.last_name or ''}".strip() or "New User",
-            first_name=token_data.first_name,
-            last_name=token_data.last_name,
-            picture=token_data.picture,
-            active=True
-        )
-        db.add(user)
-    else:
-        # Enrich existing user profile with any new information from Clerk.
-        update_needed = False
-        if not user.email and token_data.email:
-            user.email = token_data.email
-            update_needed = True
-        
-        new_name = f"{token_data.first_name or ''} {token_data.last_name or ''}".strip()
-        if (not user.name or user.name == "New User") and new_name:
-            user.name = new_name
-            update_needed = True
-
-        if not user.first_name and token_data.first_name:
-            user.first_name = token_data.first_name
-            update_needed = True
-
-        if not user.last_name and token_data.last_name:
-            user.last_name = token_data.last_name
-            update_needed = True
-
-        if not user.picture and token_data.picture:
-            user.picture = token_data.picture
-            update_needed = True
-        
-        if update_needed:
-            logger.info(f"User profile for {user.external_id} enriched from Clerk.")
-
-    # Commit changes whether it's a new user or an updated one.
-    await db.commit()
-    await db.refresh(user)
-    
-    return user
-
-
 async def get_current_user(
     request: Request,
     token: Optional[str] = Depends(oauth2_scheme), 
@@ -251,6 +194,7 @@ async def get_current_active_user_ws(
     """
     Dependency for WebSocket endpoints.
     Verifies Clerk token from query parameters and returns the active user.
+    This logic is now aligned with the primary `get_current_user` function for consistency and correctness.
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -259,16 +203,66 @@ async def get_current_active_user_ws(
     )
     try:
         if not token:
+            logger.warning("WebSocket connection attempt without a token.")
             raise credentials_exception
         
-        token_data = await verify_token(token)
-        if token_data is None:
+        clerk_user: ClerkUser = await verify_token(token)
+        if not clerk_user:
+            logger.warning("WebSocket connection with an invalid token.")
             raise credentials_exception
             
-        user = await get_user_from_token_data(token_data, db)
+        # This logic is now a direct, correct implementation, mirroring get_current_user.
+        result = await db.execute(select(User).where(User.external_id == clerk_user.sub))
+        user = result.scalar_one_or_none()
+
+        if user is None:
+            logger.info(f"WS Auth: User with external_id {clerk_user.sub} not found. Creating new user.")
+            user = User(
+                external_id=clerk_user.sub,
+                email=clerk_user.email,
+                name=f"{clerk_user.first_name or ''} {clerk_user.last_name or ''}".strip() or "New User",
+                first_name=clerk_user.first_name,
+                last_name=clerk_user.last_name,
+                picture=clerk_user.picture,
+                active=True
+            )
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+        else:
+            # Enrich profile only if needed, and only commit if changes were made.
+            update_needed = False
+            if not user.email and clerk_user.email:
+                user.email = clerk_user.email
+                update_needed = True
+            
+            new_name = f"{clerk_user.first_name or ''} {clerk_user.last_name or ''}".strip()
+            if (not user.name or user.name == "New User") and new_name:
+                user.name = new_name
+                update_needed = True
+
+            if not user.first_name and clerk_user.first_name:
+                user.first_name = clerk_user.first_name
+                update_needed = True
+
+            if not user.last_name and clerk_user.last_name:
+                user.last_name = clerk_user.last_name
+                update_needed = True
+
+            if not user.picture and clerk_user.picture:
+                user.picture = clerk_user.picture
+                update_needed = True
+            
+            if update_needed:
+                logger.info(f"WS Auth: User profile for {user.external_id} enriched from Clerk.")
+                await db.commit()
+                await db.refresh(user)
+
         if not user.active:
+            logger.warning(f"WS Auth: Inactive user tried to connect: {user.id}")
             raise HTTPException(status_code=400, detail="Inactive user")
         
+        logger.info(f"WS Auth: Successfully authenticated user: {user.id}")
         return user
     except Exception as e:
         logger.error(f"WebSocket authentication error: {e}", exc_info=True)
