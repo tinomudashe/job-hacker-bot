@@ -103,7 +103,7 @@ class AdvancedMemoryManager:
                 document = Document(
                     page_content=memory_text,
                     metadata={
-                        "user_id": self.user_id,
+                        "user_id": self.user.id,
                         "subject": memory["subject"],
                         "predicate": memory["predicate"],
                         "object_": memory["object_"],
@@ -116,7 +116,7 @@ class AdvancedMemoryManager:
             # Add to vector store
             self.memory_store.add_documents(documents)
             
-            logger.info(f"Saved {len(memories)} memories for user {self.user_id}")
+            logger.info(f"Saved {len(memories)} memories for user {self.user.id}")
             return f"Successfully saved {len(memories)} memories"
             
         except Exception as e:
@@ -137,7 +137,7 @@ class AdvancedMemoryManager:
             # This is safer and avoids the internal bug in the FAISS filter implementation.
             results = [
                 doc for doc in all_results 
-                if isinstance(doc, Document) and doc.metadata.get("user_id") == self.user_id
+                if isinstance(doc, Document) and doc.metadata.get("user_id") == self.user.id
             ]
             
             memories = []
@@ -171,19 +171,19 @@ class AdvancedMemoryManager:
         extracted_memory = await self.extraction_chain.extract(formatted_history)
 
         if not extracted_memory:
-            logger.info(f"No new memory was extracted for user {self.user_id}.")
+            logger.info(f"No new memory was extracted for user {self.user.id}.")
             return
 
-        logger.info(f"Extracted memory of type '{extracted_memory.memory_type}' for user {self.user_id}")
+        logger.info(f"Extracted memory of type '{extracted_memory.memory_type}' for user {self.user.id}")
 
         # 4. Implement the selective saving logic. This is the core of the fix.
         if extracted_memory.memory_type == "core_user_fact":
             # Only save timeless, core facts to the permanent vector store.
             await self.add_memory(extracted_memory.content)
-            logger.info(f"Saved CORE memory for user {self.user_id}: {extracted_memory.content}")
+            logger.info(f"Saved CORE memory for user {self.user.id}: {extracted_memory.content}")
         else:
             # Discard temporary conversational context.
-            logger.info(f"Discarded CONVERSATIONAL memory for user {self.user_id}: {extracted_memory.content}")
+            logger.info(f"Discarded CONVERSATIONAL memory for user {self.user.id}: {extracted_memory.content}")
     
     async def extract_knowledge_from_conversation(self, user_message: str, ai_response: str) -> List[KnowledgeTriple]:
         """Extract structured knowledge from conversation"""
@@ -259,7 +259,7 @@ class AdvancedMemoryManager:
                 all_memories = self.memory_store.similarity_search(
                     "",
                     k=20,
-                    filter=lambda doc: doc.metadata.get("user_id") == self.user_id
+                    filter=lambda doc: doc.metadata.get("user_id") == self.user.id
                 )
                 
                 for memory in all_memories:
@@ -277,7 +277,7 @@ class AdvancedMemoryManager:
             context_summary = self._create_context_summary(relevant_memories, knowledge_graph)
             
             return MemoryContext(
-                user_id=self.user_id,
+                user_id=self.user.id,
                 relevant_memories=relevant_memories,
                 knowledge_graph=knowledge_graph,
                 user_preferences={},
@@ -317,7 +317,7 @@ class AdvancedMemoryManager:
     def _create_empty_context(self) -> MemoryContext:
         """Create empty context as fallback"""
         return MemoryContext(
-            user_id=self.user_id,
+            user_id=self.user.id,
             relevant_memories=[],
             knowledge_graph=[],
             user_preferences={},
