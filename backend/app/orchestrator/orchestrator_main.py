@@ -292,96 +292,73 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
             data = await websocket.receive_text()
             message_data = json.loads(data)
 
-            # FIX: This replaces the faulty check with a proper, minimal message router.
-            # It now correctly handles different commands from the frontend.
+            # FIX: This replaces the broken if/elif structure with a single, valid
+            # conditional block that correctly routes different message types.
             message_type = message_data.get("type")
 
-            # Commands that don't trigger the AI graph are handled and the loop continues.
             if message_type == "switch_page":
                 log.info(f"Switched page context to: {message_data.get('page_id')}")
                 continue
-            if message_type == "stop_generation":
-                # (Future implementation: Add logic to stop the LangGraph stream here)
-                log.info("Stop generation received, but not yet implemented.")
-                continue
 
-            # "message" and "regenerate" types are now allowed to proceed.
-            # A missing type is treated as a regular message for backward compatibility.
-            if message_type not in ["message", "regenerate", None]:
+            elif message_type in ["message", "regenerate", None]:
+                user_message_content = message_data.get("content")
+                page_id = message_data.get("page_id")
+
+                if not user_message_content:
+                    log.warning("Received message with no content.")
+                    continue
+
+                # This is the core logical fix. All database writes will now happen
+                # in a single, atomic transaction using a fresh session.
+                async with async_session_maker() as fresh_db:
+                    if not page_id:
+                        # Create the new page within the same session where the messages will be saved.
+                        page = Page(user_id=user.id, title=user_message_content[:50])
+                        fresh_db.add(page)
+                        await fresh_db.commit()
+                        await fresh_db.refresh(page)
+                        page_id = str(page.id)
+                        # Notify the client of the newly created page ID so the conversation can continue correctly.
+                        await websocket.send_json({
+                            "type": "page_created",
+                            "page_id": page_id
+                        })
+
+                    # FIX: The user message is now created AND saved immediately in its own transaction.
+                    # This ensures the user's message is never lost, even if the AI fails.
+                    user_message_for_db = ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, content=user_message_content, is_user_message=True)
+                    fresh_db.add(user_message_for_db)
+                    await fresh_db.commit()
+
+                # --- The AI processing now happens *after* the user's message is safely stored. ---
+                context_summary = await _get_unified_context_summary(
+                    simple_memory, enhanced_memory, advanced_memory, user_message_content, page_id
+                )
+                history = await simple_memory.get_conversation_context(page_id)
+                chat_history = [HumanMessage(content=msg["content"]) if msg["role"] == "user" else AIMessage(content=msg["content"]) for msg in history.conversation_history]
+                final_input = f"{context_summary}\n\nUSER QUERY:\n{user_message_content}" if context_summary else user_message_content
+                initial_state = {"input": final_input, "chat_history": chat_history, "critique": ""}
+                
+                final_response = None
+                async for event in graph.astream(initial_state):
+                    if END in event:
+                        final_response = event[END].get("final_response", "Sorry, I encountered an error.")
+                    
+                    if "reasoning_events" in event.get(list(event.keys())[0], {}):
+                        await websocket.send_json({"type": "reasoning", "data": event})
+                
+                # The AI message is saved in a separate, second transaction.
+                async with async_session_maker() as fresh_db:
+                    # FIX: The same correction is applied here for the AI's response.
+                    ai_message_for_db = ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, content=final_response, is_user_message=False)
+                    fresh_db.add(ai_message_for_db)
+                    await fresh_db.commit()
+
+                await websocket.send_json({"type": "final_response", "content": final_response})
+            
+            else:
                 log.warning(f"Received unknown message type, skipping: {message_type}")
                 continue
-
-            user_message_content = message_data.get("content")
-            page_id = message_data.get("page_id")
-
-            if not user_message_content:
-                log.warning("Received empty message content.")
-                continue
-
-            # in a single, atomic transaction using a fresh session.
-            async with async_session_maker() as fresh_db:
-                if not page_id:
-                    # Create the new page within the same session where the messages will be saved.
-                    page = Page(user_id=user.id, title=user_message_content[:50])
-                    fresh_db.add(page)
-                    await fresh_db.commit()
-                    await fresh_db.refresh(page)
-                    page_id = str(page.id)
-                    # Notify the client of the newly created page ID so the conversation can continue correctly.
-                    await websocket.send_json({
-                        "type": "page_created",
-                        "page_id": page_id
-                    })
-
-                # FIX: The ChatMessage constructor was being called with an incorrect keyword argument.
-                # This now correctly creates the message object, allowing it to be saved.
-                user_message_for_db = ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, content=user_message_content, is_user_message=True)
-                fresh_db.add(user_message_for_db)
-                await fresh_db.commit()
-
-            # --- The AI processing now happens *after* the user's message is safely stored. ---
-            context_summary = await _get_unified_context_summary(
-                simple_memory, enhanced_memory, advanced_memory, user_message_content, page_id
-            )
-
-                # 2. Get the short-term, literal chat history.
-            history = await simple_memory.get_conversation_context(page_id)
-            chat_history = [HumanMessage(content=msg["content"]) if msg["role"] == "user" else AIMessage(content=msg["content"]) for msg in history.conversation_history]
-            
-            # 3. Prepend the long-term context to the user's input for the agent.
-            final_input = user_message_content
-            if context_summary:
-                final_input = f"{context_summary}\n\nUSER QUERY:\n{user_message_content}"
-
-            initial_state = {
-                "input": final_input, # Use the input with the prepended context
-                "chat_history": chat_history,
-                "critique": ""
-            }
-                
-            final_response = None
-            async for event in graph.astream(initial_state):
-                if END in event:
-                    final_response = event[END].get("final_response", "Sorry, I encountered an error.")
-                
-                # Simplified streaming for now
-                if "reasoning_events" in event.get(list(event.keys())[0], {}):
-                    await websocket.send_json({"type": "reasoning", "data": event})
-            
-            # The AI message is saved in a separate, second transaction.
-                    async with async_session_maker() as fresh_db:
-                        # FIX: The same correction is applied here for the AI's response.
-                        ai_message_for_db = ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, content=final_response, is_user_message=False)
-                        fresh_db.add(ai_message_for_db)
-                        await fresh_db.commit()
-
-                    await websocket.send_json({"type": "final_response", "content": final_response})
-
-                elif message_type == "switch_page":
-                    page_id = message_data.get("page_id")
-            # ... (page switching logic)
-            
-            # ... (other message types)
 
     except WebSocketDisconnect:
         log.info("WebSocket disconnected.")
