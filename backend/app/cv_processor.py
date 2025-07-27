@@ -208,10 +208,21 @@ Extract all available information. If a field is not found, use null for strings
                 for exp in data.get('experience', [])
             ]
             
-            education = [
-                ExtractedEducation(**edu) 
-                for edu in data.get('education', [])
-            ]
+            # FIX: Replace the strict education parsing with a more robust and forgiving loop
+            # that handles variations in the LLM's output.
+            education = []
+            education_list = data.get('education', [])
+            if isinstance(education_list, list):
+                for edu_item in education_list:
+                    if isinstance(edu_item, dict):
+                        education.append(ExtractedEducation(
+                            degree=edu_item.get("degree"),
+                            # It now accepts 'institution', 'university', or 'school'
+                            institution=edu_item.get("institution") or edu_item.get("university") or edu_item.get("school"),
+                            # It now accepts 'graduation_year' or 'year'
+                            graduation_year=edu_item.get("graduation_year") or edu_item.get("year"),
+                            gpa=edu_item.get("gpa")
+                        ))
             
             skills = ExtractedSkills(**data.get('skills', {}))
             
