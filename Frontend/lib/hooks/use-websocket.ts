@@ -161,155 +161,101 @@ export const useWebSocket = (
       }
 
       // Handle different message types from backend
-      if (parsedData.type === "message") {
-        const aiMessageContent = parsedData.message || "";
+      // FIX: The parser logic is rewritten to be more robust and to correctly
+      // handle the events being sent by the backend, including reasoning and final_response.
+      switch (parsedData.type) {
+        case "message":
+        case "final_response":
+          const aiMessageContent =
+            (parsedData as any).content || parsedData.message || "";
 
-        setMessages((prev) => {
-          console.log(
-            `📨 [WebSocket] BEFORE adding AI response: ${prev.length} messages`
-          );
-
-          // Simplified DUPLICATE PREVENTION: Check if the last AI message is identical
-          // This is a basic check; backend should ideally prevent sending exact duplicates for sequential messages
-          const lastMessage = prev[prev.length - 1];
-          const isDuplicate =
-            lastMessage &&
-            !lastMessage.isUser &&
-            lastMessage.content === aiMessageContent;
-
-          if (isDuplicate) {
-            console.log(
-              `🚫 [WebSocket] DUPLICATE DETECTED - Last AI message identical, skipping`
-            );
-            return prev; // Return existing messages without modification
-          }
-
-          const newMessages = [
-            ...prev,
-            { id: uuidv4(), content: aiMessageContent, isUser: false },
-          ];
-          console.log(
-            `📨 [WebSocket] AFTER adding AI response: ${newMessages.length} messages`
-          );
-          return newMessages;
-        });
-        setIsLoading(false);
-        setReasoningSteps([]); // Clear the reasoning steps on final message
-      } else if (parsedData.type === "reasoning_start") {
-        const reasoningData = parsedData.data;
-        if (!reasoningData) return;
-
-        // When reasoning starts, clear any old steps and add the new one.
-        setReasoningSteps([
-          {
-            type: "reasoning_start",
-            content: reasoningData.content,
-            step: reasoningData.step,
-            specialist: reasoningData.specialist,
-            timestamp: parsedData.timestamp || new Date().toISOString(),
-          },
-        ]);
-      } else if (parsedData.type === "reasoning_chunk") {
-        const reasoningData = parsedData.data;
-        if (!reasoningData) return;
-
-        // For each chunk, append it to the reasoningSteps state.
-        setReasoningSteps((prev) => [
-          ...prev,
-          {
-            type: "reasoning_chunk",
-            content: reasoningData.content,
-            step: reasoningData.step,
-            specialist: reasoningData.specialist,
-            tool_name: reasoningData.tool_name,
-            progress: reasoningData.progress,
-            timestamp: parsedData.timestamp || new Date().toISOString(),
-          },
-        ]);
-      } else if (parsedData.type === "reasoning_complete") {
-        // This event now signals the end, but the final message will clear the steps.
-        // We can optionally add the final step for a brief moment.
-        const reasoningData = parsedData.data;
-        if (!reasoningData) return;
-
-        setReasoningSteps((prev) => [
-          ...prev,
-          {
-            type: "reasoning_complete",
-            content: reasoningData.content,
-            timestamp: parsedData.timestamp || new Date().toISOString(),
-          },
-        ]);
-      } else if (parsedData.type === "info") {
-        // Handle info messages (e.g., "Loading...", "Searching...")
-        // You might want to display these as temporary status updates rather than full messages
-        console.log(`ℹ️ [WebSocket Info]: ${parsedData.message}`);
-        // Potentially update a loading indicator or a temporary status message
-        // For now, we'll just log it and not add to chat history directly
-        // If you want to show it, you'd add it to messages with a special type/styling
-      } else if (parsedData.type === "error") {
-        console.error(`❌ [WebSocket Error]: ${parsedData.message}`);
-        toast.error(parsedData.message || "Unknown error occurred");
-        setIsLoading(false);
-      } else if (parsedData.type === "final_response") {
-        // This event now signals the end, but the final message will clear the steps.
-        // We can optionally add the final step for a brief moment.
-        const reasoningData = parsedData.data;
-        if (!reasoningData) return;
-
-        setReasoningSteps((prev) => [
-          ...prev,
-          {
-            type: "reasoning_complete",
-            content: reasoningData.content,
-            timestamp: parsedData.timestamp || new Date().toISOString(),
-          },
-        ]);
-      } else if (parsedData.type === "subscription_updated") {
-        console.log(
-          "Subscription status received, triggering refetch:",
-          parsedData
-        );
-        triggerRefetch(); // Trigger a refetch via the store
-        toast.success("Your subscription has been updated!");
-      } else if (parsedData.type === "page_created") {
-        const newPageId = parsedData.page_id as string;
-        if (newPageId && setCurrentPageId) {
-          console.log(`[WebSocket] New page created by backend: ${newPageId}`);
-          setCurrentPageId(newPageId);
-          currentPageIdRef.current = newPageId;
-          localStorage.setItem("lastConversationId", newPageId);
-        }
-      } else if (parsedData.type === "subscription_status") {
-        console.log("Subscription status received:", parsedData);
-        // This event now signals the end, but the final message will clear the steps.
-        // We can optionally add the final step for a brief moment.
-        const reasoningData = parsedData.data;
-        if (!reasoningData) return;
-
-        setReasoningSteps((prev) => [
-          ...prev,
-          {
-            type: "reasoning_complete",
-            content: reasoningData.content,
-            timestamp: parsedData.timestamp || new Date().toISOString(),
-          },
-        ]);
-      } else {
-        console.warn(
-          `⁉️ [WebSocket] Unknown message type: ${parsedData.type}`,
-          parsedData
-        );
-        // Default to adding as a regular AI message if type is unknown but has a message field
-        if (parsedData.message) {
-          const messageContent: Message = {
-            id: uuidv4(),
-            content: parsedData.message as string,
-            isUser: false,
-          };
-          setMessages((prev) => [...prev, messageContent]);
+          setMessages((prev) => {
+            const lastMessage = prev[prev.length - 1];
+            const isDuplicate =
+              lastMessage &&
+              !lastMessage.isUser &&
+              lastMessage.content === aiMessageContent;
+            if (isDuplicate) {
+              return prev;
+            }
+            return [
+              ...prev,
+              { id: uuidv4(), content: aiMessageContent, isUser: false },
+            ];
+          });
           setIsLoading(false);
-        }
+          setReasoningSteps([]);
+          break;
+
+        case "reasoning":
+          // This handles the complex event stream from LangGraph
+          const eventData = (parsedData as any).data;
+          if (!eventData) break;
+
+          const eventKey = Object.keys(eventData)[0];
+          const eventContent = eventData[eventKey];
+
+          if (eventContent?.reasoning_events) {
+            setReasoningSteps((prev) => [
+              ...prev,
+              ...eventContent.reasoning_events,
+            ]);
+          }
+          break;
+
+        case "reasoning_start":
+        case "reasoning_chunk":
+        case "reasoning_complete":
+          setReasoningSteps((prev) => [
+            ...prev,
+            {
+              type: parsedData.type,
+              content: parsedData.data?.content || "",
+              step: parsedData.data?.step,
+              specialist: parsedData.data?.specialist,
+              tool_name: parsedData.data?.tool_name,
+              progress: parsedData.data?.progress,
+              timestamp: parsedData.timestamp || new Date().toISOString(),
+            },
+          ]);
+          break;
+
+        case "error":
+          toast.error(parsedData.message || "Unknown error occurred");
+          setIsLoading(false);
+          break;
+
+        case "page_created":
+          const newPageId = parsedData.page_id as string;
+          if (newPageId && setCurrentPageId) {
+            setCurrentPageId(newPageId);
+            currentPageIdRef.current = newPageId;
+            localStorage.setItem("lastConversationId", newPageId);
+          }
+          break;
+
+        case "subscription_updated":
+          triggerRefetch();
+          toast.success("Your subscription has been updated!");
+          break;
+
+        default:
+          console.warn(
+            `[WebSocket] Unknown message type: ${parsedData.type}`,
+            parsedData
+          );
+          if (parsedData.message) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: uuidv4(),
+                content: parsedData.message as string,
+                isUser: false,
+              },
+            ]);
+            setIsLoading(false);
+          }
+          break;
       }
     };
 
@@ -422,6 +368,11 @@ export const useWebSocket = (
         }
         return;
       }
+
+      // FIX: Activate the loading state immediately on send.
+      setIsLoading(true);
+      setError(null);
+
       const messageData = {
         type: "message",
         content: message.trim(),

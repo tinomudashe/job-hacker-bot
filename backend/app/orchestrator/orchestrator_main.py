@@ -318,27 +318,31 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
                 log.warning("Received empty message content.")
                 continue
 
-            if not page_id:
-                # FIX: Correctly create and use the new page_id for the whole transaction.
-                page = Page(user_id=user.id, title=user_message_content[:50])
-                db.add(page)
-                await db.commit()
-                await db.refresh(page)
-                page_id = str(page.id)
-                # FIX: Notify the client of the newly created page ID so the conversation can continue.
-                await websocket.send_json({
-                    "type": "page_created",
-                    "page_id": page_id
-                })
+            # in a single, atomic transaction using a fresh session.
+            async with async_session_maker() as fresh_db:
+                if not page_id:
+                    # Create the new page within the same session where the messages will be saved.
+                    page = Page(user_id=user.id, title=user_message_content[:50])
+                    fresh_db.add(page)
+                    await fresh_db.commit()
+                    await fresh_db.refresh(page)
+                    page_id = str(page.id)
+                    # Notify the client of the newly created page ID so the conversation can continue correctly.
+                    await websocket.send_json({
+                        "type": "page_created",
+                        "page_id": page_id
+                    })
 
-            # FIX: The database model expects the field `content`, not `message`.
-            user_message = ChatMessage(user_id=user.id, page_id=page_id, content=user_message_content, is_user_message=True)
-            
-            # --- FIX: Re-integrate the advanced memory context gathering ---
-            # 1. Get the long-term context from enhanced and advanced memory.
+                # FIX: The ChatMessage constructor was being called with an incorrect keyword argument.
+                # This now correctly creates the message object, allowing it to be saved.
+                user_message_for_db = ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, content=user_message_content, is_user_message=True)
+                fresh_db.add(user_message_for_db)
+                await fresh_db.commit()
+
+            # --- The AI processing now happens *after* the user's message is safely stored. ---
             context_summary = await _get_unified_context_summary(
-                    simple_memory, enhanced_memory, advanced_memory, user_message_content, page_id
-                )
+                simple_memory, enhanced_memory, advanced_memory, user_message_content, page_id
+            )
 
                 # 2. Get the short-term, literal chat history.
             history = await simple_memory.get_conversation_context(page_id)
@@ -363,17 +367,13 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
                 # Simplified streaming for now
                 if "reasoning_events" in event.get(list(event.keys())[0], {}):
                     await websocket.send_json({"type": "reasoning", "data": event})
-
-            # FIX: The database model expects the field `content`, not `message`.
-                    ai_message = ChatMessage(user_id=user.id, page_id=page_id, content=final_response, is_user_message=False)
-
-                    try:
-                        async with async_session_maker() as fresh_db:
-                            fresh_db.add(user_message)
-                            fresh_db.add(ai_message)
-                            await fresh_db.commit()
-                    except Exception as e:
-                        log.error(f"Atomic save failed: {e}")
+            
+            # The AI message is saved in a separate, second transaction.
+                    async with async_session_maker() as fresh_db:
+                        # FIX: The same correction is applied here for the AI's response.
+                        ai_message_for_db = ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, content=final_response, is_user_message=False)
+                        fresh_db.add(ai_message_for_db)
+                        await fresh_db.commit()
 
                     await websocket.send_json({"type": "final_response", "content": final_response})
 
