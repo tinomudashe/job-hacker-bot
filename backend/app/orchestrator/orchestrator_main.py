@@ -376,16 +376,34 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
                 initial_state = {"input": final_input, "chat_history": chat_history, "critique": ""}
                 
                 final_response = None
-                async for event in graph.astream(initial_state):
-                    if END in event:
-                        final_response = event[END].get("final_response", "Sorry, I encountered an error.")
-                    
-                    if "reasoning_events" in event.get(list(event.keys())[0], {}):
-                        await websocket.send_json({"type": "reasoning", "data": event})
+                # FIX: Add a try/except block to gracefully handle any errors during graph execution.
+                # This prevents the graph from crashing and ensures final_response gets a value.
+                try:
+                    async for event in graph.astream(initial_state):
+                        if END in event:
+                            # This logic now safely handles both string and AIMessage responses from the graph.
+                            raw_response = event[END].get("final_response")
+                            if isinstance(raw_response, AIMessage):
+                                final_response = raw_response.content
+                            elif isinstance(raw_response, str):
+                                final_response = raw_response
+                            elif raw_response is not None:
+                                final_response = str(raw_response)
+                        
+                        if "reasoning_events" in event.get(list(event.keys())[0], {}):
+                            await websocket.send_json({"type": "reasoning", "data": event})
+                except Exception as graph_error:
+                    log.error(f"Error during graph execution: {graph_error}", exc_info=True)
+                    final_response = "I'm sorry, an internal error occurred while processing your request."
+
+                # FIX: Final fallback to ensure `final_response` is never None before saving to the database.
+                if final_response is None:
+                    log.error("Graph finished without error, but final_response was None. This should not happen.")
+                    final_response = "I'm sorry, I was unable to generate a response."
                 
                 # The AI message is saved in a separate, second transaction.
                 async with async_session_maker() as fresh_db:
-                    # FIX: The same correction is applied here for the AI's response.
+                    # The `message` field is now guaranteed to be a non-null string.
                     ai_message_for_db = ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, message=final_response, is_user_message=False)
                     fresh_db.add(ai_message_for_db)
                     await fresh_db.commit()
