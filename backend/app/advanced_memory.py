@@ -127,11 +127,11 @@ class AdvancedMemoryManager:
         """Search for relevant memories using semantic similarity"""
         try:
             # --- BUG FIX ---
-            # The `filter` parameter for in-memory FAISS is not reliably supported.
-            # The robust solution is to fetch all results and then filter them manually.
+            # The `similarity_search` method on the vector store is asynchronous
+            # and must be awaited to get the actual results.
 
-            # 1. Get all similarity search results from the vector store first.
-            all_results = self.memory_store.similarity_search(query, k=k)
+            # 1. Await the similarity search to get the list of documents.
+            all_results = await self.memory_store.similarity_search(query, k=k)
 
             # 2. Manually filter the results to ensure they belong to the current user.
             # This is safer and avoids the internal bug in the FAISS filter implementation.
@@ -256,7 +256,7 @@ class AdvancedMemoryManager:
             # Get knowledge graph entries
             knowledge_graph = []
             try:
-                all_memories = self.memory_store.similarity_search(
+                all_memories = await self.memory_store.similarity_search(
                     "",
                     k=20,
                     filter=lambda doc: doc.metadata.get("user_id") == self.user.id
