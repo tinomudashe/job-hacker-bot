@@ -261,7 +261,8 @@ def decide_after_agent(state: AgentState):
         return "general_conversation_tools"
     return END
 
-def create_master_agent_graph(db: AsyncSession, user: User):
+# FIX: The function signature is updated here to accept the new `system_prompt` argument.
+def create_master_agent_graph(db: AsyncSession, user: User, system_prompt: str):
     lock = asyncio.Lock()
     lock_list = [
         "refine_cv_for_role", "generate_cover_letter", "create_resume_from_scratch",
@@ -282,7 +283,7 @@ def create_master_agent_graph(db: AsyncSession, user: User):
     all_tools = create_tools_with_dependencies(all_tools_funcs, db, user, lock, lock_list)
     
     # Using a single general-purpose agent for stability
-    general_agent_node = create_agent_node(all_tools, "You are a helpful assistant.")
+    general_agent_node = create_agent_node(all_tools, system_prompt)
     general_tool_node = create_tool_node(all_tools)
 
     workflow = StateGraph(AgentState)
