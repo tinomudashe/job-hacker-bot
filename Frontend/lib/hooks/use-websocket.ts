@@ -209,7 +209,7 @@ export const useWebSocket = (
           setReasoningSteps((prev) => [
             ...prev,
             {
-              type: parsedData.type,
+              type: parsedData.type as ReasoningStep["type"],
               content: parsedData.data?.content || "",
               step: parsedData.data?.step,
               specialist: parsedData.data?.specialist,
