@@ -224,8 +224,20 @@ async def router_node(state: AgentState):
     return {"route": "general_conversation"}
 
 async def validator_node(state: AgentState):
-    # Simplified for stability
-    return {"final_response": state["agent_outcome"]}
+    # FIX: This is the definitive fix. The validator now correctly processes the
+    # output from the tool node (which is in `state["messages"]`) instead of
+    # incorrectly looking at the agent's original plan.
+    tool_outputs = state.get("messages", [])
+    
+    # We join the outputs of all tools into a single string response.
+    # We also handle the case where a tool might return None.
+    final_text = "\n".join(str(output) for output in tool_outputs if output is not None)
+    
+    if not final_text:
+        # If all tools returned None or the list was empty, provide a fallback.
+        final_text = "The requested action was completed, but it did not produce a message to display."
+
+    return {"final_response": final_text}
 
 
 # --- 4. Master Graph Creation ---
