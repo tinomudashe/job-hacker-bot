@@ -149,12 +149,8 @@ class AdvancedMemoryManager:
             if not vector_store:
                 return []
 
-            # --- BUG FIX ---
-            # The `similarity_search` method on the vector store is asynchronous
-            # and must be awaited to get the actual results.
-
-            # 1. Await the similarity search to get the list of documents.
-            all_results = await vector_store.similarity_search(query, k=k)
+            # FIX: Use the ASYNCHRONOUS version of the search method: `asimilarity_search`.
+            all_results = await vector_store.asimilarity_search(query, k=k)
 
             # 2. Manually filter the results to ensure they belong to the current user.
             # This is safer and avoids the internal bug in the FAISS filter implementation.
@@ -282,7 +278,8 @@ class AdvancedMemoryManager:
                 # Ensure the vector store is initialized.
                 vector_store = await self._get_or_create_vector_store()
                 if vector_store:
-                    all_memories = await vector_store.similarity_search(
+                    # FIX: Use the ASYNCHRONOUS version here as well: `asimilarity_search`.
+                    all_memories = await vector_store.asimilarity_search(
                         "",
                         k=20,
                         # The lambda filter is not async, so this part is correct.

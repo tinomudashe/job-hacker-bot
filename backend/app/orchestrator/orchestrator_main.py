@@ -175,7 +175,7 @@ def create_agent_node(tools, system_prompt):
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}\n{critique}"),
         ])
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.2).bind_tools(tools)
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.2).bind_tools(tools)
         response = await (prompt | llm).ainvoke(state)
         
         # --- FIX: Restore Detailed Reasoning Events ---
@@ -190,7 +190,15 @@ def create_agent_node(tools, system_prompt):
             return {"agent_outcome": response, "reasoning_events": reasoning_events}
         else:
             reasoning_events.append({"type": "reasoning_complete", "content": "Analysis complete."})
-            return {"final_response": response.content, "reasoning_events": reasoning_events}
+            
+            # FINAL FIX: Add a crucial safety check to handle cases where the LLM
+            # returns an empty or invalid `content` string. This prevents the graph
+            # from silently failing and producing a None response.
+            final_text = response.content if isinstance(response.content, str) else ""
+            if not final_text.strip():
+                final_text = "I'm sorry, I was unable to generate a direct response. Could you please try rephrasing your request?"
+
+            return {"final_response": final_text, "reasoning_events": reasoning_events}
     return agent_node
 
 def create_tool_node(tools):
