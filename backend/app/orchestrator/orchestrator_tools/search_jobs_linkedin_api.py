@@ -1,10 +1,21 @@
 from langchain_core.tools import tool
 import logging
 from app.linkedin_jobs_service import get_linkedin_jobs_service
+from pydantic import BaseModel, Field
+from typing import Optional
 
 log = logging.getLogger(__name__)
 
-@tool
+# FIX: Define a Pydantic model for the tool's arguments.
+# This provides a clear schema and resolves the "Too many arguments" error.
+class LinkedInSearchInput(BaseModel):
+    keyword: str = Field(description="Job search terms (e.g., 'software engineer', 'python developer')")
+    location: str = Field(default="Remote", description="Location to search in (e.g., 'Poland', 'Remote', 'Warsaw')")
+    job_type: Optional[str] = Field(default="", description="Type of position ('full time', 'part time', 'contract', 'internship')")
+    experience_level: Optional[str] = Field(default="", description="Level ('internship', 'entry level', 'associate', 'senior')")
+    limit: Optional[int] = Field(default=10, description="Number of jobs to return (max 25)")
+
+@tool(args_schema=LinkedInSearchInput)
 async def search_jobs_linkedin_api(
         keyword: str,
         location: str = "Remote",
@@ -92,4 +103,4 @@ async def search_jobs_linkedin_api(
             
         except Exception as e:
             log.error(f"Error in LinkedIn API search: {e}")
-            return f"🔍 No jobs found for '{keyword}' in {location}.\\n\\n💡 **Suggestions:**\\n• Try different keywords (e.g., 'developer', 'engineer')\\n• Expand location (e.g., 'Europe' instead of specific city)\\n• Try different job types or experience levels"
+            return f"🔍 No jobs found for '{keyword}' in {location}.\n\n💡 **Suggestions:**\n• Try different keywords (e.g., 'developer', 'engineer')\n• Expand location (e.g., 'Europe' instead of specific city)\n• Try different job types or experience levels"

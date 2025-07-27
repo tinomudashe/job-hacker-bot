@@ -57,6 +57,7 @@ async def refine_cv_for_role(
                 partial_variables={"format_instructions": parser.get_format_instructions()},
             )
             
+            # FIX: Use the user-specified Gemini Pro model.
             llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.3)
             chain = prompt | llm | parser
             
