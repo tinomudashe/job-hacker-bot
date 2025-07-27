@@ -419,9 +419,9 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
                 history_for_prompt = await simple_memory.get_conversation_context(page_id)
 
                 # FIX: The system prompt is now chosen dynamically based on user intent.
-                if graph is None:
-                    system_prompt = await get_prompt_for_input(user_message_content, history_for_prompt.conversation_history)
-                    graph = create_master_agent_graph(db, user, system_prompt)
+                # A default prompt is provided for the graph creation.
+                system_prompt = await get_prompt_for_input(user_message_content, history_for_prompt.conversation_history)
+                graph = create_master_agent_graph(db, user, system_prompt)
 
                 if not user_message_content:
                     log.warning("Received message with no content.")
