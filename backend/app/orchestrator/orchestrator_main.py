@@ -307,6 +307,60 @@ def create_master_agent_graph(db: AsyncSession, user: User):
     workflow.set_entry_point("router")
     return workflow.compile()
 
+# This is a new helper function to load the detailed system prompt from the file.
+def load_system_prompt(prompt_type: str = "system") -> str:
+    """Loads the specified system prompt from the text file."""
+    prompt_file_map = {
+        "system": "system_prompt.txt",
+        "general": "general_conversation_prompt.txt"
+    }
+    filename = prompt_file_map.get(prompt_type, "system_prompt.txt")
+    
+    try:
+        prompt_path = Path(__file__).parent / "orchestrator_prompts" / filename
+        with open(prompt_path, "r") as f:
+            return f.read()
+    except FileNotFoundError:
+        log.error(f"PROMPT FILE '{filename}' NOT FOUND. Using a basic fallback prompt.")
+        return "You are a helpful assistant."
+
+async def get_prompt_for_input(user_input: str, history: List[Dict]) -> str:
+    """
+    Dynamically selects the appropriate system prompt based on user intent.
+    Uses a lightweight LLM to classify the input.
+    """
+    # If there's no history and it's a short message, it's likely a greeting.
+    if not history and len(user_input) < 20:
+        return load_system_prompt("general")
+
+    # Use a lightweight LLM for intent classification
+    try:
+        classifier_llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
+        
+        class Intent(BaseModel):
+            """The user's intent."""
+            intent: Literal["task_request", "general_conversation"] = Field(
+                description="Classify the user's intent. 'task_request' is for specific actions like searching jobs or building a resume. 'general_conversation' is for greetings, questions, or chit-chat."
+            )
+
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are an expert at classifying user intent. Determine if the user wants to perform a specific career-related task or just have a general conversation."),
+            ("user", "{input}")
+        ])
+        
+        chain = prompt | classifier_llm.with_structured_output(Intent)
+        result = await chain.ainvoke({"input": user_input})
+        
+        if result.intent == "general_conversation":
+            log.info("Classified intent as 'general_conversation'. Using general prompt.")
+            return load_system_prompt("general")
+        else:
+            log.info("Classified intent as 'task_request'. Using main system prompt.")
+            return load_system_prompt("system")
+    except Exception as e:
+        log.error(f"Intent classification failed: {e}. Defaulting to main system prompt.")
+        return load_system_prompt("system")
+
 # --- 5. Main WebSocket Function ---
 @router.websocket("/ws/orchestrator")
 async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_current_active_user_ws), db: AsyncSession = Depends(get_db)):
@@ -336,7 +390,7 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
         # Send a default inactive status if the check fails for any reason.
         await websocket.send_json({"type": "subscription_status", "isActive": False, "plan": "free"})
 
-    graph = create_master_agent_graph(db, user)
+    graph = None # Initialize graph to None
     
     simple_memory = SimpleMemoryManager(db=db, user=user)
     # --- FIX: Re-instantiate the advanced memory managers ---
@@ -359,6 +413,14 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
             elif message_type in ["message", "regenerate", None]:
                 user_message_content = message_data.get("content")
                 page_id = message_data.get("page_id")
+                
+                # This ensures we have the history to make an informed prompt choice.
+                history_for_prompt = await simple_memory.get_conversation_context(page_id)
+
+                # FIX: The system prompt is now chosen dynamically based on user intent.
+                if graph is None:
+                    system_prompt = await get_prompt_for_input(user_message_content, history_for_prompt.conversation_history)
+                    graph = create_master_agent_graph(db, user, system_prompt)
 
                 if not user_message_content:
                     log.warning("Received message with no content.")
