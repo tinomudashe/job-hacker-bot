@@ -326,7 +326,7 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
 
                     # FIX: The user message is now created AND saved immediately in its own transaction.
                     # This ensures the user's message is never lost, even if the AI fails.
-                    user_message_for_db = ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, content=user_message_content, is_user_message=True)
+                    user_message_for_db = ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, message=user_message_content, is_user_message=True)
                     fresh_db.add(user_message_for_db)
                     await fresh_db.commit()
 
@@ -350,7 +350,7 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
                 # The AI message is saved in a separate, second transaction.
                 async with async_session_maker() as fresh_db:
                     # FIX: The same correction is applied here for the AI's response.
-                    ai_message_for_db = ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, content=final_response, is_user_message=False)
+                    ai_message_for_db = ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, message=final_response, is_user_message=False)
                     fresh_db.add(ai_message_for_db)
                     await fresh_db.commit()
 
