@@ -84,7 +84,8 @@ async def get_user_vector_store(user_id: str, db: AsyncSession) -> Optional[PGVe
         # This will use our Alembic-managed tables.
         # pre_delete_collection=True ensures that all old entries for this user are cleared
         # before adding the new ones, keeping the store perfectly in sync.
-        vector_store = PGVector.from_documents(
+        # FIX: PGVector.from_documents is an async function and must be awaited.
+        vector_store = await PGVector.from_documents(
             embedding=EMBEDDINGS,
             documents=docs_for_vector_store,
             collection_name=collection_name,

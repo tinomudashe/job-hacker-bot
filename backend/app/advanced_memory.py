@@ -27,6 +27,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.models_db import User, UserBehavior, UserPreference
 from app.vector_store import get_user_vector_store
+from langchain_community.vectorstores import PGVector
 
 logger = logging.getLogger(__name__)
 
@@ -88,13 +89,30 @@ class AdvancedMemoryManager:
         """Initializes the AdvancedMemoryManager."""
         self.user = user
         self.db = db # Store the db session
-        self.memory_store = get_user_vector_store(user.id, db=db) # Pass the db session here
+        # FIX: The memory store is no longer initialized here.
+        # It will be created on-demand by an async method.
+        self._memory_store: Optional[PGVector] = None 
         self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.1)
         self.extraction_chain = MemoryExtractionChain(self.llm)
+
+    async def _get_or_create_vector_store(self) -> PGVector:
+        """
+        Asynchronously gets or creates the vector store for the user.
+        This ensures the store is properly awaited and initialized before use.
+        """
+        if self._memory_store is None:
+            # This is now the single place where the vector store is created.
+            self._memory_store = await get_user_vector_store(self.user.id, db=self.db)
+        return self._memory_store
 
     async def save_memories(self, memories: List[KnowledgeTriple]) -> str:
         """Save structured memories to vector store"""
         try:
+            # Ensure the vector store is initialized.
+            vector_store = await self._get_or_create_vector_store()
+            if not vector_store:
+                return "Error: Vector store is not available."
+
             documents = []
             for memory in memories:
                 # Create searchable text from triple
@@ -114,7 +132,7 @@ class AdvancedMemoryManager:
                 documents.append(document)
             
             # Add to vector store
-            self.memory_store.add_documents(documents)
+            await vector_store.aadd_documents(documents)
             
             logger.info(f"Saved {len(memories)} memories for user {self.user.id}")
             return f"Successfully saved {len(memories)} memories"
@@ -126,12 +144,17 @@ class AdvancedMemoryManager:
     async def search_memories(self, query: str, k: int = 5) -> List[str]:
         """Search for relevant memories using semantic similarity"""
         try:
+            # Ensure the vector store is initialized.
+            vector_store = await self._get_or_create_vector_store()
+            if not vector_store:
+                return []
+
             # --- BUG FIX ---
             # The `similarity_search` method on the vector store is asynchronous
             # and must be awaited to get the actual results.
 
             # 1. Await the similarity search to get the list of documents.
-            all_results = await self.memory_store.similarity_search(query, k=k)
+            all_results = await vector_store.similarity_search(query, k=k)
 
             # 2. Manually filter the results to ensure they belong to the current user.
             # This is safer and avoids the internal bug in the FAISS filter implementation.
@@ -256,20 +279,24 @@ class AdvancedMemoryManager:
             # Get knowledge graph entries
             knowledge_graph = []
             try:
-                all_memories = await self.memory_store.similarity_search(
-                    "",
-                    k=20,
-                    filter=lambda doc: doc.metadata.get("user_id") == self.user.id
-                )
-                
-                for memory in all_memories:
-                    metadata = memory.metadata
-                    if all(key in metadata for key in ["subject", "predicate", "object_"]):
-                        knowledge_graph.append({
-                            "subject": metadata["subject"],
-                            "predicate": metadata["predicate"],
-                            "object_": metadata["object_"]
-                        })
+                # Ensure the vector store is initialized.
+                vector_store = await self._get_or_create_vector_store()
+                if vector_store:
+                    all_memories = await vector_store.similarity_search(
+                        "",
+                        k=20,
+                        # The lambda filter is not async, so this part is correct.
+                        filter=lambda doc: doc.metadata.get("user_id") == self.user.id
+                    )
+                    
+                    for memory in all_memories:
+                        metadata = memory.metadata
+                        if all(key in metadata for key in ["subject", "predicate", "object_"]):
+                            knowledge_graph.append({
+                                "subject": metadata["subject"],
+                                "predicate": metadata["predicate"],
+                                "object_": metadata["object_"]
+                            })
             except Exception:
                 pass
             
