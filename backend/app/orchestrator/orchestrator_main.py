@@ -462,19 +462,28 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
                 # FIX: Add a try/except block to gracefully handle any errors during graph execution.
                 # This prevents the graph from crashing and ensures final_response gets a value.
                 try:
+                    # DEFINITIVE FIX: Instead of only checking the END state, we now inspect
+                    # every event from the stream. The moment a node produces a "final_response",
+                    # we capture it. This is more robust and prevents the response from being lost.
                     async for event in graph.astream(initial_state):
-                        if END in event:
-                            # This logic now safely handles both string and AIMessage responses from the graph.
-                            raw_response = event[END].get("final_response")
-                            if isinstance(raw_response, AIMessage):
-                                final_response = raw_response.content
-                            elif isinstance(raw_response, str):
-                                final_response = raw_response
-                            elif raw_response is not None:
-                                final_response = str(raw_response)
-                        
+                        keys = list(event.keys())
+                        if keys:
+                            node_name = keys[0]
+                            node_output = event.get(node_name, {})
+                            
+                            # Check if this node's output contains the final answer.
+                            if isinstance(node_output, dict) and "final_response" in node_output:
+                                raw_response = node_output.get("final_response")
+                                if isinstance(raw_response, AIMessage):
+                                    final_response = raw_response.content
+                                elif isinstance(raw_response, str):
+                                    final_response = raw_response
+                                elif raw_response is not None:
+                                    final_response = str(raw_response)
+
                         if "reasoning_events" in event.get(list(event.keys())[0], {}):
                             await websocket.send_json({"type": "reasoning", "data": event})
+
                 except Exception as graph_error:
                     log.error(f"Error during graph execution: {graph_error}", exc_info=True)
                     final_response = "I'm sorry, an internal error occurred while processing your request."
