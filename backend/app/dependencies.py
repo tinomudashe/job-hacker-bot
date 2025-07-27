@@ -83,38 +83,56 @@ async def get_user_from_token_data(token_data: ClerkUser, db: AsyncSession) -> U
     """
     Given validated token data from Clerk, find or create the corresponding user in our database.
     """
+    if not token_data or not token_data.sub:
+        raise ValueError("Invalid token data provided.")
+
     user_result = await db.execute(select(User).where(User.external_id == token_data.sub))
     user = user_result.scalar_one_or_none()
     
+    # This logic is now unified here. It handles both creation and enrichment.
     if user is None:
         logger.info(f"User with external_id {token_data.sub} not found. Creating new user.")
-        
-        email = token_data.email
-        first_name = token_data.first_name
-        last_name = token_data.last_name
-        picture = token_data.picture
-        name = " ".join(filter(None, [first_name, last_name])) or "New User"
-
         user = User(
-            external_id=token_data.sub, 
-            email=email,
-            name=name,
-            picture=picture,
-            first_name=first_name,
-            last_name=last_name,
-            phone=None,
-            address=None,
-            linkedin=None,
-            preferred_language=None,
-            date_of_birth=None,
-            profile_headline=None,
-            skills=None,
-            profile_picture_url=picture
+            external_id=token_data.sub,
+            email=token_data.email,
+            name=f"{token_data.first_name or ''} {token_data.last_name or ''}".strip() or "New User",
+            first_name=token_data.first_name,
+            last_name=token_data.last_name,
+            picture=token_data.picture,
+            active=True
         )
         db.add(user)
-        await db.commit()
-        await db.refresh(user)
+    else:
+        # Enrich existing user profile with any new information from Clerk.
+        update_needed = False
+        if not user.email and token_data.email:
+            user.email = token_data.email
+            update_needed = True
+        
+        new_name = f"{token_data.first_name or ''} {token_data.last_name or ''}".strip()
+        if (not user.name or user.name == "New User") and new_name:
+            user.name = new_name
+            update_needed = True
 
+        if not user.first_name and token_data.first_name:
+            user.first_name = token_data.first_name
+            update_needed = True
+
+        if not user.last_name and token_data.last_name:
+            user.last_name = token_data.last_name
+            update_needed = True
+
+        if not user.picture and token_data.picture:
+            user.picture = token_data.picture
+            update_needed = True
+        
+        if update_needed:
+            logger.info(f"User profile for {user.external_id} enriched from Clerk.")
+
+    # Commit changes whether it's a new user or an updated one.
+    await db.commit()
+    await db.refresh(user)
+    
     return user
 
 
@@ -234,11 +252,29 @@ async def get_current_active_user_ws(
     Dependency for WebSocket endpoints.
     Verifies Clerk token from query parameters and returns the active user.
     """
-    token_data = await verify_token(token)
-    user = await get_user_from_token_data(token_data, db)
-    if not user.active:
-        raise HTTPException(status_code=400, detail="Inactive user")
-    return user
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        if not token:
+            raise credentials_exception
+        
+        token_data = await verify_token(token)
+        if token_data is None:
+            raise credentials_exception
+            
+        user = await get_user_from_token_data(token_data, db)
+        if not user.active:
+            raise HTTPException(status_code=400, detail="Inactive user")
+        
+        return user
+    except Exception as e:
+        logger.error(f"WebSocket authentication error: {e}", exc_info=True)
+        # It is crucial to re-raise a specific exception that FastAPI can handle
+        # to properly terminate the WebSocket connection attempt.
+        raise credentials_exception
 
 
 async def get_current_user_from_ws(
