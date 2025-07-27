@@ -126,8 +126,24 @@ def create_dependency_injected_tool(original_tool, db, user, lock, lock_list):
     tool_name = getattr(original_tool, 'name', getattr(original_tool, '__name__', 'unknown'))
     needs_lock = tool_name in lock_list
 
-    async def injected_tool(**kwargs):
+    # FIX: The signature is changed to accept positional arguments (*args) as well.
+    # This makes the wrapper robust to however the AI decides to invoke the tool.
+    async def injected_tool(*args, **kwargs):
+        # This logic correctly maps any positional arguments from *args
+        # to the actual parameter names of the original tool function.
         sig = inspect.signature(original_tool.func if hasattr(original_tool, 'func') else original_tool)
+        
+        param_names = [
+            p.name for p in sig.parameters.values()
+            if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and p.name not in ['db', 'user', 'resume_modification_lock']
+        ]
+        
+        for i, arg_val in enumerate(args):
+            if i < len(param_names) and param_names[i] not in kwargs:
+                kwargs[param_names[i]] = arg_val
+
+        # The rest of the function prepares dependencies and calls the original tool,
+        # now with a complete set of keyword arguments.
         call_args = {}
         if 'db' in sig.parameters: call_args['db'] = db
         if 'user' in sig.parameters: call_args['user'] = user
