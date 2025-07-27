@@ -1164,7 +1164,7 @@ export function ChatMessage({
     setEditedContent("");
     setOriginalWidth(null);
     setOriginalHeight(null);
-    setMinRows(3);
+    setMinRows(2); // change to experiment with the height of the textarea
   };
 
   const handleSaveEdit = () => {
@@ -1181,7 +1181,7 @@ export function ChatMessage({
     setEditedContent("");
     setOriginalWidth(null);
     setOriginalHeight(null);
-    setMinRows(3);
+    setMinRows(2); // change to experiment with the height of the textarea
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

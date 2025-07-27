@@ -292,15 +292,31 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
             data = await websocket.receive_text()
             message_data = json.loads(data)
 
-            # FIX: The original code didn't handle message types.
-            # This now correctly identifies and routes chat messages.
+            # FIX: This replaces the faulty check with a proper, minimal message router.
+            # It now correctly handles different commands from the frontend.
             message_type = message_data.get("type")
-            if message_type != "message":
-                log.info(f"Received non-message type, skipping: {message_type}")
+
+            # Commands that don't trigger the AI graph are handled and the loop continues.
+            if message_type == "switch_page":
+                log.info(f"Switched page context to: {message_data.get('page_id')}")
+                continue
+            if message_type == "stop_generation":
+                # (Future implementation: Add logic to stop the LangGraph stream here)
+                log.info("Stop generation received, but not yet implemented.")
+                continue
+
+            # "message" and "regenerate" types are now allowed to proceed.
+            # A missing type is treated as a regular message for backward compatibility.
+            if message_type not in ["message", "regenerate", None]:
+                log.warning(f"Received unknown message type, skipping: {message_type}")
                 continue
 
             user_message_content = message_data.get("content")
             page_id = message_data.get("page_id")
+
+            if not user_message_content:
+                log.warning("Received empty message content.")
+                continue
 
             if not page_id:
                 # FIX: Correctly create and use the new page_id for the whole transaction.
