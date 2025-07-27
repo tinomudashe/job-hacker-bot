@@ -213,6 +213,18 @@ async def validator_node(state: AgentState):
 
 
 # --- 4. Master Graph Creation ---
+
+# This new helper function creates the "smart" conditional path.
+def decide_after_agent(state: AgentState):
+    """
+    Decides the next step after the agent has run.
+    If there are tool calls, it proceeds to execute them.
+    If there is a final response, the graph ends.
+    """
+    if "agent_outcome" in state and state["agent_outcome"].tool_calls:
+        return "general_conversation_tools"
+    return END
+
 def create_master_agent_graph(db: AsyncSession, user: User):
     lock = asyncio.Lock()
     lock_list = [
@@ -243,8 +255,16 @@ def create_master_agent_graph(db: AsyncSession, user: User):
     workflow.add_node("general_conversation_tools", general_tool_node)
     workflow.add_node("validator", validator_node)
 
+    # FIX: This replaces the old, direct edge with a smart, conditional one.
     workflow.add_conditional_edges("router", lambda state: "general_conversation_agent")
-    workflow.add_edge("general_conversation_agent", "general_conversation_tools")
+    workflow.add_conditional_edges(
+        "general_conversation_agent",
+        decide_after_agent,
+        {
+            "general_conversation_tools": "general_conversation_tools",
+            END: END
+        }
+    )
     workflow.add_edge("general_conversation_tools", "validator")
     workflow.add_conditional_edges("validator", lambda state: END)
     
