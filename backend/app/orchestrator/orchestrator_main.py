@@ -131,7 +131,15 @@ def create_dependency_injected_tool(original_tool, db, user, lock, lock_list):
     async def injected_tool(*args, **kwargs):
         # This logic correctly maps any positional arguments from *args
         # to the actual parameter names of the original tool function.
-        sig = inspect.signature(original_tool.func if hasattr(original_tool, 'func') else original_tool)
+        
+        # DEFINITIVE FIX: The inspection logic is now robust.
+        # It correctly finds the underlying callable function for both tools
+        # defined with the `@tool` decorator and tools created manually with the `Tool` constructor.
+        target_func = original_tool.func if hasattr(original_tool, 'func') else (original_tool.coroutine if hasattr(original_tool, 'coroutine') else original_tool)
+        if not callable(target_func):
+            raise TypeError(f"The provided tool '{tool_name}' is not a callable object.")
+        
+        sig = inspect.signature(target_func)
         
         param_names = [
             p.name for p in sig.parameters.values()
@@ -151,7 +159,8 @@ def create_dependency_injected_tool(original_tool, db, user, lock, lock_list):
         call_args.update(kwargs)
 
         async def execute():
-            return await (original_tool.func if hasattr(original_tool, 'func') else original_tool)(**call_args)
+            # The execution logic is also made more robust to handle both kinds of tools.
+            return await target_func(**call_args)
 
         if needs_lock:
             async with lock: return await execute()
