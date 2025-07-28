@@ -11,7 +11,8 @@ log = logging.getLogger(__name__)
 
 # Step 1: Define the explicit Pydantic input schema.
 class GetUserDataInput(BaseModel):
-    endpoint: constr(regex=r"^\/api\/(users\/me|resume|users\/me\/documents)$") = Field(
+    # FIX: The keyword argument for the regex is 'pattern', not 'regex'.
+    endpoint: constr(pattern=r"^\/api\/(users\/me|resume|users\/me\/documents)$") = Field(
         description="The API endpoint to access. Allowed values: '/api/users/me', '/api/resume', '/api/users/me/documents'."
     )
 
