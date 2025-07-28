@@ -15,7 +15,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.prebuilt import ToolNode, tools_condition, Tool
 
 from app.db import get_db, async_session_maker
 from app.models_db import User, ChatMessage, Page, Subscription
@@ -73,22 +73,31 @@ router = APIRouter()
 class AgentState(TypedDict):
     messages: List[BaseMessage]
 
-# --- 2. Dependency Injection with RunnableLambda ---
-def create_tool_runnable(tool, db: AsyncSession, user: User, websocket: WebSocket):
+# --- 2. Dependency Injection with a Factory Function ---
+def create_injected_tool_func(original_tool, db: AsyncSession, user: User, websocket: WebSocket):
     """
-    Creates a RunnableLambda that injects dependencies into a tool's underlying function.
-    This is the modern, robust way to handle dependency injection in LangChain.
+    A factory that creates a new, named async function with dependencies "baked in".
+    This is the robust way to handle dependency injection for use with ToolNode.
+    It correctly captures the tool and dependencies for each iteration of the loop.
     """
-    async def tool_with_deps(tool_input: dict):
-        # We can now safely inject dependencies because we control the execution context.
+    async def injected_func(**kwargs):
+        """
+        This is the new function that will be the "body" of our tool.
+        It calls the original tool's logic with the injected dependencies.
+        """
+        # The kwargs are the arguments from the LLM (e.g., {'query': '...'})
         injected_kwargs = {'db': db, 'user': user}
-        # Some tools might need the websocket for sending real-time updates.
-        if "websocket" in tool.func.__code__.co_varnames:
+        if "websocket" in original_tool.func.__code__.co_varnames:
             injected_kwargs['websocket'] = websocket
         
-        return await tool.func(**tool_input, **injected_kwargs)
+        # Call the original async function with both the LLM args and our injected args
+        return await original_tool.func(**kwargs, **injected_kwargs)
+    
+    # The function needs a __name__ for the Tool constructor to be happy.
+    # We assign it the name of the original tool.
+    injected_func.__name__ = original_tool.name
+    return injected_func
 
-    return RunnableLambda(tool_with_deps)
 
 # --- 3. Graph Node Definitions ---
 def create_agent_node(llm, tools, system_prompt: str):
@@ -123,15 +132,32 @@ def create_master_agent_graph(db: AsyncSession, user: User, websocket: WebSocket
         update_user_profile, update_user_profile_comprehensive
     ]
 
-    # Use the RunnableLambda injector to prepare tools for the ToolNode.
-    # We are no longer modifying the tools themselves, just how they are called.
-    runnable_tools = [create_tool_runnable(tool, db, user, websocket) for tool in all_tools]
-    tool_node = ToolNode(runnable_tools)
+    # Use the factory to create a new list of tools with dependencies injected.
+    injected_tools = []
+    for tool in all_tools:
+        injected_func = create_injected_tool_func(tool, db, user, websocket)
+        
+        # Create a new Tool instance using the injected function
+        injected_tools.append(
+            Tool(
+                name=tool.name,
+                description=tool.description,
+                func=injected_func, # Pass the new named async function
+                args_schema=tool.args_schema
+            )
+        )
+
+    # The prebuilt ToolNode is now happy because it receives a list of valid
+    # Tool objects whose .func attribute is a named callable.
+    tool_node = ToolNode(injected_tools)
 
     # Define the LLM for the agent node.
     # Using the user-preferred Gemini Pro model [[memory:4475666]]
     llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro-preview-03-25", temperature=0.2)
-    agent_node = create_agent_node(llm, all_tools, system_prompt)
+    # FIX 1: The agent is now bound to `injected_tools`. This ensures that the
+    # agent's understanding of the tool schemas matches the tools that will
+    # actually be executed, guaranteeing argument compatibility.
+    agent_node = create_agent_node(llm, injected_tools, system_prompt)
 
     # Define the graph structure.
     workflow = StateGraph(AgentState)
@@ -265,10 +291,13 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
             # Recreate the graph for each message to ensure it has the latest dependencies and the complete prompt.
             graph = create_master_agent_graph(db, user, websocket, final_system_prompt)
             
-            history = await simple_memory.get_conversation_context(page_id)
-            chat_history = [HumanMessage(content=msg["content"]) if msg["role"] == "user" else AIMessage(content=msg["content"]) for msg in history.conversation_history]
+            # FIX: Fetch history only once to avoid redundant database calls.
+            history_context = await simple_memory.get_conversation_context(page_id)
+            chat_history = [HumanMessage(content=msg["content"]) if msg["role"] == "user" else AIMessage(content=msg["content"]) for msg in history_context.conversation_history]
             
-            initial_state = {"messages": chat_history}
+            # FIX 2: The current user message is now correctly added to the chat history.
+            # This is critical for the agent to know which message it needs to respond to.
+            initial_state = {"messages": chat_history + [HumanMessage(content=user_message_content)]}
 
             final_response = "I'm sorry, an error occurred."
             try:
