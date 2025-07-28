@@ -126,7 +126,6 @@ def create_dependency_injected_tool(original_tool, db, user, lock, lock_list):
     tool_name = getattr(original_tool, 'name', getattr(original_tool, '__name__', 'unknown'))
     needs_lock = tool_name in lock_list
 
-    # FIX: The signature is changed to accept positional arguments (*args) as well.
     # This makes the wrapper robust to however the AI decides to invoke the tool.
     async def injected_tool(*args, **kwargs):
         # This logic correctly maps any positional arguments from *args
@@ -137,7 +136,12 @@ def create_dependency_injected_tool(original_tool, db, user, lock, lock_list):
         # defined with the `@tool` decorator and tools created manually with the `Tool` constructor.
         target_func = original_tool.func if hasattr(original_tool, 'func') else (original_tool.coroutine if hasattr(original_tool, 'coroutine') else original_tool)
         if not callable(target_func):
-            raise TypeError(f"The provided tool '{tool_name}' is not a callable object.")
+            # This handles cases where a tool object might be malformed or not a function.
+            # It provides a clear error message instead of crashing.
+            log.error(f"Tool '{tool_name}' is not a callable object. It might be missing a function definition.")
+            # We must return a value here to prevent the graph from crashing.
+            # An error message is appropriate for the user to see.
+            return f"Error: The tool '{tool_name}' is not configured correctly."
         
         sig = inspect.signature(target_func)
         
@@ -230,10 +234,10 @@ def create_tool_node(tools):
             # LangChain causing the error and mimics our successful direct test.
             if isinstance(call["args"], dict):
                 # For multi-argument tools, unpack the dictionary of arguments.
-                result = await tool.func(**call["args"])
+                result = await tool.ainvoke(call["args"], {"user": user, "db": db})
             else:
                 # For any single-input tools, pass the argument directly.
-                result = await tool.func(call["args"])
+                result = await tool.ainvoke(call["args"], {"user": user, "db": db})
 
             tool_results.append(result)
             reasoning_events.append({
