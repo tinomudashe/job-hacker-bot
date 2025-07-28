@@ -2,35 +2,37 @@ from langchain_core.tools import tool
 import logging
 from app.linkedin_jobs_service import get_linkedin_jobs_service
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Dict, Any
 
 log = logging.getLogger(__name__)
 
-# This Pydantic model defines the exact input schema for the tool.
+# This schema now just signals that the input is a dictionary.
 class LinkedInSearchInput(BaseModel):
-    keyword: str = Field(description="Job search terms (e.g., 'software engineer', 'python developer')")
-    location: str = Field(default="Remote", description="Location to search in (e.g., 'Poland', 'Remote', 'Warsaw')")
-    job_type: Optional[str] = Field(default="", description="Type of position ('full time', 'part time', 'contract', 'internship')")
-    experience_level: Optional[str] = Field(default="", description="Level ('internship', 'entry level', 'associate', 'senior')")
-    limit: Optional[int] = Field(default=10, description="Number of jobs to return (max 25)")
+    tool_input: Dict[str, Any] = Field(description="A dictionary containing the job search parameters.")
 
-# The @tool decorator now uses the Pydantic model as its `args_schema`.
-# The function now accepts a single argument: an instance of the Pydantic model.
-# This is the correct way to define a multi-argument tool.
-@tool(args_schema=LinkedInSearchInput)
-async def search_jobs_linkedin_api(tool_input: LinkedInSearchInput) -> str:
+@tool
+async def search_jobs_linkedin_api(tool_input: dict) -> str:
     """⭐ JOB SEARCH API - Direct access to job listings!
     
     Uses professional job search API for reliable, fast job searches.
-    NO BROWSER AUTOMATION - Direct API access for instant results.
+    Accepts a single dictionary with the following keys:
+    - keyword (str): Job search terms (e.g., 'software engineer'). Required.
+    - location (str): Location to search in. Defaults to 'Remote'.
+    - job_type (str): 'full time', 'part time', etc. Optional.
+    - experience_level (str): 'internship', 'entry level', etc. Optional.
+    - limit (int): Number of jobs to return. Defaults to 10.
     """
     try:
-        # We now access the arguments from the tool_input object.
-        keyword = tool_input.keyword
-        location = tool_input.location
-        job_type = tool_input.job_type
-        experience_level = tool_input.experience_level
-        limit = tool_input.limit
+        # Manually and safely extract arguments from the input dictionary.
+        # This makes the tool a true single-input tool, resolving the error.
+        keyword = tool_input.get("keyword")
+        if not keyword:
+            return "Error: The 'keyword' argument is required for a job search."
+            
+        location = tool_input.get("location", "Remote")
+        job_type = tool_input.get("job_type", "")
+        experience_level = tool_input.get("experience_level", "")
+        limit = tool_input.get("limit", 10)
 
         log.info(f"🔗 Starting job search for '{keyword}' in '{location}'")
         
