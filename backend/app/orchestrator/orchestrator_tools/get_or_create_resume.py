@@ -3,6 +3,7 @@ from typing import Tuple, Union
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.models_db import Resume, User
+# FIX: Import 'ResumeData' and 'PersonalInfo' from the correct central model file.
 from app.orchestrator.education_input import ResumeData, PersonalInfo
 
 log = logging.getLogger(__name__)

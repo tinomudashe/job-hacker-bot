@@ -7,7 +7,8 @@ import uuid
 
 from app.models_db import User
 from .get_or_create_resume import get_or_create_resume
-from app.orchestrator.project_input import Project
+# FIX: Import 'Project' from the correct central model file.
+from ..education_input import Project
 from sqlalchemy.orm.attributes import flag_modified
 
 log = logging.getLogger(__name__)

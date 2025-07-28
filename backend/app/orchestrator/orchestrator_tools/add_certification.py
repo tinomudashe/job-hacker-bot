@@ -8,7 +8,8 @@ from langchain_core.tools import Tool
 
 from app.models_db import User
 from .get_or_create_resume import get_or_create_resume
-from app.orchestrator.certification_input import Certification
+# FIX: Import 'Certification' from the correct central model file.
+from ..education_input import Certification
 
 log = logging.getLogger(__name__)
 

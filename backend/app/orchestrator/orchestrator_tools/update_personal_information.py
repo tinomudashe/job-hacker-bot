@@ -7,7 +7,8 @@ from langchain_core.tools import Tool
 
 from app.models_db import User
 from .get_or_create_resume import get_or_create_resume
-from ..personal_Info import PersonalInfo
+# FIX: Import 'PersonalInfo' from the correct central model file.
+from ..education_input import PersonalInfo
 
 log = logging.getLogger(__name__)
 

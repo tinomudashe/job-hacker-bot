@@ -8,6 +8,7 @@ from langchain_core.tools import Tool
 
 from app.models_db import User
 from .get_or_create_resume import get_or_create_resume
+# FIX: Import 'Education' and 'Dates' from the correct central model file.
 from ..education_input import Education, Dates
 
 log = logging.getLogger(__name__)

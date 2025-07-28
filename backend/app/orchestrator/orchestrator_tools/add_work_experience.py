@@ -7,7 +7,8 @@ import uuid
 
 from app.models_db import User, Resume
 from .get_or_create_resume import get_or_create_resume
-from app.orchestrator.work_experience_input import Experience, Dates
+# FIX: Import 'Experience' and 'Dates' from the correct model file.
+from ..work_experience_input import Experience, Dates
 from sqlalchemy.orm.attributes import flag_modified
 
 log = logging.getLogger(__name__)
