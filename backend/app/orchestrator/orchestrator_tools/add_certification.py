@@ -54,9 +54,11 @@ async def _add_certification(
         return f"❌ An error occurred while adding the certification: {e}"
 
 # Step 3: Manually construct the Tool object with the explicit schema.
+# FIX: Replaced the lambda with a direct reference to the named function `_add_certification`.
+# This resolves the `TypeError` because `_add_certification` has the required `__name__` attribute.
 add_certification = Tool(
     name="add_certification",
     description="Adds a new certification to the user's resume.",
-    func=lambda **kwargs: _add_certification(**kwargs),
+    func=_add_certification,
     args_schema=AddCertificationInput
 )

@@ -65,12 +65,12 @@ async def _search_jobs_tool(
 
     except Exception as e:
         log.error(f"Error in _search_jobs_tool for user {user.id}: {e}", exc_info=True)
-        return "Sorry, I encountered an error while searching for jobs. Please try again."
+        return "An unexpected error occurred while searching for jobs. Please try again later."
 
 # Step 3: Manually construct the Tool object with the explicit schema.
 search_jobs_tool = Tool(
     name="search_jobs_tool",
-    description="Searches for job postings using the Google Cloud Talent Solution API with a mock data fallback.",
-    func=lambda **kwargs: _search_jobs_tool(**kwargs),
+    description="Searches for job listings based on a query, location, and other filters.",
+    func=_search_jobs_tool,
     args_schema=JobSearchInput
 )

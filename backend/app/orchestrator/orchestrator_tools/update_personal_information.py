@@ -55,7 +55,7 @@ async def _update_personal_information(db: AsyncSession, user: User, **kwargs) -
 # Step 3: Manually construct the Tool object with the explicit schema.
 update_personal_information = Tool(
     name="update_personal_information",
-    description="Updates one or more fields in the personal information section of the user's resume.",
-    func=lambda **kwargs: _update_personal_information(**kwargs),
+    description="Updates the user's personal information (name, email, phone, location, etc.) on their resume.",
+    func=_update_personal_information,
     args_schema=UpdatePersonalInfoInput
 )
