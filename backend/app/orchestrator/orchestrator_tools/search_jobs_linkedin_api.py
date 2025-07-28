@@ -1,39 +1,31 @@
-from langchain_core.tools import tool
 import logging
+from typing import Optional, Type
 from app.linkedin_jobs_service import get_linkedin_jobs_service
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from langchain_core.tools import Tool
 
 log = logging.getLogger(__name__)
 
-# This schema now just signals that the input is a dictionary.
+# Step 1: Define the Pydantic model for the tool's arguments.
+# This provides a clear, explicit schema.
 class LinkedInSearchInput(BaseModel):
-    tool_input: Dict[str, Any] = Field(description="A dictionary containing the job search parameters.")
+    keyword: str = Field(description="Job search terms (e.g., 'software engineer', 'python developer')")
+    location: str = Field(default="Remote", description="Location to search in (e.g., 'Poland', 'Remote', 'Warsaw')")
+    job_type: Optional[str] = Field(default="", description="Type of position ('full time', 'part time', 'contract', 'internship')")
+    experience_level: Optional[str] = Field(default="", description="Level ('internship', 'entry level', 'associate', 'senior')")
+    limit: Optional[int] = Field(default=10, description="Number of jobs to return (max 25)")
 
-@tool
-async def search_jobs_linkedin_api(tool_input: dict) -> str:
-    """⭐ JOB SEARCH API - Direct access to job listings!
-    
-    Uses professional job search API for reliable, fast job searches.
-    Accepts a single dictionary with the following keys:
-    - keyword (str): Job search terms (e.g., 'software engineer'). Required.
-    - location (str): Location to search in. Defaults to 'Remote'.
-    - job_type (str): 'full time', 'part time', etc. Optional.
-    - experience_level (str): 'internship', 'entry level', etc. Optional.
-    - limit (int): Number of jobs to return. Defaults to 10.
-    """
+# Step 2: Define the core logic as a plain async function.
+# This function is NOT decorated with @tool.
+async def _search_jobs(
+        keyword: str,
+        location: str = "Remote",
+        job_type: str = "",
+        experience_level: str = "",
+        limit: int = 10
+    ) -> str:
+    """The underlying implementation of the job search tool."""
     try:
-        # Manually and safely extract arguments from the input dictionary.
-        # This makes the tool a true single-input tool, resolving the error.
-        keyword = tool_input.get("keyword")
-        if not keyword:
-            return "Error: The 'keyword' argument is required for a job search."
-            
-        location = tool_input.get("location", "Remote")
-        job_type = tool_input.get("job_type", "")
-        experience_level = tool_input.get("experience_level", "")
-        limit = tool_input.get("limit", 10)
-
         log.info(f"🔗 Starting job search for '{keyword}' in '{location}'")
         
         linkedin_service = get_linkedin_jobs_service()
@@ -69,3 +61,12 @@ async def search_jobs_linkedin_api(tool_input: dict) -> str:
     except Exception as e:
         log.error(f"Error in LinkedIn API search: {e}", exc_info=True)
         return "An error occurred during the job search. Please try again."
+
+# Step 3: Manually construct the Tool object.
+# This is the most explicit method and avoids any decorator magic.
+search_jobs_linkedin_api = Tool(
+    name="search_jobs_linkedin_api",
+    description="⭐ JOB SEARCH API - Direct access to job listings! Uses professional job search API for reliable, fast job searches. NO BROWSER AUTOMATION - Direct API access for instant results.",
+    func=_search_jobs,
+    args_schema=LinkedInSearchInput
+)

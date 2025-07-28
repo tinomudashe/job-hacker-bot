@@ -7,6 +7,41 @@ from app.models_db import User
 # --- DEFINITIVE FIX ---
 # We now import the newly separated, testable graph creation function.
 from app.orchestrator.orchestrator_main import create_master_agent_graph
+from app.orchestrator.orchestrator_tools.search_jobs_linkedin_api import search_jobs_linkedin_api
+
+# THIS TEST IS NO LONGER NEEDED AND WILL BE REMOVED
+# @pytest.mark.asyncio
+# async def test_search_jobs_linkedin_api_direct_call():
+#     """
+#     Tests the search_jobs_linkedin_api tool directly to ensure it
+#     handles multiple arguments correctly after the refactoring.
+#     """
+#     print("\n--- Testing search_jobs_linkedin_api ---")
+#     
+#     # Define the arguments as a dictionary, simulating how the AI would call it.
+#     test_args = {
+#         "keyword": "Python Developer",
+#         "location": "Warsaw",
+#         "limit": 3
+#     }
+#     
+#     try:
+#         # Await the tool's core function with the arguments.
+#         result = await search_jobs_linkedin_api.func(**test_args)
+#         
+#         # Print the result to the console for verification.
+#         print("Tool executed successfully. Result:")
+#         print(result)
+#         
+#         # A successful result should contain the header and job listings.
+#         assert "Found" in result
+#         assert "jobs for 'Python Developer' in Warsaw" in result
+#         assert "Apply:" in result
+#         
+#     except Exception as e:
+#         # If any exception occurs, the test will fail and print the error.
+#         print(f"Tool execution failed with error: {e}")
+#         pytest.fail(f"search_jobs_linkedin_api raised an exception: {e}")
 
 @pytest.fixture
 def mock_db_session():
