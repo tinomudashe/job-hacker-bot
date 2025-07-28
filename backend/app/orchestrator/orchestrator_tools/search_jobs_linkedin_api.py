@@ -7,18 +7,18 @@ from langchain_core.tools import Tool
 log = logging.getLogger(__name__)
 
 # Step 1: Define the Pydantic model for the tool's arguments.
-# This provides a clear, explicit schema.
+# FIX: The field is renamed from `keyword` to `query` to match what the AI is sending.
 class LinkedInSearchInput(BaseModel):
-    keyword: str = Field(description="Job search terms (e.g., 'software engineer', 'python developer')")
+    query: str = Field(description="Job search query (e.g., 'software engineer', 'python developer')")
     location: str = Field(default="Remote", description="Location to search in (e.g., 'Poland', 'Remote', 'Warsaw')")
     job_type: Optional[str] = Field(default="", description="Type of position ('full time', 'part time', 'contract', 'internship')")
     experience_level: Optional[str] = Field(default="", description="Level ('internship', 'entry level', 'associate', 'senior')")
     limit: Optional[int] = Field(default=10, description="Number of jobs to return (max 25)")
 
 # Step 2: Define the core logic as a plain async function.
-# This function is NOT decorated with @tool.
+# FIX: The function signature is updated to accept `query` instead of `keyword`.
 async def _search_jobs(
-        keyword: str,
+        query: str,
         location: str = "Remote",
         job_type: str = "",
         experience_level: str = "",
@@ -26,12 +26,13 @@ async def _search_jobs(
     ) -> str:
     """The underlying implementation of the job search tool."""
     try:
-        log.info(f"🔗 Starting job search for '{keyword}' in '{location}'")
+        log.info(f"🔗 Starting job search for '{query}' in '{location}'")
         
         linkedin_service = get_linkedin_jobs_service()
         
+        # FIX: The local `query` variable is correctly passed to the `keyword` parameter of the service.
         jobs = await linkedin_service.search_jobs(
-            keyword=keyword,
+            keyword=query,
             location=location,
             job_type=job_type,
             experience_level=experience_level,
@@ -40,7 +41,7 @@ async def _search_jobs(
         )
         
         if not jobs:
-            return f"🔍 No jobs found for '{keyword}' in {location}.\n\n💡 **Suggestions:**\n• Try different keywords\n• Expand location"
+            return f"🔍 No jobs found for '{query}' in {location}.\n\n💡 **Suggestions:**\n• Try different queries\n• Expand location"
         
         formatted_jobs = []
         for i, job in enumerate(jobs, 1):
@@ -53,7 +54,7 @@ async def _search_jobs(
             if job.job_url: job_text += f"\n   🔗 **Apply:** {job.job_url}"
             formatted_jobs.append(job_text)
         
-        result_header = f"🎯 **Found {len(jobs)} jobs for '{keyword}' in {location}:**\n\n"
+        result_header = f"🎯 **Found {len(jobs)} jobs for '{query}' in {location}:**\n\n"
         result_body = "\n\n---\n\n".join(formatted_jobs)
         
         return result_header + result_body
@@ -63,7 +64,6 @@ async def _search_jobs(
         return "An error occurred during the job search. Please try again."
 
 # Step 3: Manually construct the Tool object.
-# This is the most explicit method and avoids any decorator magic.
 search_jobs_linkedin_api = Tool(
     name="search_jobs_linkedin_api",
     description="⭐ JOB SEARCH API - Direct access to job listings! Uses professional job search API for reliable, fast job searches. NO BROWSER AUTOMATION - Direct API access for instant results.",
