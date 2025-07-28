@@ -1,56 +1,45 @@
-from langchain_core.tools import tool
 import logging
-log = logging.getLogger(__name__)
-
+from typing import Optional
+from pydantic import BaseModel, Field
+from langchain_core.tools import Tool
 from app.langchain_webbrowser import create_webbrowser_tool
 
+log = logging.getLogger(__name__)
 
-@tool
-async def browse_web_with_langchain(
+# Step 1: Define the explicit Pydantic input schema.
+class BrowseWebInput(BaseModel):
+    url: str = Field(description="The URL to browse.")
+    query: Optional[str] = Field(default="", description="Specific query about what to find on the page.")
+
+# Step 2: Define the core logic as a plain async function.
+async def _browse_web_with_langchain(
         url: str,
         query: str = ""
     ) -> str:
-        """
-        Use the official LangChain WebBrowser tool to browse and extract information from web pages.
+    """The underlying implementation for browsing a web page and extracting information."""
+    try:
+        log.info(f"Browsing URL: {url} with query: '{query}'")
         
-        This tool provides intelligent web browsing with AI-powered content extraction and summarization.
-        It's particularly useful for extracting job information from job posting URLs.
+        webbrowser_tool = create_webbrowser_tool()
         
-        Args:
-            url: The URL to browse and extract information from
-            query: Optional specific query about what to find on the page (e.g., "job requirements", "salary information")
-                  If empty, will provide a general summary of the page content
+        browser_input = f"{url},{query}" if query else url
         
-        Returns:
-            Extracted and summarized information from the webpage, with relevant links if available
-        """
-        try:
-            from app.langchain_webbrowser import create_webbrowser_tool
+        result = await webbrowser_tool.arun(browser_input)
+        
+        if result:
+            return f"🌐 **Web Content from {url}:**\n\n{result}"
+        else:
+            log.warning(f"WebBrowser tool returned empty result for {url}")
+            return f"❌ Could not extract content from {url}. The page might be inaccessible."
             
-            log.info(f"Using official LangChain WebBrowser tool for URL: {url}")
-            
-            # Create the WebBrowser tool
-            webbrowser_tool = create_webbrowser_tool()
-            
-            # Prepare input for WebBrowser tool
-            # Format: "URL,query" or just "URL" for summary
-            if query:
-                browser_input = f"{url},{query}"
-                log.info(f"WebBrowser query: '{query}'")
-            else:
-                browser_input = url
-                log.info("WebBrowser mode: general summary")
-            
-            # Use the WebBrowser tool
-            result = await webbrowser_tool.arun(browser_input)
-            
-            if result:
-                log.info(f"WebBrowser tool successful for {url}")
-                return f"🌐 **Web Content from {url}:**\n\n{result}"
-            else:
-                log.warning(f"WebBrowser tool returned empty result for {url}")
-                return f"❌ Could not extract content from {url}. The page might be inaccessible or protected."
-                
-        except Exception as e:
-            log.error(f"Error using LangChain WebBrowser tool for {url}: {e}")
-            return f"❌ Error browsing {url}: {str(e)}. Please try again or use a different URL."
+    except Exception as e:
+        log.error(f"Error in _browse_web_with_langchain for {url}: {e}", exc_info=True)
+        return f"❌ Error browsing {url}: {str(e)}."
+
+# Step 3: Manually construct the Tool object with the explicit schema.
+browse_web_with_langchain = Tool(
+    name="browse_web_with_langchain",
+    description="Browse a web page to extract and summarize information. Useful for getting details from job posting URLs.",
+    func=_browse_web_with_langchain,
+    args_schema=BrowseWebInput
+)

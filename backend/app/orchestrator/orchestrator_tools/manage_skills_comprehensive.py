@@ -1,126 +1,78 @@
-from typing import Optional, List
-from langchain_core.tools import tool
 import logging
+from typing import Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import attributes
+from pydantic import BaseModel, Field
+from langchain_core.tools import Tool
+
 from app.models_db import User
 from .get_or_create_resume import get_or_create_resume
 
 log = logging.getLogger(__name__)
 
-@tool
-async def manage_skills_comprehensive(
+# Step 1: Define the explicit Pydantic input schema.
+class ManageSkillsInput(BaseModel):
+    skills_to_add: Optional[List[str]] = Field(default=None, description="A list of skills to add to the resume.")
+    skills_to_remove: Optional[List[str]] = Field(default=None, description="A list of skills to remove from the resume.")
+    replace_all_skills: Optional[List[str]] = Field(default=None, description="A new list of skills that will completely replace the existing skills.")
+
+# Step 2: Define the core logic as a plain async function.
+async def _manage_skills_comprehensive(
     db: AsyncSession,
     user: User,
-    technical_skills: Optional[str] = None,
-    programming_languages: Optional[str] = None,
-    frameworks_libraries: Optional[str] = None,
-    databases: Optional[str] = None,
-    cloud_platforms: Optional[str] = None,
-    tools_software: Optional[str] = None,
-    soft_skills: Optional[str] = None,
-    languages_spoken: Optional[str] = None,
-    certifications: Optional[str] = None,
-    replace_all: bool = False
+    skills_to_add: Optional[List[str]] = None,
+    skills_to_remove: Optional[List[str]] = None,
+    replace_all_skills: Optional[List[str]] = None
 ) -> str:
-    """
-    Comprehensive skills management with categorization and exact variables.
-    
-    Args:
-        technical_skills: General technical skills (e.g., "Machine Learning, Data Analysis, Web Development")
-        programming_languages: Programming languages (e.g., "Python, JavaScript, Java, C++, SQL")
-        frameworks_libraries: Frameworks and libraries (e.g., "React, Django, TensorFlow, pandas")
-        databases: Database systems (e.g., "PostgreSQL, MongoDB, Redis, MySQL")
-        cloud_platforms: Cloud services (e.g., "AWS, Google Cloud, Azure, Docker, Kubernetes")
-        tools_software: Tools and software (e.g., "Git, VS Code, Jupyter, Figma, Photoshop")
-        soft_skills: Interpersonal skills (e.g., "Leadership, Communication, Problem Solving")
-        languages_spoken: Spoken languages (e.g., "English (Native), Polish (Fluent), Spanish (Basic)")
-        certifications: Professional certifications (e.g., "AWS Solutions Architect, PMP, Google Analytics")
-        replace_all: If True, replaces all skills. If False, adds to existing skills.
-    
-    Returns:
-        Success message with updated skills breakdown
-    """
+    """The underlying implementation for comprehensively managing the user's skills list."""
     try:
         db_resume, resume_data = await get_or_create_resume(db, user)
+        if isinstance(resume_data, str): # Error case
+            return resume_data
         
-        # Collect all skills into categorized list
-        all_skills = []
-        skill_categories = []
-        
-        if technical_skills:
-            tech_list = [skill.strip() for skill in technical_skills.split(",") if skill.strip()]
-            all_skills.extend(tech_list)
-            skill_categories.append(f"Technical Skills: {len(tech_list)} skills")
-        
-        if programming_languages:
-            prog_list = [skill.strip() for skill in programming_languages.split(",") if skill.strip()]
-            all_skills.extend(prog_list)
-            skill_categories.append(f"Programming Languages: {len(prog_list)} languages")
-        
-        if frameworks_libraries:
-            framework_list = [skill.strip() for skill in frameworks_libraries.split(",") if skill.strip()]
-            all_skills.extend(framework_list)
-            skill_categories.append(f"Frameworks & Libraries: {len(framework_list)} items")
-        
-        if databases:
-            db_list = [skill.strip() for skill in databases.split(",") if skill.strip()]
-            all_skills.extend(db_list)
-            skill_categories.append(f"Databases: {len(db_list)} systems")
-        
-        if cloud_platforms:
-            cloud_list = [skill.strip() for skill in cloud_platforms.split(",") if skill.strip()]
-            all_skills.extend(cloud_list)
-            skill_categories.append(f"Cloud Platforms: {len(cloud_list)} platforms")
-        
-        if tools_software:
-            tools_list = [skill.strip() for skill in tools_software.split(",") if skill.strip()]
-            all_skills.extend(tools_list)
-            skill_categories.append(f"Tools & Software: {len(tools_list)} tools")
-        
-        if soft_skills:
-            soft_list = [skill.strip() for skill in soft_skills.split(",") if skill.strip()]
-            all_skills.extend(soft_list)
-            skill_categories.append(f"Soft Skills: {len(soft_list)} skills")
-        
-        if languages_spoken:
-            lang_list = [skill.strip() for skill in languages_spoken.split(",") if skill.strip()]
-            all_skills.extend(lang_list)
-            skill_categories.append(f"Languages: {len(lang_list)} languages")
-        
-        if certifications:
-            cert_list = [skill.strip() for skill in certifications.split(",") if skill.strip()]
-            all_skills.extend(cert_list)
-            skill_categories.append(f"Certifications: {len(cert_list)} certifications")
-        
-        # Update skills in resume
-        if replace_all or not resume_data.skills:
-            resume_data.skills = all_skills
-            action = "replaced"
+        # Ensure skills list exists and is a set for efficient operations
+        current_skills = set(resume_data.skills or [])
+        actions_taken = []
+
+        if replace_all_skills is not None:
+            current_skills = {skill.strip() for skill in replace_all_skills if skill.strip()}
+            actions_taken.append(f"Replaced all skills with {len(current_skills)} new skills.")
         else:
-            # Add to existing skills, avoiding duplicates
-            existing_skills = set(resume_data.skills)
-            new_skills = [skill for skill in all_skills if skill not in existing_skills]
-            resume_data.skills.extend(new_skills)
-            action = "added"
+            if skills_to_add:
+                added_count = len(current_skills)
+                current_skills.update({skill.strip() for skill in skills_to_add if skill.strip()})
+                actions_taken.append(f"Added {len(current_skills) - added_count} new skills.")
+            
+            if skills_to_remove:
+                removed_count = len(current_skills)
+                current_skills.difference_update({skill.strip() for skill in skills_to_remove if skill.strip()})
+                actions_taken.append(f"Removed {removed_count - len(current_skills)} skills.")
+
+        if not actions_taken:
+            return "No skill management actions were specified. Please provide skills to add, remove, or replace."
+
+        # Update both resume data and user profile skills for consistency
+        sorted_skills = sorted(list(current_skills))
+        resume_data.skills = sorted_skills
+        user.skills = ", ".join(sorted_skills) # Sync with the user model
+
+        db_resume.data = resume_data.model_dump(exclude_none=True)
+        attributes.flag_modified(db_resume, "data")
         
-        # Also update user profile skills field for consistency
-        user.skills = ", ".join(resume_data.skills)
-        
-        db_resume.data = resume_data.dict()
         await db.commit()
-        
-        result_message = f"✅ **Skills {action.title()} Successfully!**\n\n"
-        
-        if skill_categories:
-            result_message += "**Updated Categories:**\n" + "\n".join(f"• {cat}" for cat in skill_categories)
-            result_message += f"\n\n**Total Skills:** {len(resume_data.skills)}"
-        else:
-            result_message += "No skills provided to update."
-        
-        return result_message
-        
+
+        log.info(f"Successfully managed skills for user {user.id}: {', '.join(actions_taken)}")
+        return f"✅ Skills updated successfully: {', '.join(actions_taken)}"
+
     except Exception as e:
-        if db.is_active:
-            await db.rollback()
-        log.error(f"Error managing skills: {e}")
-        return f"❌ Error updating skills: {str(e)}"
+        log.error(f"Error in _manage_skills_comprehensive for user {user.id}: {e}", exc_info=True)
+        await db.rollback()
+        return f"❌ An error occurred while managing your skills: {e}"
+
+# Step 3: Manually construct the Tool object with the explicit schema.
+manage_skills_comprehensive = Tool(
+    name="manage_skills_comprehensive",
+    description="Manages the user's skills list by adding, removing, or replacing skills.",
+    func=_manage_skills_comprehensive,
+    args_schema=ManageSkillsInput
+)

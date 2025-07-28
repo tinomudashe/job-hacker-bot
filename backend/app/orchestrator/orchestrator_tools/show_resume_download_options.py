@@ -1,41 +1,38 @@
-from langchain_core.tools import tool
 import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
+from langchain_core.tools import Tool
+
 from app.models_db import Resume, User
 
 log = logging.getLogger(__name__)
 
-@tool
-async def show_resume_download_options(db: AsyncSession, user: User) -> str:
-    """Show download options for the user's resume with PDF styling choices.
-    
-    Returns:
-        Professional resume download interface with multiple PDF styles
-    """
+# Step 1: Define the explicit Pydantic input schema (even if empty).
+class ShowDownloadOptionsInput(BaseModel):
+    pass
+
+# Step 2: Define the core logic as a plain async function.
+async def _show_resume_download_options(db: AsyncSession, user: User) -> str:
+    """The underlying implementation for showing resume download options."""
     try:
-        # Check if user has resume data
         result = await db.execute(select(Resume).where(Resume.user_id == user.id))
         db_resume = result.scalars().first()
         
-        if not db_resume:
-            return "❌ **No Resume Found**\n\nPlease create your resume first by adding:\n- Personal information\n- Work experience\n- Education\n- Skills\n\nUse the resume tools to build your professional resume!"
+        if not db_resume or not db_resume.data:
+            return "❌ **No Resume Found**: Please create your resume first using the resume-building tools."
         
-        return f"""[DOWNLOADABLE_RESUME]
-
-## 📄 **CV/Resume Ready for Download**
-
-✅ **Your CV/Resume is ready for download!**
-
-You can download your CV/Resume in multiple professional styles. The download dialog will let you:
-
-- **Choose from 3 professional styles** (Modern, Classic, Minimal)
-- **Edit content** before downloading if needed
-- **Preview** your CV/Resume before downloading
-- **Download all styles** at once
-
-**A download button (📥) should appear on this message to access all options.**"""
+        # This special string is a command for the frontend to open the PDF generation dialog.
+        return "[DOWNLOADABLE_RESUME]\n\nYour resume is ready. A dialog should appear to select your preferred style and download the PDF."
         
     except Exception as e:
-        log.error(f"Error showing resume download options: {e}", exc_info=True)
-        return f"❌ Sorry, I encountered an error while preparing your resume download options: {str(e)}. Please try again."
+        log.error(f"Error in _show_resume_download_options for user {user.id}: {e}", exc_info=True)
+        return f"❌ An error occurred while preparing your resume for download."
+
+# Step 3: Manually construct the Tool object with the explicit schema.
+show_resume_download_options = Tool(
+    name="show_resume_download_options",
+    description="Shows download options for the user's resume, triggering the PDF styling and generation dialog on the frontend.",
+    func=_show_resume_download_options,
+    args_schema=ShowDownloadOptionsInput
+)

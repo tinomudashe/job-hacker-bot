@@ -1,94 +1,59 @@
-from langchain_core.tools import tool
 import logging
 from typing import Optional
+from datetime import datetime
 import httpx
 from urllib.parse import quote_plus
-from datetime import datetime
 from bs4 import BeautifulSoup
+from pydantic import BaseModel, Field
+from langchain_core.tools import Tool
 
 log = logging.getLogger(__name__)
 
-@tool
-async def search_web_for_advice(
-        query: str,
-        context: Optional[str] = None
-    ) -> str:
-    """
-    Search the web for up-to-date information, advice, and guidance.
-    
-    Use this tool when providing career advice, industry insights, latest trends,
-    or any information that requires current, real-time data from the internet.
-    
-    Args:
-        query: The search query for current information (e.g., "latest software engineering trends", 
-                "how to negotiate salary in tech", "remote work best practices")
-        context: Optional context about why this search is needed (e.g., "user asking for interview tips")
-    
-    Returns:
-        Current information and insights from web search results
-    """
+# Step 1: Define the explicit Pydantic input schema.
+class WebSearchInput(BaseModel):
+    query: str = Field(description="The search query for current information.")
+    context: Optional[str] = Field(default=None, description="Optional context about why this search is needed.")
+
+# Step 2: Define the core logic as a plain async function.
+async def _search_web_for_advice(query: str, context: Optional[str] = None) -> str:
+    """The underlying implementation for searching the web for up-to-date information."""
     try:
-        # Format search query for better results with current year
-        current_year = datetime.now().year
+        search_query = f"{query} {context or ''} {datetime.now().year}".strip()
+        log.info(f"🔍 Searching web for: '{search_query}'")
         
-        if context:
-            search_query = f"{query} {context} {current_year}"
-        else:
-            search_query = f"{query} {current_year}"
-        
-        log.info(f"🔍 Web search for advice: '{search_query}'")
-        
-        # Use DuckDuckGo search (no API key needed)
         encoded_query = quote_plus(search_query)
         search_url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
         
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        
-        async with httpx.AsyncClient(timeout=15.0, headers=headers) as client:
+        async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
             response = await client.get(search_url, follow_redirects=True)
-            
-            if response.status_code != 200:
-                return f"❌ Unable to fetch current information for '{query}' at the moment. I'll provide guidance based on established best practices instead."
-            
-            # Parse search results (basic HTML parsing)
+            response.raise_for_status()
+
             soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Extract search result snippets
             results = []
-            result_links = soup.find_all('a', class_='result__a')[:5]  # Get first 5 results
-            
-            for link in result_links:
+            for link in soup.find_all('a', class_='result__a', limit=3):
                 title = link.get_text(strip=True)
-                if title and len(title) > 10:  # Valid title
-                    # Find the snippet for this result
-                    result_container = link.find_parent('div', class_='result__body') or link.find_parent('div')
-                    if result_container:
-                        snippet_elem = result_container.find('a', class_='result__snippet')
-                        snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
-                        
-                        if snippet and len(snippet) > 20:
-                            results.append(f"**{title}**\n{snippet}")
+                snippet_elem = link.find_next_sibling('a', class_='result__snippet')
+                snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
+                if title and snippet:
+                    results.append(f"**{title}**\n{snippet}")
             
             if not results:
-                return f"❌ No current information found for '{query}'. I'll provide general guidance based on my knowledge instead."
+                return "❌ No relevant information found from the web search."
             
-            search_results = "\n\n".join(results[:3])  # Use top 3 results
-            
-            # Format the results for career/advice context
-            formatted_response = f"""🌐 **Latest Information on: {query}**
-
-Based on current web search results:
-
-{search_results}
-
-💡 **How this applies to your situation:**
-This up-to-date information can help inform your career decisions and strategies. Consider how these current trends and insights align with your professional goals and background."""
-            
-            log.info(f"✅ Web search completed for advice query: '{query}' - found {len(results)} results")
-            return formatted_response
+            return f"🌐 **Latest Information on: {query}**\n\n" + "\n\n".join(results)
         
+    except httpx.HTTPStatusError as e:
+        log.error(f"HTTP error during web search for '{query}': {e}", exc_info=True)
+        return f"❌ Web search failed with status code: {e.response.status_code}. The service may be temporarily unavailable."
     except Exception as e:
-        log.error(f"Error in web search for advice: {e}", exc_info=True)
-        return f"❌ Unable to fetch current information for '{query}' at the moment. Let me provide guidance based on established best practices instead."
+        log.error(f"Error in _search_web_for_advice for query '{query}': {e}", exc_info=True)
+        return "❌ An unexpected error occurred while searching the web."
+
+# Step 3: Manually construct the Tool object with the explicit schema.
+search_web_for_advice = Tool(
+    name="search_web_for_advice",
+    description="Searches the web for up-to-date information, advice, and guidance on career-related topics.",
+    func=_search_web_for_advice,
+    args_schema=WebSearchInput
+)

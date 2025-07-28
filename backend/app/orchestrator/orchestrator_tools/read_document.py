@@ -1,43 +1,50 @@
-from langchain_core.tools import tool
 import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, Field
+from langchain_core.tools import Tool
+
 from app.models_db import Document, User
 
 log = logging.getLogger(__name__)
 
-@tool
-async def read_document(
-    filename: str,
-    db: AsyncSession,
-    user: User
-) -> str:
-    """Reads the content of a specified document from the database."""
+# Step 1: Define the explicit Pydantic input schema.
+class ReadDocumentInput(BaseModel):
+    filename: str = Field(description="The name of the document to read.")
+
+# Step 2: Define the core logic as a plain async function.
+async def _read_document(filename: str, db: AsyncSession, user: User) -> str:
+    """The underlying implementation for reading the content of a specified document."""
     try:
-        user_id = user.id
-        # Search for document in database by name (case-insensitive partial match)
+        # Use an exact match for clarity, or a more specific search if needed.
         doc_result = await db.execute(
-            select(Document).where(
-                Document.user_id == user_id,
-                Document.name.ilike(f"%{filename}%")
-            )
+            select(Document).where(Document.user_id == user.id, Document.name == filename)
         )
-        documents = doc_result.scalars().all()
+        document = doc_result.scalars().first()
         
-        if not documents:
-            return f"Error: Document '{filename}' not found in your uploaded documents."
-        
-        if len(documents) > 1:
-            doc_list = "\n".join([f"- {doc.name}" for doc in documents])
-            return f"Multiple documents found matching '{filename}':\n{doc_list}\n\nPlease be more specific with the document name."
-        
-        document = documents[0]
+        if not document:
+            # If not found, try a case-insensitive search as a fallback.
+            like_result = await db.execute(select(Document.name).where(Document.user_id == user.id, Document.name.ilike(f"%{filename}%")))
+            possible_matches = like_result.scalars().all()
+            if possible_matches:
+                return f"Document '{filename}' not found. Did you mean one of these?\n- " + "\n- ".join(possible_matches)
+            return f"❌ Error: Document '{filename}' not found."
         
         if not document.content:
-            return f"Error: Document '{document.name}' found but has no content."
+            return f"⚠️ Warning: Document '{document.name}' was found but has no readable content."
         
-        return f"Content of {document.name}:\n\n{document.content}"
+        # Return a preview to avoid returning excessively long content to the agent.
+        content_preview = document.content[:2000]
+        return f"**Content of {document.name}:**\n\n{content_preview}{'...' if len(document.content) > 2000 else ''}"
         
     except Exception as e:
-        log.error(f"Error reading document: {e}", exc_info=True)
-        return f"Error reading document: {e}"
+        log.error(f"Error in _read_document for user {user.id}, filename {filename}: {e}", exc_info=True)
+        return f"❌ An error occurred while reading the document: {e}"
+
+# Step 3: Manually construct the Tool object with the explicit schema.
+read_document = Tool(
+    name="read_document",
+    description="Reads the content of a specified document from the database.",
+    func=_read_document,
+    args_schema=ReadDocumentInput
+)
