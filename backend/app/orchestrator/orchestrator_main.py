@@ -259,9 +259,13 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
     try:
         while True:
             data = await websocket.receive_text()
-            message_data = json.loads(data)
-            message_type = message_data.get("type")
+            try:
+                message_data = json.loads(data)
+            except json.JSONDecodeError:
+                log.warning(f"Received malformed JSON from user {user.id}. Raw data: {data}")
+                continue
 
+            message_type = message_data.get("type")
             if message_type != "message": continue
 
             user_message_content = message_data.get("content")
@@ -281,34 +285,38 @@ async def orchestrator_websocket(websocket: WebSocket, user: User = Depends(get_
                 user_message_for_db = ChatMessage(id=str(uuid.uuid4()), user_id=user.id, page_id=page_id, message=user_message_content, is_user_message=True)
                 fresh_db.add(user_message_for_db)
                 await fresh_db.commit()
-
-            history_for_prompt = await simple_memory.get_conversation_context(page_id)
-            base_system_prompt = await get_prompt_for_input(user_message_content, history_for_prompt.conversation_history)
             
-            # Here is the reintegration:
+            history_context = await simple_memory.get_conversation_context(page_id)
+            base_system_prompt = await get_prompt_for_input(user_message_content, history_context.conversation_history)
+            
             memory_context = await _get_memory_context_for_prompt(db, user, user_message_content, page_id)
             final_system_prompt = f"{memory_context}\n\n{base_system_prompt}"
 
-            # Recreate the graph for each message to ensure it has the latest dependencies and the complete prompt.
             graph = create_master_agent_graph(db, user, websocket, final_system_prompt)
             
-            # FIX: Fetch history only once to avoid redundant database calls.
-            history_context = await simple_memory.get_conversation_context(page_id)
             chat_history = [HumanMessage(content=msg["content"]) if msg["role"] == "user" else AIMessage(content=msg["content"]) for msg in history_context.conversation_history]
             
-            # FIX 2: The current user message is now correctly added to the chat history.
-            # This is critical for the agent to know which message it needs to respond to.
             initial_state = {"messages": chat_history + [HumanMessage(content=user_message_content)]}
 
             final_response = "I'm sorry, an error occurred."
+            final_state_result = None
             try:
-                # We now stream events from the graph.
+                # Stream all events and capture the final state from the agent node.
                 async for event in graph.astream(initial_state):
-                    # The final response is the last AI message in the 'agent' node's output.
-                    if "agent" in event and isinstance(event["agent"], AIMessage):
-                        final_response_message = event["agent"]
-                        if not final_response_message.tool_calls:
-                            final_response = final_response_message.content
+                    if "agent" in event:
+                        # This will be overwritten multiple times in a tool-using run,
+                        # leaving us with the very last output from the agent.
+                        final_state_result = event["agent"]
+
+                # After the stream is finished, safely process the last state we received.
+                if isinstance(final_state_result, AIMessage) and not final_state_result.tool_calls:
+                    final_response = final_state_result.content
+                # Handle cases where the last event might be a list of messages
+                elif isinstance(final_state_result, list) and final_state_result:
+                    last_message = final_state_result[-1]
+                    if isinstance(last_message, AIMessage) and not last_message.tool_calls:
+                        final_response = last_message.content
+
             except Exception as graph_error:
                 log.error(f"Error during graph execution for user {user.id}: {graph_error}", exc_info=True)
             
