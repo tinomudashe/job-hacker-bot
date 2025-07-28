@@ -1,40 +1,52 @@
 import logging
+import os
 from typing import Optional, List
 from pydantic import BaseModel, Field
 from langchain_core.tools import Tool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models_db import User
-from app.job_search import search_jobs_with_serper, JobSearchResult
+# FIX: Import the correct function and request model from app.job_search
+from app.job_search import search_jobs, JobSearchRequest, JobSearchResult
 
 log = logging.getLogger(__name__)
 
 # Step 1: Define the explicit Pydantic input schema.
 class JobSearchInput(BaseModel):
     query: str = Field(description="Job search terms, e.g., 'software engineer'.")
-    location: Optional[str] = Field(default="United States", description="Location to search in, e.g., 'Warsaw, Poland'.")
+    location: Optional[str] = Field(default="Poland", description="Location to search in, e.g., 'Warsaw, Poland'.")
+    distance_in_miles: Optional[float] = Field(default=30.0, description="Search radius in miles.")
     job_type: Optional[str] = Field(default=None, description="Type of employment, e.g., 'full-time'.")
     experience_level: Optional[str] = Field(default=None, description="Required experience level, e.g., 'entry-level'.")
 
 # Step 2: Define the core logic as a plain async function.
 async def _search_jobs_tool(
+    db: AsyncSession,
+    user: User,
     query: str,
     location: Optional[str],
+    distance_in_miles: Optional[float],
     job_type: Optional[str],
-    experience_level: Optional[str],
-    user: User, # Injected dependency
-    db: AsyncSession # Injected dependency
+    experience_level: Optional[str]
 ) -> str:
     """The underlying implementation for searching for real-time job postings."""
     try:
         log.info(f"Searching jobs with query: '{query}', location: '{location}' for user {user.id}")
         
-        # We will use the serper integration for a reliable, simple search.
-        # The more complex browser-based tools can be called explicitly if needed.
-        results: List[JobSearchResult] = await search_jobs_with_serper(
+        search_request = JobSearchRequest(
             query=query,
             location=location,
-            user_id=str(user.id)
+            distance_in_miles=distance_in_miles,
+            job_type=job_type,
+            experience_level=experience_level
+        )
+
+        # Use debug mode if GOOGLE_CLOUD_PROJECT is not set, otherwise use the real API.
+        use_real_api = bool(os.getenv('GOOGLE_CLOUD_PROJECT'))
+        results: List[JobSearchResult] = await search_jobs(
+            search_request=search_request,
+            user_id=str(user.id),
+            debug=not use_real_api
         )
 
         if not results:
@@ -44,9 +56,9 @@ async def _search_jobs_tool(
         for i, job in enumerate(results[:5], 1): # Show top 5
             parts = [f"**{i}. {job.title}** at **{job.company}**"]
             if job.location: parts.append(f"   📍 Location: {job.location}")
-            if job.salary: parts.append(f"   💰 Salary: {job.salary}")
+            if job.salary_range: parts.append(f"   💰 Salary: {job.salary_range}")
             if job.description: parts.append(f"   📋 Description: {job.description[:200]}...")
-            if job.url: parts.append(f"   🔗 Apply: {job.url}")
+            if job.apply_url: parts.append(f"   🔗 Apply: {job.apply_url}")
             response_parts.append("\n".join(parts))
 
         return "\n\n---\n\n".join(response_parts)
@@ -58,7 +70,7 @@ async def _search_jobs_tool(
 # Step 3: Manually construct the Tool object with the explicit schema.
 search_jobs_tool = Tool(
     name="search_jobs_tool",
-    description="Searches for real-time job postings using a general web search provider.",
+    description="Searches for job postings using the Google Cloud Talent Solution API with a mock data fallback.",
     func=lambda **kwargs: _search_jobs_tool(**kwargs),
     args_schema=JobSearchInput
 )
