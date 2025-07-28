@@ -11,11 +11,12 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage, ToolMessage
 from langchain_core.runnables import RunnableLambda
+from langchain_core.tools import Tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolNode, tools_condition, Tool
+from langgraph.prebuilt import ToolNode, tools_condition
 
 from app.db import get_db, async_session_maker
 from app.models_db import User, ChatMessage, Page, Subscription
