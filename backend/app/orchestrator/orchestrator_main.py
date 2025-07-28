@@ -214,7 +214,18 @@ def create_tool_node(tools):
                 "content": f"Using tool: {tool.name}",
                 "step": "tool_execution"
             })
-            result = await tool.ainvoke(call["args"])
+            
+            # --- DEFINITIVE FIX FOR TOOL INVOCATION ---
+            # Instead of using tool.ainvoke(), which has faulty argument parsing in this environment,
+            # we call the tool's underlying `func` directly. This bypasses the part of
+            # LangChain causing the error and mimics our successful direct test.
+            if isinstance(call["args"], dict):
+                # For multi-argument tools, unpack the dictionary of arguments.
+                result = await tool.func(**call["args"])
+            else:
+                # For any single-input tools, pass the argument directly.
+                result = await tool.func(call["args"])
+
             tool_results.append(result)
             reasoning_events.append({
                 "type": "reasoning_chunk",
