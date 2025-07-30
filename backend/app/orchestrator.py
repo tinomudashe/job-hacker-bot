@@ -46,9 +46,12 @@ from langchain.output_parsers import PydanticOutputParser
 from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
 from app.models_db import User, ChatMessage, Resume, Document, GeneratedCoverLetter, Page
+from app.job_search import JobSearchRequest
+from app.linkedin_jobs_service import get_linkedin_jobs_service, LinkedInJobResult
 from app.dependencies import get_current_active_user_ws
 from app.clerk import verify_token
 from app.resume import ResumeData, PersonalInfo, Experience, Education, Dates, fix_resume_data_structure
+from app.url_scraper import scrape_job_url, JobDetails
 from app.job_search import JobSearchRequest, search_jobs
 from app.vector_store import get_user_vector_store
 from langchain.tools.retriever import create_retriever_tool
@@ -287,6 +290,7 @@ NEVER NEVER skip the tool call
    
 3. **TOOL PRIORITY**: **only use LinkedIn API First, then fallbacks**
    - ✅ **FIRST CHOICE**: search_jobs_linkedin_api (direct LinkedIn database access)
+4. **IMPORTANT**: After a job search, your only job is to present the job listings to the user. **DO NOT** generate a cover letter unless the user explicitly asks for one.
    
 
 ### Search Tool Selection (Priority Order):
@@ -815,146 +819,57 @@ async def orchestrator_websocket(
     async def search_jobs_tool(
         query: Optional[str] = None,
         location: Optional[str] = None,
-        distance_in_miles: Optional[float] = 30.0,
         job_type: Optional[str] = None,
-        experience_level: Optional[str] = None
+        experience_level: Optional[str] = None,
+        websocket: Optional[WebSocket] = None,
+        user: Optional[User] = None
     ) -> str:
-        """Search for real-time job postings. 
-        
+        """Search for real-time job postings exclusively on LinkedIn.
+
         Args:
-            query: Job search terms (e.g., 'software engineer', 'python developer', 'data analyst'). 
-                  If not provided, will search for general jobs in the specified location.
-            location: Location to search in (e.g., 'Poland', 'Warsaw', 'Krakow'). Defaults to Poland.
-            distance_in_miles: Search radius in miles. Defaults to 30.
-            job_type: Type of employment (e.g., 'full-time', 'part-time', 'contract').
-            experience_level: Required experience level (e.g., 'entry-level', 'mid-level', 'senior').
-        
+            query: Job search terms (e.g., 'software engineer', 'python developer').
+            location: Location to search in (e.g., 'Poland', 'Warsaw'). Defaults to 'Remote'.
+            job_type: Type of employment (e.g., 'full time', 'part time').
+            experience_level: Required experience level (e.g., 'entry level', 'senior').
+            websocket: The WebSocket connection to send results to the client.
+            user: The user performing the search.
+
         Returns:
-            JSON string containing job listings with titles, companies, locations, and descriptions.
+            A summary message indicating the results of the LinkedIn job search.
         """
+        if not query:
+            return "Please provide a query to search for jobs on LinkedIn."
+
+        log.info(f"Initiating LinkedIn job search with query: '{query}', location: '{location or 'Remote'}'")
+
         try:
-            # If no query provided, use a generic search term
-            search_query = query or "jobs"
+            linkedin_service = get_linkedin_jobs_service()
             
-            # If location is provided but query is not, make it location-specific
-            if not query and location:
-                search_query = f"jobs in {location}"
-            
-            search_request = JobSearchRequest(
-                query=search_query,
-                location=location or "Poland",
-                distance_in_miles=distance_in_miles,
+            results = await linkedin_service.search_jobs(
+                keyword=query,
+                location=location or "Remote",
                 job_type=job_type,
-                experience_level=experience_level
+                experience_level=experience_level,
+                limit=10  # Limiting to 10 results for now
             )
-            
-            log.info(f"Searching jobs with query: '{search_query}', location: '{location or 'Poland'}'")
-            
-            # Try Browser Use Cloud first as fallback for real data
-            try:
-                from app.browser_use_cloud import get_browser_use_service
-                
-                log.info("🔄 Basic search: Trying Browser Use Cloud as primary source...")
-                browser_service = get_browser_use_service()
-                
-                cloud_jobs = await browser_service.search_jobs_on_platform(
-                    query=search_query,
-                    location=location or "Remote",
-                    platform="indeed",
-                    max_jobs=5
-                )
-                
-                if cloud_jobs:
-                    log.info(f"✅ Basic search: Found {len(cloud_jobs)} real jobs via Browser Use Cloud")
-                    results = [
-                        type('JobResult', (), {
-                            'title': job.title,
-                            'company': job.company,
-                            'location': job.location,
-                            'description': job.description,
-                            'requirements': job.requirements,
-                            'apply_url': job.url,
-                            'job_type': job.job_type,
-                            'salary_range': job.salary,
-                            'dict': lambda: {
-                                'title': job.title,
-                                'company': job.company,
-                                'location': job.location,
-                                'description': job.description,
-                                'requirements': job.requirements,
-                                'apply_url': job.url,
-                                'employment_type': job.job_type,
-                                'salary_range': job.salary
-                            }
-                        })() for job in cloud_jobs
-                    ]
-                else:
-                    log.warning("Browser Use Cloud returned no results, trying Google Cloud API...")
-                    # Use real Google Cloud Talent API if project is configured, otherwise use debug mode
-                    use_real_api = bool(os.getenv('GOOGLE_CLOUD_PROJECT'))
-                    results = await search_jobs(search_request, user_id, debug=not use_real_api)
-                    
-            except Exception as e:
-                log.warning(f"Browser Use Cloud failed in basic search: {e}, trying Google Cloud API...")
-            # Use real Google Cloud Talent API if project is configured, otherwise use debug mode
-            use_real_api = bool(os.getenv('GOOGLE_CLOUD_PROJECT'))
-            results = await search_jobs(search_request, user_id, debug=not use_real_api)
-            
+
             if not results:
-                return f"🔍 No jobs found for '{search_query}' in {location or 'Poland'}.\n\n💡 **Tip**: Try asking me to 'search for {search_query} jobs using browser automation' for more comprehensive results from LinkedIn, Indeed, and other major job boards!"
-            
-            job_list = [job.dict() for job in results]
-            
-            # Format the response nicely for the user
-            formatted_jobs = []
-            for i, job in enumerate(job_list, 1):
-                job_text = f"**{i}. {job.get('title', 'Job Title')}** at **{job.get('company', 'Company')}**"
-                
-                if job.get('location'):
-                    job_text += f"\n   📍 **Location:** {job['location']}"
-                
-                if job.get('employment_type'):
-                    job_text += f"\n   💼 **Type:** {job['employment_type']}"
-                
-                if job.get('salary_range'):
-                    job_text += f"\n   💰 **Salary:** {job['salary_range']}"
-                
-                if job.get('description'):
-                    # Clean up and truncate description
-                    desc = job['description'].replace('\n', ' ').strip()
-                    if len(desc) > 300:
-                        desc = desc[:300] + "..."
-                    job_text += f"\n   📋 **Description:** {desc}"
-                
-                if job.get('requirements'):
-                    req = job['requirements'].replace('\n', ' ').strip()
-                    if len(req) > 200:
-                        req = req[:200] + "..."
-                    job_text += f"\n   ✅ **Requirements:** {req}"
-                
-                if job.get('apply_url'):
-                    job_text += f"\n   🔗 **Apply:** [{job['apply_url']}]({job['apply_url']})"
-                    # Remove automatic cover letter link
-                
-                formatted_jobs.append(job_text)
-            
-            # Check if we used Browser Use Cloud data
-            using_cloud_data = any('Browser Use Cloud' in str(job.get('source', '')) for job in job_list) or len([job for job in job_list if job.get('apply_url', '').startswith('http')]) > 0
-            
-            if using_cloud_data:
-                result_header = f"🔍 **Found {len(job_list)} real jobs for '{search_query}' in {location or 'Poland'}** (via Browser Use Cloud):\n\n"
-                result_footer = f"\n\n✨ **These are real job postings!** Click the URLs to apply directly. Want even more detailed results? Ask me to 'search with comprehensive browser automation'!"
-            else:
-                result_header = f"🔍 **Found {len(job_list)} jobs for '{search_query}' in {location or 'Poland'}** (sample results):\n\n"
-                result_footer = f"\n\n💡 **Want real job postings?** Ask me to 'search for {search_query} jobs using browser automation' for live results from LinkedIn, Indeed, and other major job boards!"
-            
-            result_body = "\n\n---\n\n".join(formatted_jobs)
-            
-            return result_header + result_body + result_footer
+                return f"🔍 No jobs found on LinkedIn for '{query}' in {location or 'Remote'}."
+
+            if websocket:
+                job_listings_data = [job.model_dump() for job in results]
+                await websocket.send_json({
+                    "type": "job-listings",
+                    "data": job_listings_data
+                })
+                log.info(f"Sent {len(results)} LinkedIn job listings to the client.")
+
+            summary = f"Found {len(results)} jobs on LinkedIn for '{query}'."
+            return summary
 
         except Exception as e:
-            log.error(f"Error in search_jobs_tool: {e}", exc_info=True)
-            return f"Sorry, I encountered an error while searching for jobs: {str(e)}. Please try again with different search terms."
+            log.error(f"Error in search_jobs_tool (LinkedIn): {e}", exc_info=True)
+            return f"Sorry, I encountered an error while searching for jobs on LinkedIn: {str(e)}."
 
     @tool
     async def update_personal_information(
@@ -1986,18 +1901,76 @@ Your resume now has {len(resume_data.certifications)} certifications."""
         
     
 
-    @tool("refine_cv_from_url", return_direct=False)
-    async def refine_cv_from_url(job_url: str) -> str:
+    @tool("create_resume_from_scratch", return_direct=False)
+    async def create_resume_from_scratch(prompt: str) -> str:
         """
-        Refines a user's CV for a specific job by extracting details from a job posting URL.
-        This tool scrapes the job description, then calls the resume generation logic to
-        tailor the user's resume and saves it to the database.
+        Creates a new resume from scratch based on a user's prompt.
 
         Args:
-            job_url: The URL of the job posting.
+            prompt: A prompt from the user describing the resume they want to create.
         """
         async with async_session_maker() as session:
             try:
+                log.info(f"Creating resume from scratch for user {user_id}")
+
+                # 1. Set up LLM chain to generate the resume
+                llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro-preview-latest", temperature=0.3)
+                parser = JsonOutputParser(pydantic_object=ResumeData)
+
+                prompt_template = PromptTemplate(
+                    template="""
+                    You are an expert resume writer. Your task is to create a new resume from scratch based on the user's prompt.
+                    The user's prompt is: {prompt}
+
+                    **Instructions:**
+                    - Generate a complete resume in JSON format.
+                    - The resume should include personal information, a summary, work experience, education, and skills.
+                    - Ensure the output is a valid JSON object that conforms to the provided schema.
+
+                    {format_instructions}
+                    """,
+                    input_variables=["prompt"],
+                    partial_variables={"format_instructions": parser.get_format_instructions()},
+                )
+
+                chain = prompt_template | llm | parser
+
+                # 2. Invoke the chain and get the generated resume data
+                resume_dict = await chain.ainvoke({"prompt": prompt})
+
+                # 3. Save the new resume data to the database
+                if resume_dict:
+                    # Validate with Pydantic model before saving
+                    new_resume_data = ResumeData(**resume_dict)
+                    db_resume, _ = await get_or_create_resume(session)
+                    db_resume.data = new_resume_data.dict()
+                    db_resume.updated_at = datetime.utcnow()
+                    session.add(db_resume)
+                    await session.commit()
+                    log.info(f"Successfully created and saved resume from scratch {db_resume.id} for user {user_id}")
+                    return "I have successfully created a new resume from scratch. You can view and download it now. [DOWNLOADABLE_RESUME]"
+                else:
+                    return "I could not create a resume from scratch. Please try again."
+
+            except Exception as e:
+                log.error(f"An unexpected error occurred in create_resume_from_scratch: {e}", exc_info=True)
+                if session.is_active:
+                    await session.rollback()
+                return f"An unexpected error occurred while creating the resume from scratch: {str(e)}"
+
+    @tool("refine_cv_from_url", return_direct=False)
+    async def refine_cv_from_url(job_url: str) -> str:
+        """
+        Refines an existing resume based on a job posting URL.
+        
+        Args:
+            job_url (str): The URL of the job posting to refine the resume for. 
+        
+        Returns:
+            str: A confirmation message with a trigger to download the refined resume.
+        """
+        try:
+            # Step 1: Scrape job details from the URL
                 # Step 1: Scrape job details from the URL
                 from app.url_scraper import scrape_job_url, JobDetails
                 log.info(f"Attempting to refine CV from URL: {job_url}")
@@ -2094,9 +2067,9 @@ Your resume now has {len(resume_data.certifications)} certifications."""
 
                 return output_str
 
-            except Exception as e:
-                log.error(f"Error in refine_cv_from_url tool: {e}", exc_info=True)
-                return f"❌ An error occurred while refining your resume from the URL. The website might be blocking access, or the job posting may have expired."
+        except Exception as e:
+            log.error(f"Error in refine_cv_from_url tool: {e}", exc_info=True)
+            return f"❌ An error occurred while refining your resume from the URL. The website might be blocking access, or the job posting may have expired."
         
 
     @tool
@@ -4803,7 +4776,8 @@ Your resume database record is now properly structured. Try clicking a download 
     tools = [
         # ⭐ CV/RESUME TOOLS (HIGHEST PRIORITY) ⭐
         refine_cv_for_role,  # 🥇 PRIMARY CV refinement tool - FIRST PRIORITY!
-        generate_tailored_resume,  # Tailored resume generation tool
+        refine_cv_from_url, # Tailored resume generation tool
+        generate_tailored_resume, 
         create_resume_from_scratch,  # Resume creation from scratch tool
         enhance_resume_section,  # Resume section enhancement tool
         get_cv_best_practices,  # Comprehensive CV guidance tool
