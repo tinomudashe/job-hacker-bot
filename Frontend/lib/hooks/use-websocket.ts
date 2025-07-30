@@ -171,6 +171,7 @@ export const useWebSocket = (
 
           setMessages((prev) => {
             const lastMessage = prev[prev.length - 1];
+            // Prevent duplicates by checking if the last message is identical.
             const isDuplicate =
               lastMessage &&
               !lastMessage.isUser &&
