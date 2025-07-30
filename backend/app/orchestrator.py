@@ -5127,6 +5127,9 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                     log.info("🔄 Regeneration request received")
                     regenerate_content = message_data.get("content", "")
                     regenerate_page_id = message_data.get("page_id")
+                    # FIX: Ensure page_id is None if it's an empty string to avoid foreign key errors.
+                    if not regenerate_page_id:
+                        regenerate_page_id = None
                     
                     log.info(f"🔄 Regenerate content: '{regenerate_content[:50]}...'")
                     log.info(f"🔄 Page ID: {regenerate_page_id}")
@@ -5256,6 +5259,9 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                     # New format with page context
                     message_content = message_data["content"]
                     page_id = message_data.get("page_id")
+                    # FIX: Ensure page_id is None if it's an empty string to avoid foreign key errors.
+                    if not page_id:
+                        page_id = None
                     
                     # Only load page history if WebSocket context isn't already set for this page
                     # Frontend is responsible for loading messages via API, WebSocket just tracks context

@@ -5,7 +5,7 @@ import pytest
 
 # --- Configuration ---
 # Make sure to replace this with a fresh, valid token before running.
-TOKEN = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6Ii1sX0llanRjajJZRDRORi0ybjhpbSJ9.eyJpc3MiOiJodHRwczovL2Rldi1qdG1hOG9zdzY2dW01YnF1LnVzLmF1dGgwLmNvbS8iLCJzdWIiOiJobWNSQ3QzZjM1REpDMk5GMGlWaXB3Z3J1YjFqbGdUU0BjbGllbnRzIiwiYXVkIjoiaHR0cHM6Ly9kZXYtanRtYThvc3c2NnVtNWJxdS51cy5hdXRoMC5jb20vYXBpL3YyLyIsImlhdCI6MTc0OTY0NjgwMywiZXhwIjoxNzQ5NzMzMjAzLCJndHkiOiJjbGllbnQtY3JlZGVudGlhbHMiLCJhenAiOiJobWNSQ3QzZjM1REpDMk5GMGlWaXB3Z3J1YjFqbGdUUyJ9.VlmQZZV7se17l_VQ0e7Ngf0qSlMLWja2LhLhCcFJUntOqFrbIVhOu2E_bjLEpDVRihYHECmX1lFuy3fHq_-NxPwJEr7t19g1SzBbBEoSoQs-OL22_JmqWyXXq65_I3F5XtTOEmNSJal9wmxtrm9viEXZtDQbolpBvE-ZaY38MuuhgApuc_cZRo68bdJeFsBWR1bqshpxHhbhZlbQpVzgQQJ5YG6tC0TqyLT8TpO8OJei9qQZaB5XzJeCI0vhNJFYvtdacq5SA3wp_ndLYxXulA18oVVkqgmGWqDzk3O6X3sqQA_2HszcATTO3Gfa-hdYwKUIrcpJ9-fo2_w_0gBEUQ"
+TOKEN = "<YOUR_VALID_TOKEN>"  # ⚠️ IMPORTANT: Replace with a valid token
 URI = f"ws://127.0.0.1:8001/api/ws/orchestrator?token={TOKEN}"
 
 @pytest.mark.asyncio
@@ -41,4 +41,42 @@ async def test_resume_agent():
         print(f"An error occurred: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(test_resume_agent()) 
+    asyncio.run(test_resume_agent())
+
+@pytest.mark.asyncio
+async def test_empty_page_id_handling():
+    """
+    Tests that the orchestrator correctly handles an empty page_id
+    without disconnecting the client or raising an unhandled exception.
+    """
+    try:
+        async with websockets.connect(URI) as websocket:
+            print("--- Connected to WebSocket for page_id test ---")
+
+            # 1. Construct a message with an empty page_id
+            message_payload = {
+                "content": "This is a test message with an empty page_id.",
+                "page_id": ""  # Explicitly send an empty string
+            }
+            message_str = json.dumps(message_payload)
+            print(f"> Sending message with empty page_id: {message_str}")
+
+            # 2. Send the message
+            await websocket.send(message_str)
+
+            # 3. Wait for a response
+            try:
+                response = await asyncio.wait_for(websocket.recv(), timeout=10.0)
+                print(f"< Received response: {response}")
+                # The test passes if a response is received and no exception is raised
+                assert response is not None
+            except asyncio.TimeoutError:
+                pytest.fail("Did not receive a response from the agent within the timeout period.")
+
+            # 4. Ensure the connection is still open
+            assert websocket.open
+
+    except websockets.exceptions.ConnectionClosed as e:
+        pytest.fail(f"WebSocket connection closed unexpectedly: {e.code} {e.reason}")
+    except Exception as e:
+        pytest.fail(f"An unexpected error occurred: {e}") 

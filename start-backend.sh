@@ -8,4 +8,4 @@ echo "Starting Job Hacker Bot Backend..."
 export PYTHONPATH=$(pwd)/backend
 
 # FIX: Run uvicorn from the project root, pointing to the app inside the backend directory.
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --app-dir backend 
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8001 --app-dir backend 
