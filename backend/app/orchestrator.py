@@ -320,7 +320,7 @@ NEVER NEVER skip the tool call
 - ✅ **LinkedIn API is fastest** - Use search_jobs_linkedin_api for instant results
 - ✅ The tools handle everything and return actual job results
 - ✅ Present the results in a clear, organized format
-- ✅ Use the user's preferred name {user.first_name} in all responses
+- ✅ Use the user's preferred name or first name in all responses
 
 ## Cover Letter Generation Guidelines:
 🔥 **CRITICAL**: NEVER ask users to provide their background information manually - you have full access to their profile data!
