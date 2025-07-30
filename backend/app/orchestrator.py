@@ -2067,6 +2067,8 @@ Your resume now has {len(resume_data.certifications)} certifications."""
             except Exception as e:
                 log.error(f"Error in refine_cv_from_url tool: {e}", exc_info=True)
                 return f"❌ An error occurred while refining your resume from the URL. The website might be blocking access, or the job posting may have expired."
+
+ 
         
 
     @tool

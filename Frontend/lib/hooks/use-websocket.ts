@@ -231,6 +231,7 @@ export const useWebSocket = (
             setCurrentPageId(newPageId);
             currentPageIdRef.current = newPageId;
             localStorage.setItem("lastConversationId", newPageId);
+            window.history.pushState({}, "", `/?page_id=${newPageId}`);
           }
           break;
 
