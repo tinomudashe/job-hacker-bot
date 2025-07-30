@@ -5227,7 +5227,7 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                     user_message_db = ChatMessage(
                         user_id=user.id,
                         page_id=page_id,
-                        content=message_content,
+                        message=message_content,
                         is_user_message=True
                     )
                     db.add(user_message_db)
@@ -5370,15 +5370,16 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
             
             # Save AI message with page context
             try:
-                ai_message_id = str(uuid.uuid4())
-                db.add(ChatMessage(
-                    id=ai_message_id,
-                    user_id=user_id,
-                    page_id=page_id,
-                    message=result,
-                    is_user_message=False
-                ))
-                await db.commit()
+                if result:
+                    ai_message_id = str(uuid.uuid4())
+                    db.add(ChatMessage(
+                        id=ai_message_id,
+                        user_id=user_id,
+                        page_id=page_id,
+                        message=result,
+                        is_user_message=False
+                    ))
+                    await db.commit()
                 log.info(f"Saved AI message {ai_message_id} with page_id: {page_id}")
             except Exception as save_error:
                 log.error(f"Failed to save AI message: {save_error}")
