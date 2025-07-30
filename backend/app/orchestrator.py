@@ -5214,8 +5214,38 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                     # FIX: Ensure page_id is None if it's an empty string to avoid foreign key errors.
                     if not page_id:
                         page_id = None
+                        title = message_content.split('\n')[0][:50].strip() or "New Conversation"
+
+                    new_page = Page(user_id=user.id, title=title)
+                    db.add(new_page)
+                    await db.flush()
                     
-                    # Only load page history if WebSocket context isn't already set for this page
+                    page_id = new_page.id
+                    log.info(f"Created new page {page_id} for user {user.id}")
+
+                # Save the user's message
+                    user_message_db = ChatMessage(
+                        user_id=user.id,
+                        page_id=page_id,
+                        content=message_content,
+                        is_user_message=True
+                    )
+                    db.add(user_message_db)
+                    await db.commit()
+                    await db.refresh(user_message_db)
+                    log.info(f"Saved user message {user_message_db.id} for page {page_id}")
+
+                    # If it was a new page, send the ID to the client
+                    if new_page:
+                        await websocket.send_json({
+                            "type": "page_created",
+                            "page_id": new_page.id,
+                            "title": new_page.title
+                        })
+                        log.info(f"Sent page_created event for new page {new_page.id}")
+
+
+                # Only load page history if WebSocket context isn't already set for this page
                     # Frontend is responsible for loading messages via API, WebSocket just tracks context
                     if page_id != current_loaded_page_id:
                         if page_id:
