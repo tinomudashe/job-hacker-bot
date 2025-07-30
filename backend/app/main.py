@@ -16,8 +16,6 @@ from app.cover_letter_generator import router as cover_letter_router
 from app.resume import router as resume_router
 from app.resume_generator import router as resume_generator_router
 from app.job_search import router as job_search_router
-from app.routers import jobs
-from app.routers.graph_rag_demo import router as graph_rag_demo_router
 from app.test_regenerate import router as test_regenerate_router
 from app.messages import router as messages_router
 from app.uploads import router as uploads_router
