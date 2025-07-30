@@ -320,7 +320,7 @@ NEVER NEVER skip the tool call
 - ✅ **LinkedIn API is fastest** - Use search_jobs_linkedin_api for instant results
 - ✅ The tools handle everything and return actual job results
 - ✅ Present the results in a clear, organized format
-- ✅ Use the user's preferred name "Tino" in all responses
+- ✅ Use the user's preferred name {user.first_name} in all responses
 
 ## Cover Letter Generation Guidelines:
 🔥 **CRITICAL**: NEVER ask users to provide their background information manually - you have full access to their profile data!
@@ -456,14 +456,14 @@ The generated cover letter will be automatically saved and available for downloa
 - For cover letters, present them in a clear, professional format with proper spacing
 
 ## Examples of good interactions:
-- Job Search: "Find software engineer jobs in Poland" → query="software engineer", location="Poland"
+- Job Search: "Find sales representative jobs in London" → query="sales representative", location="London"
 - URL Cover Letter: "Generate a cover letter for this job: [LinkedIn URL]" → use generate_cover_letter_from_url tool
 - Manual Cover Letter: "Generate a cover letter for a Data Analyst position at Google" → Ask for job description, then use generate_cover_letter tool
 - Resume PDF: "Download my resume as PDF" → Use show_resume_download_options tool
 - **Tailored Resume**: "Create a resume for a Software Engineer position at Google" → use generate_tailored_resume tool
 - **Resume from Scratch**: "Build me a resume for Product Manager roles" → use create_resume_from_scratch tool
 - **Section Enhancement**: "Improve my professional summary" → use enhance_resume_section tool
-- General: "Show me jobs in Warsaw" → location="Warsaw" (query will be auto-generated)
+- General: "Show me jobs in London" → location="London" (query will be auto-generated)
 - **Document Questions**: "What's my experience?" → use enhanced_document_search("experience")
 - **CV Summary**: "Summarize my CV" → use enhanced_document_search("resume summary")
 - **Skills Query**: "What skills do I have?" → use enhanced_document_search("skills")
@@ -579,8 +579,8 @@ The generated cover letter will be automatically saved and available for downloa
     ## Job Search Guidelines:
     - **Basic Job Search**: Use linkedin_jobs_service standard searches
     - **Advanced Browser Search**: Use linkedin_jobs_service for more comprehensive results with browser automation
-    - For general job searches, you can search with just a location (e.g., location="Poland")
-    - For specific roles, include both query and location (e.g., query="software engineer", location="Warsaw")
+    - For general job searches, you can search with just a location (e.g., location="London")
+    - For specific roles, include both query and location (e.g., query="sales representative", location="London")
     - Always provide helpful context about the jobs you find
 
     ## Cover Letter Generation Guidelines:
@@ -828,7 +828,7 @@ async def orchestrator_websocket(
 
         Args:
             query: Job search terms (e.g., 'software engineer', 'python developer').
-            location: Location to search in (e.g., 'Poland', 'Warsaw'). Defaults to 'Remote'.
+            location: Location to search in (e.g., 'London', 'London'). Defaults to 'Remote'.
             job_type: Type of employment (e.g., 'full time', 'part time').
             experience_level: Required experience level (e.g., 'entry level', 'senior').
             websocket: The WebSocket connection to send results to the client.
@@ -916,9 +916,9 @@ async def orchestrator_websocket(
             first_name: User's first name
             last_name: User's last name  
             phone: Phone number (e.g., "+48 123 456 789")
-            address: Full address or location (e.g., "Warsaw, Poland")
+            address: Full address or location (e.g., "London, UK")
             linkedin: LinkedIn profile URL (e.g., "https://linkedin.com/in/username")
-            preferred_language: Preferred language (e.g., "English", "Polish")
+            preferred_language: Preferred language (e.g., "English", "Chinese")
             date_of_birth: Date of birth (e.g., "1990-01-15")
             profile_headline: Professional headline/summary
             skills: Comma-separated skills (e.g., "Python, React, AWS, Docker")
@@ -4596,53 +4596,32 @@ I can now provide location-specific salary guidance, job market insights, and ca
                     "skills": user.skills.split(", ") if user.skills else [],
                     "experience": [
                         {
-                            "jobTitle": "Technical Support Advocate",
-                            "company": "Foundever (BPO)",
+                            "jobTitle": "Sales Representative",
+                            "company": "Job-hacker-bot",
                             "dates": "Jan 2023 – Apr 2025",
-                            "description": "Provided expert technical support for U.S. fintech client, resolving complex API integration and SaaS troubleshooting issues."
+                            "description": "Provided expert sales support for U.S. fintech client, resolving complex API integration and SaaS troubleshooting issues."
                         },
-                        {
-                            "jobTitle": "Full-Stack Developer",
-                            "company": "Freelance via Upwork",
-                            "dates": "Jul 2022 – Mar 2025",
-                            "description": "Developed scalable SaaS and mobile applications using React.js, Next.js, Spring Boot, and Flutter for diverse clients."
-                        },
-                        {
-                            "jobTitle": "Full-Stack Developer", 
-                            "company": "Alpha and Omega MedTech (China)",
-                            "dates": "Jun 2021 – Sep 2022",
-                            "description": "Improved user experience through Figma design and frontend development, resulting in 5.6% increase in conversion rate."
-                        }
+                      
                     ],
                     "education": [
                         {
-                            "degree": "B.E. in Computer Software Engineering",
-                            "institution": "Uniwersytet WSB Merito Gdańsk",
+                            "degree": "B.E. in Marketing",
+                            "institution": "Harvard University",
                             "dates": "Sep 2023 – Present",
-                            "field": "Computer Software Engineering"
+                            "field": "Marketing"
                         },
-                        {
-                            "degree": "B.Sc. in Computer Software",
-                            "institution": "Wenzhou University", 
-                            "dates": "Jul 2018 – Jun 2022",
-                            "field": "Computer Software"
-                        }
+                       
                     ],
                     "projects": [
                         {
-                            "name": "BlogAi",
-                            "description": "AI-based application for converting audio/video content into SEO-optimized blog posts",
-                            "technologies": "Next.js, Clerk, Google Cloud Speech, Gemini AI, MDX"
+                            "name": "Mega Marting campaign",
+                            "description": "Created a marketing campaign for a new product",
+                            "technologies": "Google Ads, Facebook Ads, Instagram Ads, LinkedIn Ads"
                         },
-                        {
-                            "name": "krótkiLink",
-                            "description": "URL shortener application with Spring Boot backend and React frontend",
-                            "technologies": "Spring Boot, MySQL, JWT, React, Vite, Tailwind CSS"
-                        }
+                        
                     ],
                     "certifications": [
-                        "Java for Programmers – Codecademy (Oct 2023)",
-                        "Java SE 7 Programmer II – HackerRank (Mar 2022)"
+                        "Marketing – Harvard University (Sep 2023)"
                     ]
                 }
                 

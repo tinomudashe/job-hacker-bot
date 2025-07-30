@@ -122,27 +122,24 @@ async def delete_page(
     """
     Delete a page/conversation and all associated messages.
     """
-    # Check if page exists and belongs to user
-    result = await db.execute(
-        select(Page)
-        .where(Page.user_id == current_user.id)
-        .order_by(Page.last_opened_at.desc().nulls_last(), Page.created_at.desc())
-        .limit(1)
+    # Verify the page exists and belongs to the current user before deleting
+    page_to_delete = await db.execute(
+        select(Page).where(Page.id == page_id, Page.user_id == current_user.id)
     )
-    page = result.scalars().first()
+    page = page_to_delete.scalar_one_or_none()
     
     if not page:
-        raise HTTPException(status_code=404, detail="Page not found")
+        raise HTTPException(status_code=404, detail="Page not found or you don't have permission to delete it.")
     
-    # Delete associated chat messages first
+    # First, delete all chat messages associated with this page
     await db.execute(
         delete(ChatMessage).where(ChatMessage.page_id == page_id)
     )
     
-    # Delete the page
+    # Then, delete the page itself
     await db.execute(
-        delete(Page).where(Page.id == page_id)
+        delete(Page).where(Page.id == page_id, Page.user_id == current_user.id)
     )
     
     await db.commit()
-    return {"message": "Page deleted successfully"} 
+    return {"message": "Page deleted successfully"}
