@@ -5042,7 +5042,7 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
             
             # Parse message data to check for page context
             message_content = data
-            page_id = None
+           
             
             try:
                 message_data = json.loads(data)
