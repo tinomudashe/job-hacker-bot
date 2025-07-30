@@ -1734,6 +1734,7 @@ Your resume now has {len(resume_data.certifications)} certifications."""
         
         Returns:
             Professional job listings with company info, descriptions, and apply links
+            Always return the job listings in the format of a list of job postings.
         """
         try:
             from app.linkedin_jobs_service import get_linkedin_jobs_service
@@ -1969,10 +1970,9 @@ Your resume now has {len(resume_data.certifications)} certifications."""
         Returns:
             str: A confirmation message with a trigger to download the refined resume.
         """
-        try:
-            # Step 1: Scrape job details from the URL
+        async with async_session_maker() as session:
+            try:
                 # Step 1: Scrape job details from the URL
-                from app.url_scraper import scrape_job_url, JobDetails
                 log.info(f"Attempting to refine CV from URL: {job_url}")
                 
                 scraped_details = await scrape_job_url(job_url)
@@ -1990,7 +1990,7 @@ Your resume now has {len(resume_data.certifications)} certifications."""
                 # Step 2: Generate the tailored resume using AI
                 # Get User's Base Resume Data
                 resume_result = await session.execute(
-                    select(Resume).where(Resume.user_id == user_id)
+                    select(Resume).where(Resume.user_id == user.id)
                 )
                 base_resume = resume_result.scalars().first()
                 
@@ -2046,14 +2046,11 @@ Your resume now has {len(resume_data.certifications)} certifications."""
                 })
 
                 # Step 3: Save the new resume to the database
-                db_resume_to_update = await session.get(Resume, base_resume.id) if base_resume else None
-
-                if db_resume_to_update:
-                    db_resume_to_update.data = tailored_resume.dict()
-                    attributes.flag_modified(db_resume_to_update, "data")
+                if base_resume:
+                    base_resume.data = tailored_resume.dict()
                 else:
-                    db_resume_to_update = Resume(user_id=user_id, data=tailored_resume.dict())
-                    session.add(db_resume_to_update)
+                    new_resume = Resume(user_id=user.id, data=tailored_resume.dict())
+                    session.add(new_resume)
                 
                 await session.commit()
 
@@ -2067,9 +2064,9 @@ Your resume now has {len(resume_data.certifications)} certifications."""
 
                 return output_str
 
-        except Exception as e:
-            log.error(f"Error in refine_cv_from_url tool: {e}", exc_info=True)
-            return f"❌ An error occurred while refining your resume from the URL. The website might be blocking access, or the job posting may have expired."
+            except Exception as e:
+                log.error(f"Error in refine_cv_from_url tool: {e}", exc_info=True)
+                return f"❌ An error occurred while refining your resume from the URL. The website might be blocking access, or the job posting may have expired."
         
 
     @tool
