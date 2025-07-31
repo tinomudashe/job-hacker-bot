@@ -32,10 +32,6 @@ class ChatMessageResponse(BaseModel):
             # If it fails, it's a plain string
             content = orm_model.message
         
-        # If the content is a dictionary, serialize it back to a JSON string for the frontend
-        if isinstance(content, dict):
-            content = json.dumps(content)
-        
         return cls(
             id=orm_model.id,
             content=content,

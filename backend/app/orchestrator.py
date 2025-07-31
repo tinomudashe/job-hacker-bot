@@ -646,7 +646,7 @@ async def orchestrator_websocket(
     # --- Initialize Advanced Memory Manager ---
     try:
         from app.advanced_memory import AdvancedMemoryManager, create_memory_tools
-        advanced_memory_manager = AdvancedMemoryManager(user)
+        advanced_memory_manager = AdvancedMemoryManager(user, db)
         memory_tools = create_memory_tools(advanced_memory_manager)
         log.info("Advanced memory manager initialized successfully")
         
