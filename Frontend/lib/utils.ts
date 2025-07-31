@@ -10,7 +10,7 @@ export function cn(...inputs: ClassValue[]) {
 export const getApiUrl = (path: string): string => {
   const apiUrl =
     process.env.NEXT_PUBLIC_API_URL ||
-    "https://jobhackerbot-backend-552901894440.europe-west1.run.app";
+    "https://jobckerbot-backend-556781469272.europe-west1.run.app";
   return `${apiUrl}${path}`;
 };
 
