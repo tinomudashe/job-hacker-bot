@@ -30,7 +30,8 @@ webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
 premium_price_id = os.getenv("STRIPE_PREMIUM_PRICE_ID")
 pro_product_id = os.getenv("STRIPE_PRO_PRODUCT_ID")
 price_id = os.getenv("STRIPE_PRICE_ID")
-app_url = os.getenv("APP_URL", "http://localhost:8000")
+# FIX: Set the default APP_URL to the frontend's typical local port (3000)
+app_url = os.getenv("APP_URL", "http://localhost:3000")
 
 
 # --- Helper Functions ---
@@ -178,9 +179,25 @@ async def create_checkout_session(
     if subscription and subscription.status in ['active', 'trialing', 'past_due']:
          try:
             logger.info(f"User {db_user.id} is already subscribed. Redirecting to customer portal.")
+            
+            # FIX: Ensure a portal configuration is created and used for robustness.
+            portal_configuration = stripe.billing_portal.Configuration.create(
+                business_profile={
+                    "headline": "JobHackerBot - Manage Your Subscription",
+                    "privacy_policy_url": f"{app_url}/privacy",
+                    "terms_of_service_url": f"{app_url}/terms",
+                },
+                features={
+                    "customer_update": {"allowed_updates": ["email", "tax_id"], "enabled": True},
+                    "invoice_history": {"enabled": True},
+                    "payment_method_update": {"enabled": True},
+                },
+            )
+
             portal_session = stripe.billing_portal.Session.create(
                 customer=subscription.stripe_customer_id,
                 return_url=f"{app_url}/settings",
+                configuration=portal_configuration.id,
             )
             # Return a special response type that the frontend can use to redirect.
             return {"redirect_to_portal": True, "url": portal_session.url}
@@ -466,4 +483,4 @@ async def stripe_webhook(
     else:
         logger.info(f"Unhandled Stripe event type: {event['type']}")
 
-    return {"status": "success"} 
+    return {"status": "success"}
