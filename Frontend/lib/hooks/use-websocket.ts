@@ -121,10 +121,8 @@ export const useWebSocket = (
     // Connect to WebSocket (history is handled by page change effect)
     // FIX: Construct WebSocket URL safely, removing any trailing slash from WS_URL
     // to prevent double slashes, and avoiding URL encoding issues with the token.
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/api/ws/orchestrator?token=${token}`;
-
+    const cleanWsUrl = WS_URL.endsWith("/") ? WS_URL.slice(0, -1) : WS_URL;
+    const wsUrl = `${cleanWsUrl}/api/ws/orchestrator?token=${token}`;
     const newSocket = new WebSocket(wsUrl);
     socketRef.current = newSocket;
 
