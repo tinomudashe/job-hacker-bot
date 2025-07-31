@@ -176,7 +176,7 @@ async def create_checkout_session(
         logger.info(f"User {db_user.id} has a subscription with status '{subscription.status}'. Not eligible for a new trial.")
     
     # If user is already active, redirect them to the customer portal instead of a new checkout.
-    if subscription and subscription.status in ['active', 'trialing', 'past_due']:
+    if subscription and subscription.status and subscription.stripe_customer_id in ['active', 'trialing', 'past_due']:
          try:
             logger.info(f"User {db_user.id} is already subscribed. Redirecting to customer portal.")
             
