@@ -129,6 +129,7 @@ async def get_current_user(
             )
             db.add(user)
             await db.commit()
+            await db.flush() 
             await db.refresh(user)
         else:
             # If the user already exists, check for null or empty fields in the local
@@ -162,6 +163,7 @@ async def get_current_user(
             if update_needed:
                 logger.info(f"User profile for {user.external_id} enriched from Clerk.")
                 await db.commit()
+                await db.flush() 
                 await db.refresh(user)
             
         logger.info(f"Successfully authenticated user: {user.external_id}")
@@ -228,6 +230,7 @@ async def get_current_active_user_ws(
             )
             db.add(user)
             await db.commit()
+            await db.flush() 
             await db.refresh(user)
         else:
             # Enrich profile only if needed, and only commit if changes were made.
@@ -256,6 +259,7 @@ async def get_current_active_user_ws(
             if update_needed:
                 logger.info(f"WS Auth: User profile for {user.external_id} enriched from Clerk.")
                 await db.commit()
+                await db.flush() 
                 await db.refresh(user)
 
         if not user.active:
@@ -306,6 +310,7 @@ async def get_current_user_from_ws(
             )
             db.add(user)
             await db.commit()
+            await db.flush() 
             await db.refresh(user)
 
         return user
