@@ -1,57 +1,27 @@
 "use client";
 
-import { useSubscriptionStore } from "@/lib/stores/useSubscriptionStore";
 import { toast } from "@/lib/toast";
 import { useAuth } from "@clerk/nextjs";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 
-// This pattern correctly reads the backend URL from environment variables,
-// allowing a direct connection without vercel.json.
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const WS_URL = API_URL.replace(/^http/, "ws");
+const WS_URL = process.env.NEXT_PUBLIC_API_URL || "ws://localhost:8000";
 
 interface Message {
   id: string;
   content: string;
   isUser: boolean;
-  createdAt?: string;
-  reasoningSteps?: ReasoningStep[];
-}
-
-interface ReasoningStep {
-  type: "reasoning_start" | "reasoning_chunk" | "reasoning_complete";
-  content: string;
-  step?: string;
-  specialist?: string;
-  tool_name?: string;
-  progress?: string;
-  timestamp: string;
+  createdAt?: string; // Optional: Backend provides created_at, useful for display/ordering
 }
 
 interface WebSocketMessage {
   type: string;
   message?: string;
-  content?: string;
-  id?: string;
-  data?: {
-    content: string;
-    step?: string;
-    specialist?: string;
-    tool_name?: string;
-    progress?: string;
-  };
-  timestamp?: string;
-  page_id?: string;
 }
 
-export const useWebSocket = (
-  currentPageId?: string,
-  setCurrentPageId?: (id: string) => void
-) => {
-  const { getToken, isLoaded, isSignedIn } = useAuth();
+export const useWebSocket = (currentPageId?: string) => {
+  const { getToken, isLoaded } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
-  const [reasoningSteps, setReasoningSteps] = useState<ReasoningStep[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isHistoryLoading, setIsHistoryLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -59,8 +29,8 @@ export const useWebSocket = (
   const socketRef = useRef<WebSocket | null>(null);
   const isConnecting = useRef(false);
   const currentPageIdRef = useRef(currentPageId);
-  const { triggerRefetch } = useSubscriptionStore();
 
+  // Update the ref when currentPageId changes
   useEffect(() => {
     currentPageIdRef.current = currentPageId;
   }, [currentPageId]);
@@ -121,16 +91,16 @@ export const useWebSocket = (
       return;
     }
 
-    const socketUrl = `${WS_URL}/api/ws/orchestrator?token=${token}`;
-
-    const newSocket = new WebSocket(socketUrl);
+    // Connect to WebSocket (history is handled by page change effect)
+    const wsUrl = `${WS_URL}/api/ws/orchestrator?token=${token}`;
+    const newSocket = new WebSocket(wsUrl);
     socketRef.current = newSocket;
 
     newSocket.onopen = () => {
       setIsConnected(true);
       isConnecting.current = false;
-      setError(null);
       console.log("WebSocket connection established");
+      // Immediately send switch_page for initial context sync
       if (currentPageIdRef.current) {
         newSocket.send(
           JSON.stringify({
@@ -138,143 +108,127 @@ export const useWebSocket = (
             page_id: currentPageIdRef.current,
           })
         );
+        console.log(
+          `Initial WebSocket page switch notification: ${currentPageIdRef.current}`
+        );
       }
     };
 
     newSocket.onmessage = (event) => {
+      // Frontend expects JSON, backend sends JSON
       let parsedData: WebSocketMessage;
       try {
         parsedData = JSON.parse(event.data);
       } catch (e) {
-        parsedData = {
-          type: "final_response",
-          message: event.data,
-          id: uuidv4(),
-        };
+        console.error(
+          "Failed to parse WebSocket message as JSON:",
+          event.data,
+          e
+        );
+        // If it's not JSON, treat it as a plain text message for display
+        parsedData = { type: "message", message: event.data };
       }
 
-      switch (parsedData.type) {
-        // DEFINITIVE FIX: Add "message" to the list of handled final responses.
-        case "message":
-        case "message_chunk":
-        case "final_response": {
-          const messageContent = parsedData.content || parsedData.message || "";
-          const messageId = parsedData.id || "ai-placeholder";
-          const isFinal =
-            parsedData.type === "final_response" ||
-            parsedData.type === "message";
+      // Handle different message types from backend
+      if (parsedData.type === "message") {
+        const aiMessageContent = parsedData.message || "";
 
-          setMessages((prev) => {
-            const existingAiMessageIndex = prev.findIndex(
-              (msg) => msg.id === "ai-placeholder"
-            );
-
-            if (existingAiMessageIndex !== -1) {
-              const newMessages = [...prev];
-              const currentMsg = newMessages[existingAiMessageIndex];
-              newMessages[existingAiMessageIndex] = {
-                ...currentMsg,
-                content:
-                  parsedData.type === "message_chunk"
-                    ? currentMsg.content + messageContent
-                    : messageContent,
-                id: isFinal ? messageId : currentMsg.id,
-              };
-              return newMessages;
-            } else if (isFinal) {
-              return [
-                ...prev,
-                { id: messageId, content: messageContent, isUser: false },
-              ];
-            }
-            return prev;
-          });
-
-          if (isFinal) {
-            setIsLoading(false);
-            setReasoningSteps([]);
-          }
-          break;
-        }
-
-        case "reasoning_chunk": {
-          const reasoningContent = parsedData.data?.content || "";
-          setReasoningSteps((prev) => [
-            ...prev,
-            {
-              type: "reasoning_chunk",
-              content: reasoningContent,
-              step: parsedData.data?.step,
-              specialist: parsedData.data?.specialist,
-              tool_name: parsedData.data?.tool_name,
-              progress: parsedData.data?.progress,
-              timestamp: parsedData.timestamp || new Date().toISOString(),
-            },
-          ]);
-          break;
-        }
-        case "error": {
-          toast.error(parsedData.message || "An unknown error occurred.");
-          setIsLoading(false);
-          break;
-        }
-        case "page_created": {
-          const newPageId = parsedData.page_id as string;
-          if (newPageId && setCurrentPageId) {
-            setCurrentPageId(newPageId);
-            currentPageIdRef.current = newPageId;
-            localStorage.setItem("lastConversationId", newPageId);
-            window.history.pushState({}, "", `/?page_id=${newPageId}`);
-          }
-          break;
-        }
-        case "subscription_updated": {
-          triggerRefetch();
-          toast.success("Your subscription has been updated!");
-          break;
-        }
-        default: {
-          console.warn(
-            `[WebSocket] Ignoring unknown message type: ${parsedData.type}`,
-            parsedData
+        setMessages((prev) => {
+          console.log(
+            `📨 [WebSocket] BEFORE adding AI response: ${prev.length} messages`
           );
-          break;
+
+          // Simplified DUPLICATE PREVENTION: Check if the last AI message is identical
+          // This is a basic check; backend should ideally prevent sending exact duplicates for sequential messages
+          const lastMessage = prev[prev.length - 1];
+          const isDuplicate =
+            lastMessage &&
+            !lastMessage.isUser &&
+            lastMessage.content === aiMessageContent;
+
+          if (isDuplicate) {
+            console.log(
+              `🚫 [WebSocket] DUPLICATE DETECTED - Last AI message identical, skipping`
+            );
+            return prev; // Return existing messages without modification
+          }
+
+          const newMessages = [
+            ...prev,
+            { id: uuidv4(), content: aiMessageContent, isUser: false },
+          ];
+          console.log(
+            `📨 [WebSocket] AFTER adding AI response: ${newMessages.length} messages`
+          );
+          return newMessages;
+        });
+        setIsLoading(false);
+      } else if (parsedData.type === "info") {
+        // Handle info messages (e.g., "Loading...", "Searching...")
+        // You might want to display these as temporary status updates rather than full messages
+        console.log(`ℹ️ [WebSocket Info]: ${parsedData.message}`);
+        // Potentially update a loading indicator or a temporary status message
+        // For now, we'll just log it and not add to chat history directly
+        // If you want to show it, you'd add it to messages with a special type/styling
+      } else if (parsedData.type === "error") {
+        console.error(`❌ [WebSocket Error]: ${parsedData.message}`);
+        toast.error(parsedData.message || "Unknown error");
+        setIsLoading(false);
+      } else {
+        console.warn(
+          `⁉️ [WebSocket] Unknown message type: ${parsedData.type}`,
+          parsedData
+        );
+        // Default to adding as a regular AI message if type is unknown but has a message field
+        if (parsedData.message) {
+          setMessages((prev) => [
+            ...prev,
+            { id: uuidv4(), content: parsedData.message || "", isUser: false },
+          ]);
+          setIsLoading(false);
         }
       }
     };
 
-    newSocket.onclose = (event) => {
+    newSocket.onclose = () => {
       setIsConnected(false);
       isConnecting.current = false;
-      if (event.code !== 1000 && event.code !== 1001) {
-        setTimeout(() => {
-          if (isLoaded && isSignedIn) {
-            connect();
-          }
-        }, 2000);
-      }
+      console.log("WebSocket connection closed");
     };
     newSocket.onerror = (error) => {
-      setError("WebSocket connection failed.");
+      setError(
+        "WebSocket connection failed: " +
+          (error instanceof Event ? error.type : String(error))
+      );
       isConnecting.current = false;
+      console.error("WebSocket connection error:", error);
     };
-  }, [
-    getToken,
-    currentPageIdRef,
-    isLoaded,
-    isSignedIn,
-    triggerRefetch,
-    setCurrentPageId,
-  ]);
+  }, [getToken, currentPageIdRef]);
 
+  // Effect to handle page changes
   useEffect(() => {
     if (isLoaded && currentPageId !== undefined) {
+      console.log(
+        `[WebSocket Hook] Page changed. Loading messages for page: ${
+          currentPageId || "new conversation"
+        }`
+      );
       const loadPageMessages = async () => {
         setIsHistoryLoading(true);
+        console.log(
+          `[WebSocket Hook] Fetching history for page: ${currentPageId}`
+        );
         const history = await fetchMessagesForPage(currentPageId);
+        console.log(
+          `[WebSocket Hook] Loaded ${history.length} messages for page: ${
+            currentPageId || "new conversation"
+          }`
+        );
+        console.log("[WebSocket Hook] History received from API:", history); // Log raw history
         setMessages(history);
         setIsHistoryLoading(false);
 
+        // Notify WebSocket about page change to sync context
         if (
           socketRef.current &&
           socketRef.current.readyState === WebSocket.OPEN
@@ -285,6 +239,11 @@ export const useWebSocket = (
               page_id: currentPageId,
             })
           );
+          console.log(
+            `[WebSocket Hook] Notified WebSocket about page switch: ${
+              currentPageId || "new conversation"
+            }`
+          );
         }
       };
       loadPageMessages();
@@ -292,7 +251,7 @@ export const useWebSocket = (
   }, [currentPageId, isLoaded, fetchMessagesForPage]);
 
   useEffect(() => {
-    if (isLoaded && isSignedIn) {
+    if (isLoaded) {
       connect();
     }
     return () => {
@@ -300,47 +259,103 @@ export const useWebSocket = (
         socketRef.current.close();
       }
     };
-  }, [isLoaded, isSignedIn, connect]);
+  }, [isLoaded, connect]);
 
   const sendMessage = useCallback(
-    (message: string) => {
-      if (!message || message.trim() === "") return;
-      if (socketRef.current?.readyState !== WebSocket.OPEN) {
-        setError("Connection lost. Reconnecting...");
-        if (isLoaded && isSignedIn) connect();
-        return;
+    async (content: string) => {
+      try {
+        let pageId = currentPageIdRef.current;
+
+        console.log(
+          `📤 [WebSocket] sendMessage called with content: "${content}"`
+        );
+        console.log(`📤 [WebSocket] Current pageId: ${pageId}`);
+        console.log(
+          `📤 [WebSocket] Current messages count: ${messages.length}`
+        );
+
+        // REVERTED: Simple page creation logic that was working
+        if (messages.length === 0 && !pageId) {
+          console.log(`📄 [WebSocket] Creating new page for first message`);
+          const token = await getToken();
+          if (!token) {
+            setError("Authentication token not found.");
+            return;
+          }
+
+          try {
+            const response = await fetch("/api/pages", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ first_message: content }),
+            });
+
+            if (response.ok) {
+              const newPage = await response.json();
+              pageId = newPage.id;
+              // Immediately update currentPageIdRef so subsequent messages use it
+              currentPageIdRef.current = pageId;
+              // Also update outer state if useWebSocket is used by a component that reads currentPageId from its state
+              // This might need a direct setter passed from the component or a ref sync mechanism
+              // For now, rely on currentPageIdRef and the effect to trigger a history load
+              console.log(`📄 [WebSocket] New page created with ID: ${pageId}`);
+            } else {
+              throw new Error("Failed to create new page");
+            }
+          } catch (createPageError) {
+            console.error("Error creating new page:", createPageError);
+            setError(
+              `Failed to start new conversation: ${
+                createPageError instanceof Error
+                  ? createPageError.message
+                  : "Unknown error"
+              }`
+            );
+            return; // Stop execution if page creation fails
+          }
+        }
+
+        // Optimistically add user message to state
+        const newUserMessage: Message = {
+          id: uuidv4(),
+          content: content,
+          isUser: true,
+          createdAt: new Date().toISOString(), // Add creation timestamp
+        };
+        setMessages((prev) => [...prev, newUserMessage]);
+        setIsLoading(true); // Indicate loading for AI response
+
+        // Send message to WebSocket
+        if (
+          socketRef.current &&
+          socketRef.current.readyState === WebSocket.OPEN
+        ) {
+          const messagePayload = {
+            type: "message",
+            content: content,
+            page_id: pageId, // Ensure pageId is always sent
+          };
+          socketRef.current.send(JSON.stringify(messagePayload));
+          console.log(
+            `📤 [WebSocket] Sent message with page_id: ${pageId || "(new)"}`
+          );
+        } else {
+          setError("WebSocket is not connected. Please refresh the page.");
+          setIsLoading(false);
+        }
+      } catch (err) {
+        console.error("Error in sendMessage:", err);
+        setError(
+          "Failed to send message: " +
+            (err instanceof Error ? err.message : String(err))
+        );
+        setIsLoading(false);
       }
-
-      setIsLoading(true);
-      setError(null);
-      setReasoningSteps([]);
-
-      const messageData = {
-        type: "message",
-        content: message.trim(),
-        page_id: currentPageIdRef.current,
-      };
-      socketRef.current.send(JSON.stringify(messageData));
-
-      const userMessage: Message = {
-        id: uuidv4(),
-        content: message.trim(),
-        isUser: true,
-        createdAt: new Date().toISOString(),
-      };
-      const aiPlaceholderMessage: Message = {
-        id: "ai-placeholder",
-        content: "",
-        isUser: false,
-      };
-
-      setMessages((prevMessages) => [
-        ...prevMessages,
-        userMessage,
-        aiPlaceholderMessage,
-      ]);
     },
-    [currentPageIdRef, isLoaded, isSignedIn, connect]
+    [messages, getToken]
   );
 
   const deleteMessage = useCallback(
@@ -360,7 +375,9 @@ export const useWebSocket = (
           }
           const response = await fetch(`/api/messages/${id}?cascade=true`, {
             method: "DELETE",
-            headers: { Authorization: `Bearer ${token}` },
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
           });
           if (!response.ok) {
             throw new Error("Failed to delete message(s).");
@@ -370,7 +387,7 @@ export const useWebSocket = (
           loading: "Deleting messages...",
           success: "Messages deleted.",
           error: (err: Error) => {
-            setMessages(originalMessages);
+            setMessages(originalMessages); // Revert on error
             return err.message;
           },
         });
@@ -393,6 +410,7 @@ export const useWebSocket = (
     async (id: string, newContent: string) => {
       const messageIndex = messages.findIndex((msg) => msg.id === id);
       if (messageIndex === -1) {
+        console.warn(`Message with id ${id} not found for editing`);
         toast.error("Message not found");
         return;
       }
@@ -402,15 +420,25 @@ export const useWebSocket = (
       const editedMessage = { ...messages[messageIndex], content: newContent };
       const subsequentCount = originalMessages.length - messageIndex - 1;
 
+      // Show preview immediately
       const previewMessages = [...messagesToKeep, editedMessage];
       setMessages(previewMessages);
 
+      // REVERTED: Proper toast with confirmation and error handling
       const editPromise = async () => {
         const token = await getToken();
         if (!token) {
           throw new Error("Authentication token not available");
         }
 
+        console.log(
+          `✏️ Editing message ${id} with new content: "${newContent.substring(
+            0,
+            50
+          )}..."`
+        );
+
+        // Update message in database
         const updateResponse = await fetch(`/api/messages/${id}`, {
           method: "PUT",
           headers: {
@@ -427,6 +455,7 @@ export const useWebSocket = (
           );
         }
 
+        // Delete subsequent messages if any exist
         if (subsequentCount > 0) {
           const deleteResponse = await fetch(
             `/api/messages/${id}?cascade=true&above=true`,
@@ -442,8 +471,10 @@ export const useWebSocket = (
               `Failed to delete subsequent messages: ${deleteResponse.status} - ${errorData}`
             );
           }
+          console.log(`🗑️ Deleted ${subsequentCount} subsequent messages`);
         }
 
+        // Enhanced WebSocket handling for continuing conversation
         if (
           socketRef.current &&
           socketRef.current.readyState === WebSocket.OPEN
@@ -452,15 +483,24 @@ export const useWebSocket = (
             content: newContent,
             page_id: currentPageIdRef.current,
           };
+
+          console.log(
+            `📤 [EDIT] Sending edited message to continue conversation:`,
+            messageData
+          );
           socketRef.current.send(JSON.stringify(messageData));
           setIsLoading(true);
           setError(null);
         } else {
+          console.warn(
+            "⚠️ WebSocket not connected, cannot continue conversation"
+          );
           throw new Error(
             "Connection lost - message edited but conversation cannot continue automatically"
           );
         }
 
+        console.log(`✅ Successfully edited message ${id}`);
         return `Message edited successfully${
           subsequentCount > 0
             ? ` (${subsequentCount} subsequent messages removed)`
@@ -472,7 +512,8 @@ export const useWebSocket = (
         loading: "Saving changes...",
         success: (data) => data,
         error: (err) => {
-          setMessages(originalMessages);
+          console.error("Error editing message:", err);
+          setMessages(originalMessages); // Revert on error
           return `Edit failed: ${err.message}`;
         },
       });
@@ -483,8 +524,19 @@ export const useWebSocket = (
   const regenerateMessage = useCallback(
     async (id: string) => {
       const messageIndex = messages.findIndex((msg) => msg.id === id);
-      if (messageIndex === -1) return;
+      if (messageIndex === -1) {
+        console.warn(
+          `🔄 [Frontend] Message with id ${id} not found for regeneration`
+        );
+        return;
+      }
 
+      console.log(`🔄 [Frontend] Regenerate requested for message ID: ${id}`);
+      console.log(`🔄 [Frontend] Message index: ${messageIndex}`);
+      console.log(`🔄 [Frontend] Total messages: ${messages.length}`);
+      console.log(`🔄 [Frontend] Current page ID: ${currentPageIdRef.current}`);
+
+      // Find the last human message before the one being regenerated
       let lastHumanMessageIndex = -1;
       for (let i = messageIndex - 1; i >= 0; i--) {
         if (messages[i].isUser) {
@@ -493,19 +545,53 @@ export const useWebSocket = (
         }
       }
 
-      if (lastHumanMessageIndex === -1) return;
+      if (lastHumanMessageIndex === -1) {
+        console.warn(
+          `🔄 [Frontend] No human message found before index ${messageIndex}`
+        );
+        return;
+      }
+
+      console.log(
+        `🔄 [Frontend] Last human message index: ${lastHumanMessageIndex}`
+      );
 
       const messagesToRegenerate = messages.slice(0, lastHumanMessageIndex + 1);
-      setMessages(messagesToRegenerate);
+      console.log(
+        `🔄 [Frontend] Keeping ${
+          messagesToRegenerate.length
+        } messages, removing ${
+          messages.length - messagesToRegenerate.length
+        } messages`
+      );
 
+      // CRITICAL: Set messages immediately and log the exact state
+      setMessages((prev) => {
+        console.log(
+          `🔄 [Frontend] BEFORE regeneration: ${prev.length} messages`
+        );
+        console.log(
+          `🔄 [Frontend] SETTING TO: ${messagesToRegenerate.length} messages`
+        );
+        return messagesToRegenerate;
+      });
+
+      // Handle WebSocket connection state for regeneration
       if (
         !socketRef.current ||
         socketRef.current.readyState !== WebSocket.OPEN
       ) {
+        console.log(
+          `🔄 [Frontend] WebSocket not connected, attempting to reconnect for regeneration`
+        );
         setError("Connection lost. Reconnecting...");
+
         try {
-          await connect();
+          await connect(); // Attempt to reconnect
+
+          // Check if reconnection was successful after a brief delay
           await new Promise((resolve) => setTimeout(resolve, 1000));
+
           if (
             !socketRef.current ||
             socketRef.current.readyState !== WebSocket.OPEN
@@ -514,14 +600,17 @@ export const useWebSocket = (
             setIsLoading(false);
             return;
           }
-          setError(null);
+
+          setError(null); // Clear error on successful reconnection
         } catch (err) {
+          console.error("Failed to reconnect for regeneration:", err);
           setError("Connection failed. Please refresh the page.");
           setIsLoading(false);
           return;
         }
       }
 
+      // Proceed with regeneration if WebSocket is connected
       if (
         socketRef.current &&
         socketRef.current.readyState === WebSocket.OPEN
@@ -533,29 +622,46 @@ export const useWebSocket = (
             content: lastHumanMessage.content,
             page_id: currentPageIdRef.current,
           };
+          console.log(`🔄 [Frontend] Sending regenerate data:`, regenerateData);
           socketRef.current.send(JSON.stringify(regenerateData));
           setIsLoading(true);
           setError(null);
         } else {
+          console.warn(
+            `🔄 [Frontend] Last human message content is not a string:`,
+            lastHumanMessage.content
+          );
           setError("Invalid message format for regeneration");
         }
       }
     },
-    [messages, connect]
+    [messages]
   );
 
-  const startNewChat = React.useCallback(() => {
+  const startNewChat = React.useCallback((newPageId?: string) => {
+    // Stop any ongoing generation immediately
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify({ type: "stop_generation" }));
+      const stopMessage = JSON.stringify({ type: "stop_generation" });
+      socketRef.current.send(stopMessage);
+      console.log("🔌 [WebSocket] Sent stop_generation for new chat");
     }
+
+    // Reset local message state without adding the "stop" message to the UI
     setMessages([]);
     setError(null);
+
+    // The parent component is now responsible for managing the pageId
+    console.log(
+      `🔌 [WebSocket] Starting new chat for page: ${newPageId || "new page"}`
+    );
   }, []);
 
   const clearAllChats = useCallback(async () => {
+    // Clear frontend state immediately for better UX
     setMessages([]);
     currentPageIdRef.current = "";
 
+    // Clear WebSocket context
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({ type: "clear_context" }));
       socketRef.current.send(
@@ -574,7 +680,6 @@ export const useWebSocket = (
 
   return {
     messages,
-    reasoningSteps,
     sendMessage,
     deleteMessage,
     editMessage,
