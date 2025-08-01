@@ -6,7 +6,6 @@ import { useAuth } from "@clerk/nextjs";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 
-// DEFINITIVE FIX: Restore the direct URL connection method as requested.
 // This pattern correctly reads the backend URL from environment variables,
 // allowing a direct connection without vercel.json.
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -122,7 +121,6 @@ export const useWebSocket = (
       return;
     }
 
-    // DEFINITIVE FIX: Use the WS_URL constant to build the full, direct URL.
     const socketUrl = `${WS_URL}/api/ws/orchestrator?token=${token}`;
 
     const newSocket = new WebSocket(socketUrl);
@@ -156,10 +154,15 @@ export const useWebSocket = (
       }
 
       switch (parsedData.type) {
+        // DEFINITIVE FIX: Add "message" to the list of handled final responses.
+        case "message":
         case "message_chunk":
-        case "final_response":
+        case "final_response": {
           const messageContent = parsedData.content || parsedData.message || "";
           const messageId = parsedData.id || "ai-placeholder";
+          const isFinal =
+            parsedData.type === "final_response" ||
+            parsedData.type === "message";
 
           setMessages((prev) => {
             const existingAiMessageIndex = prev.findIndex(
@@ -175,13 +178,10 @@ export const useWebSocket = (
                   parsedData.type === "message_chunk"
                     ? currentMsg.content + messageContent
                     : messageContent,
-                id:
-                  parsedData.type === "final_response"
-                    ? messageId
-                    : currentMsg.id,
+                id: isFinal ? messageId : currentMsg.id,
               };
               return newMessages;
-            } else if (parsedData.type === "final_response") {
+            } else if (isFinal) {
               return [
                 ...prev,
                 { id: messageId, content: messageContent, isUser: false },
@@ -190,13 +190,14 @@ export const useWebSocket = (
             return prev;
           });
 
-          if (parsedData.type === "final_response") {
+          if (isFinal) {
             setIsLoading(false);
             setReasoningSteps([]);
           }
           break;
+        }
 
-        case "reasoning_chunk":
+        case "reasoning_chunk": {
           const reasoningContent = parsedData.data?.content || "";
           setReasoningSteps((prev) => [
             ...prev,
@@ -211,13 +212,13 @@ export const useWebSocket = (
             },
           ]);
           break;
-
-        case "error":
+        }
+        case "error": {
           toast.error(parsedData.message || "An unknown error occurred.");
           setIsLoading(false);
           break;
-
-        case "page_created":
+        }
+        case "page_created": {
           const newPageId = parsedData.page_id as string;
           if (newPageId && setCurrentPageId) {
             setCurrentPageId(newPageId);
@@ -226,18 +227,19 @@ export const useWebSocket = (
             window.history.pushState({}, "", `/?page_id=${newPageId}`);
           }
           break;
-
-        case "subscription_updated":
+        }
+        case "subscription_updated": {
           triggerRefetch();
           toast.success("Your subscription has been updated!");
           break;
-
-        default:
+        }
+        default: {
           console.warn(
             `[WebSocket] Ignoring unknown message type: ${parsedData.type}`,
             parsedData
           );
           break;
+        }
       }
     };
 
