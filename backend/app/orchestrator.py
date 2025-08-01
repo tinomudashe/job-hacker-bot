@@ -1724,6 +1724,12 @@ Your resume now has {len(resume_data.certifications)} certifications."""
         
         Uses professional job search API for reliable, fast job searches.
         NO BROWSER AUTOMATION - Direct API access for instant results.
+        Never use browser automation to search for jobs.
+        Never assume the user wants to apply to a job.
+        Never assume the user wants to refine their resume.
+        Never assume the user wants to generate a cover letter.
+        Never assume the user wants to generate a resume.
+        Never assume the user wants to generate a cover letter.
         
         Args:
             keyword: Job search terms (e.g., 'software engineer', 'software intern', 'python developer')
