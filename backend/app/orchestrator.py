@@ -5215,13 +5215,12 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                     if not page_id:
                         page_id = None
                         title = message_content.split('\n')[0][:50].strip() or "New Conversation"
-
-                    new_page = Page(user_id=user.id, title=title)
-                    db.add(new_page)
-                    await db.flush()
-                    
-                    page_id = new_page.id
-                    log.info(f"Created new page {page_id} for user {user.id}")
+                        new_page = Page(user_id=user.id, title=title)
+                        db.add(new_page)
+                        await db.flush()
+                        
+                        page_id = new_page.id
+                        log.info(f"Created new page {page_id} for user {user.id}")
 
                 # Save the user's message
                     user_message_db = ChatMessage(
