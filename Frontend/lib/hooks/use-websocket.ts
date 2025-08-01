@@ -6,6 +6,12 @@ import { useAuth } from "@clerk/nextjs";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 
+// DEFINITIVE FIX: Restore the direct URL connection method as requested.
+// This pattern correctly reads the backend URL from environment variables,
+// allowing a direct connection without vercel.json.
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const WS_URL = API_URL.replace(/^http/, "ws");
+
 interface Message {
   id: string;
   content: string;
@@ -116,13 +122,10 @@ export const useWebSocket = (
       return;
     }
 
-    // DEFINITIVE FIX: Restore the correct, dynamic URL construction.
-    // This was mistakenly removed in the previous version and is now restored.
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/api/ws/orchestrator?token=${token}`;
+    // DEFINITIVE FIX: Use the WS_URL constant to build the full, direct URL.
+    const socketUrl = `${WS_URL}/api/ws/orchestrator?token=${token}`;
 
-    const newSocket = new WebSocket(wsUrl);
+    const newSocket = new WebSocket(socketUrl);
     socketRef.current = newSocket;
 
     newSocket.onopen = () => {
