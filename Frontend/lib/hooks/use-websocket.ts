@@ -146,7 +146,6 @@ export const useWebSocket = (
     };
 
     newSocket.onmessage = (event) => {
-      // Frontend expects JSON, backend sends JSON
       let parsedData: WebSocketMessage;
       try {
         parsedData = JSON.parse(event.data) as WebSocketMessage;
@@ -156,62 +155,47 @@ export const useWebSocket = (
           event.data,
           e
         );
-        // If it's not JSON, treat it as a plain text message for display
-        parsedData = { type: "message", message: event.data };
+        // Treat non-JSON as a simple text message for robustness
+        parsedData = { type: "final_response", message: event.data };
       }
 
-      // Handle different message types from backend
-      // FIX: The parser logic is rewritten to be more robust and to correctly
-      // handle the events being sent by the backend, including reasoning and final_response.
       switch (parsedData.type) {
-        case "message":
         case "final_response":
           const aiMessageContent =
             (parsedData as any).content || parsedData.message || "";
 
+          // Use a more robust update function to prevent duplicates
           setMessages((prev) => {
-            const lastMessage = prev[prev.length - 1];
-            // Prevent duplicates by checking if the last message is identical.
-            const isDuplicate =
-              lastMessage &&
-              !lastMessage.isUser &&
-              lastMessage.content === aiMessageContent;
-            if (isDuplicate) {
-              return prev;
+            // If the last message is from the user, always add the new AI message.
+            if (prev.length === 0 || prev[prev.length - 1].isUser) {
+              return [
+                ...prev,
+                { id: uuidv4(), content: aiMessageContent, isUser: false },
+              ];
             }
-            return [
-              ...prev,
-              { id: uuidv4(), content: aiMessageContent, isUser: false },
-            ];
+
+            // If the last message is from the AI, update it instead of adding a new one.
+            // This handles streaming responses gracefully and prevents duplicates.
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1] = {
+              ...newMessages[newMessages.length - 1],
+              content: aiMessageContent,
+            };
+            return newMessages;
           });
+
           setIsLoading(false);
-          setReasoningSteps([]);
+          setReasoningSteps([]); // Clear reasoning steps on final response
           break;
 
-        case "reasoning":
-          // This handles the complex event stream from LangGraph
-          const eventData = (parsedData as any).data;
-          if (!eventData) break;
-
-          const eventKey = Object.keys(eventData)[0];
-          const eventContent = eventData[eventKey];
-
-          if (eventContent?.reasoning_events) {
-            setReasoningSteps((prev) => [
-              ...prev,
-              ...eventContent.reasoning_events,
-            ]);
-          }
-          break;
-
-        case "reasoning_start":
         case "reasoning_chunk":
-        case "reasoning_complete":
+          // When reasoning, update a placeholder message but don't add new messages
+          const reasoningContent = parsedData.data?.content || "";
           setReasoningSteps((prev) => [
             ...prev,
             {
-              type: parsedData.type as ReasoningStep["type"],
-              content: parsedData.data?.content || "",
+              type: "reasoning_chunk",
+              content: reasoningContent,
               step: parsedData.data?.step,
               specialist: parsedData.data?.specialist,
               tool_name: parsedData.data?.tool_name,
@@ -222,7 +206,7 @@ export const useWebSocket = (
           break;
 
         case "error":
-          toast.error(parsedData.message || "Unknown error occurred");
+          toast.error(parsedData.message || "An unknown error occurred.");
           setIsLoading(false);
           break;
 
@@ -242,21 +226,12 @@ export const useWebSocket = (
           break;
 
         default:
+          // Intentionally do nothing for other message types to avoid duplicates.
+          // All final content should come through 'final_response'.
           console.warn(
-            `[WebSocket] Unknown message type: ${parsedData.type}`,
+            `[WebSocket] Ignoring unknown message type: ${parsedData.type}`,
             parsedData
           );
-          if (parsedData.message) {
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: uuidv4(),
-                content: parsedData.message as string,
-                isUser: false,
-              },
-            ]);
-            setIsLoading(false);
-          }
           break;
       }
     };
