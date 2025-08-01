@@ -149,27 +149,45 @@ async def create_checkout_session(
 
     subscription = await get_subscription(db, str(db_user.id))
 
-    # --- DEFINITIVE FIX FOR RECURRING ERROR ---
-    # This block now correctly checks for a valid stripe_customer_id before attempting
-    # to create a portal session. If the id is missing, it will fall through
-    # to the new checkout logic, which will fix the inconsistent data.
-    if subscription and subscription.stripe_customer_id and subscription.status in ['active', 'trialing', 'past_due']:
+    # Definitive Fix for Portal Redirection:
+    # Correctly check the subscription *status* AND ensure a customer ID exists before redirecting.
+    if subscription and subscription.status in ['active', 'trialing', 'past_due'] and subscription.stripe_customer_id:
         try:
-            logger.info(f"User {db_user.id} is already subscribed. Redirecting to customer portal.")
+            logger.info(f"User {db_user.id} is already subscribed with status '{subscription.status}'. Redirecting to customer portal.")
+            portal_configuration = stripe.billing_portal.Configuration.create(
+                business_profile={
+                    "headline": "JobHackerBot - Manage Your Subscription",
+                    "privacy_policy_url": f"{app_url}/privacy",
+                    "terms_of_service_url": f"{app_url}/terms",
+                },
+                features={
+                    "customer_update": {"allowed_updates": ["email", "tax_id"], "enabled": True},
+                    "invoice_history": {"enabled": True},
+                    "payment_method_update": {"enabled": True},
+                },
+            )
+
             portal_session = stripe.billing_portal.Session.create(
                 customer=subscription.stripe_customer_id,
                 return_url=f"{app_url}/settings",
+                configuration=portal_configuration.id,
             )
             return {"redirect_to_portal": True, "url": portal_session.url}
         except Exception as e:
             logger.error(f"Failed to create Stripe portal session for already-subscribed user {db_user.id}: {e}")
             raise HTTPException(status_code=500, detail="Could not create customer portal session.")
 
-    # --- New Checkout Logic ---
+    # Definitive Fix for Trial Eligibility:
+    # A user is eligible if they have NO subscription, or if their subscription was never activated.
     is_eligible_for_trial = not (subscription and subscription.status in ['active', 'trialing', 'past_due', 'canceled'])
     
     line_items = [{'price': price_id, 'quantity': 1}]
-    subscription_data = {'trial_period_days': 1} if is_eligible_for_trial else {}
+    subscription_data: Dict[str, Any] = {}
+    if is_eligible_for_trial:
+        subscription_data['trial_period_days'] = 1
+        logger.info(f"User {db_user.id} is eligible for a new free trial.")
+    else:
+        logger.info(f"User {db_user.id} is not eligible for a new trial.")
 
     customer_id = subscription.stripe_customer_id if subscription else None
     
@@ -179,7 +197,11 @@ async def create_checkout_session(
             logger.info(f"User {db_user.id} is missing an email. Fetching from Clerk.")
             clerk_user = await get_clerk_user(db_user.external_id)
             if clerk_user:
-                user_email = clerk_user.get("email")
+                primary_email_id = clerk_user.get("primary_email_address_id")
+                for email_info in clerk_user.get("email_addresses", []):
+                    if email_info.get("id") == primary_email_id:
+                        user_email = email_info.get("email_address")
+                        break
 
         if not user_email:
             logger.error(f"Failed to create Stripe customer for user {db_user.id}: Email not found.")
@@ -255,6 +277,14 @@ async def stripe_webhook(
             logger.error("Webhook received checkout.session.completed without user_external_id.")
             return {"status": "error", "message": "Missing user_external_id"}
 
+        new_status = 'active'
+        if stripe_subscription_id:
+            try:
+                stripe_sub = stripe.Subscription.retrieve(stripe_subscription_id)
+                new_status = stripe_sub.status
+            except stripe.error.StripeError as e:
+                logger.error(f"Could not retrieve subscription {stripe_subscription_id} from Stripe: {e}")
+
         async with db.begin():
             user_result = await db.execute(select(User).where(User.external_id == user_external_id))
             user = user_result.scalar_one_or_none()
@@ -269,7 +299,7 @@ async def stripe_webhook(
                 logger.info(f"Creating new subscription record for user {user.id}.")
 
             subscription.plan = plan
-            subscription.status = data.get('status', 'active')
+            subscription.status = new_status
             subscription.stripe_customer_id = stripe_customer_id
             subscription.stripe_subscription_id = stripe_subscription_id
             logger.info(f"User {user.id} subscribed to {plan} with status {subscription.status}.")
@@ -283,13 +313,16 @@ async def stripe_webhook(
         stripe_customer_id = data.get('customer')
         async with db.begin():
             subscription = await db.scalar(select(Subscription).where(Subscription.stripe_customer_id == stripe_customer_id))
-            if subscription:
-                subscription.status = data.get('status')
-                subscription.stripe_subscription_id = data.get('id')
-                logger.info(f"Subscription for customer {stripe_customer_id} updated to status {subscription.status}.")
-                if subscription.status == 'canceled' and subscription.user:
-                     if subscription.user.email:
-                        background_tasks.add_task(send_subscription_canceled_email, subscription.user.email)
+            if not subscription:
+                logger.warning(f"Webhook received for un-tracked customer {stripe_customer_id}")
+                return {"status": "success", "message": "un-tracked customer"}
+
+            subscription.status = data.get('status')
+            subscription.stripe_subscription_id = data.get('id')
+            logger.info(f"Subscription for customer {stripe_customer_id} updated to status {subscription.status}.")
+            if subscription.status == 'canceled' and subscription.user:
+                 if subscription.user.email:
+                    background_tasks.add_task(send_subscription_canceled_email, subscription.user.email)
 
     elif event_type == 'invoice.payment_failed':
         stripe_customer_id = data.get('customer')
