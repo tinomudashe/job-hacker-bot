@@ -2000,7 +2000,7 @@ Focus on information that would be relevant for the target role. Return comprehe
                 )
                 
                 extraction_llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.5-pro-preview-03-25",
+                    model="gemini-2.5-flash-preview-04-17",
                     temperature=0.3
                 )
                 
@@ -2090,7 +2090,7 @@ OUTPUT THE COMPLETE, FULLY POPULATED TAILORED RESUME NOW:"""
             )
             
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-pro-preview-03-25",
+                model="gemini-2.5-flash-preview-04-17",
                 temperature=0.7,
                 top_p=0.9
             )
@@ -2202,7 +2202,7 @@ Generate enhanced content that would impress hiring managers and pass ATS system
             )
             
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-pro-preview-03-25",
+                model="gemini-2.5-flash-preview-04-17",
                 temperature=0.7
             )
             
@@ -2298,7 +2298,7 @@ Return comprehensive, detailed information - not placeholders or templates."""
                 )
                 
                 extraction_llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.5-pro-preview-03-25",
+                    model="gemini-2.5-flash-preview-04-17",
                     temperature=0.3
                 )
                 
@@ -2380,7 +2380,7 @@ OUTPUT THE COMPLETE, POPULATED RESUME NOW:"""
             )
             
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-pro-preview-03-25",
+                model="gemini-2.5-flash-preview-04-17",
                 temperature=0.7
             )
             
@@ -2534,7 +2534,7 @@ Return comprehensive, detailed information - not placeholders or templates. Use 
                 )
                 
                 extraction_llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.5-pro-preview-03-25",
+                    model="gemini-2.5-flash-preview-04-17",
                     temperature=0.3
                 )
                 
@@ -2614,7 +2614,7 @@ OUTPUT THE COMPLETE, POPULATED CV NOW:"""
             )
             
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-pro-preview-03-25",
+                model="gemini-2.5-flash-preview-04-17",
                 temperature=0.7,
                 top_p=0.9
             )
@@ -3695,7 +3695,7 @@ Extract EVERYTHING from the document content and return the complete JSON:"""
             )
             
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-pro-preview-03-25",
+                model="gemini-2.5-flash-preview-04-17",
                 temperature=0.3  # Low temperature for accurate extraction
             )
             
