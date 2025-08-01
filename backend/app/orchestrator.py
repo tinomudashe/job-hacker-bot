@@ -5222,6 +5222,13 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                         page_id = new_page.id
                         log.info(f"Created new page {page_id} for user {user.id}")
 
+                        await websocket.send_json({
+                            "type": "page_created",
+                            "page_id": new_page.id,
+                            "title": new_page.title
+                        })
+                        log.info(f"Sent page_created event for new page {new_page.id}")
+
                 # Save the user's message
                     user_message_db = ChatMessage(
                         user_id=user.id,
@@ -5235,14 +5242,7 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                     log.info(f"Saved user message {user_message_db.id} for page {page_id}")
 
                     # If it was a new page, send the ID to the client
-                    if new_page:
-                        await websocket.send_json({
-                            "type": "page_created",
-                            "page_id": new_page.id,
-                            "title": new_page.title
-                        })
-                        log.info(f"Sent page_created event for new page {new_page.id}")
-
+                    
 
                 # Only load page history if WebSocket context isn't already set for this page
                     # Frontend is responsible for loading messages via API, WebSocket just tracks context
