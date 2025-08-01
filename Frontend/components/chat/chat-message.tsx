@@ -28,6 +28,10 @@ import React, { useEffect, useRef, useState } from "react";
 import { Button } from "../ui/button";
 import { ConfirmationDialog } from "../ui/confirmation-dialog";
 import { Logo } from "../ui/logo";
+import {
+  AIProgressIndicator,
+  AIProgressIndicatorProps,
+} from "./ai-progress-indicator";
 import { FlashcardDialog } from "./flashcard-dialog";
 import { MessageContent } from "./message-content";
 import { PDFGenerationDialog } from "./pdf-generation-dialog";
@@ -505,6 +509,37 @@ const detectContentType = (
   return { type: null };
 };
 
+// Helper function to derive AI status and text from the latest reasoning step
+const getAIStatusFromSteps = (
+  steps: ReasoningStep[]
+): {
+  type: AIProgressIndicatorProps["progressType"];
+  text: string;
+  isComplete: boolean;
+} => {
+  if (!steps || steps.length === 0) {
+    return { type: "thinking", text: "", isComplete: false };
+  }
+
+  const lastStep = steps[steps.length - 1];
+  const isComplete = lastStep.type === "reasoning_complete";
+
+  // The text to display is always the content of the latest reasoning step.
+  const text = lastStep.content;
+
+  // Determine the icon type based on the step.
+  let type: AIProgressIndicatorProps["progressType"] = "thinking"; // Default
+  if (lastStep.step?.includes("tool")) {
+    type = "calling tool";
+  } else if (lastStep.step === "analysis" || lastStep.specialist) {
+    type = "reasoning";
+  } else if (lastStep.step?.includes("search")) {
+    type = "searching";
+  }
+
+  return { type, text, isComplete };
+};
+
 export function ChatMessage({
   id,
   content,
@@ -531,8 +566,6 @@ export function ChatMessage({
   const [isFlashcardDialogOpen, setIsFlashcardDialogOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [originalWidth, setOriginalWidth] = useState<number | null>(null);
-  const [originalHeight, setOriginalHeight] = useState<number | null>(null);
-  const [minRows, setMinRows] = useState(3);
   const [isHovered, setIsHovered] = useState(false);
   const [showActions, setShowActions] = useState(false);
   const [mobileHideTimeout, setMobileHideTimeout] =
@@ -1138,22 +1171,10 @@ export function ChatMessage({
   };
 
   const handleEdit = () => {
-    // Capture original dimensions before entering edit mode
-    if (messageRef.current && contentRef.current) {
+    // Capture original width before entering edit mode
+    if (messageRef.current) {
       const rect = messageRef.current.getBoundingClientRect();
-      const contentRect = contentRef.current.getBoundingClientRect();
-
       setOriginalWidth(rect.width);
-      setOriginalHeight(contentRect.height);
-
-      // Calculate minimum rows needed to maintain original height
-      // Approximate line height for textarea (adjust if needed)
-      const lineHeight = 24; // This should match your CSS line-height
-      const calculatedRows = Math.max(
-        1,
-        Math.ceil(contentRect.height / lineHeight)
-      );
-      setMinRows(calculatedRows);
     }
     setIsEditing(true);
     setEditedContent(plainTextContent);
@@ -1163,8 +1184,6 @@ export function ChatMessage({
     setIsEditing(false);
     setEditedContent("");
     setOriginalWidth(null);
-    setOriginalHeight(null);
-    setMinRows(2); // change to experiment with the height of the textarea
   };
 
   const handleSaveEdit = () => {
@@ -1180,8 +1199,6 @@ export function ChatMessage({
     setIsEditing(false);
     setEditedContent("");
     setOriginalWidth(null);
-    setOriginalHeight(null);
-    setMinRows(2); // change to experiment with the height of the textarea
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -1565,7 +1582,7 @@ export function ChatMessage({
             ref={messageRef}
             className={cn(
               "relative rounded-2xl sm:rounded-3xl shadow-lg border transition-all duration-200 ease-out",
-              isEditing ? "" : "w-fit min-w-[100px] max-w-full",
+              isEditing ? "w-full" : "w-fit min-w-[100px] max-w-full",
               "px-4 py-3 sm:px-5 sm:py-4 md:px-6 md:py-5 lg:px-7 lg:py-6",
               "overflow-hidden break-words", // Ensure bubble content doesn't overflow
               isUser
@@ -1607,33 +1624,29 @@ export function ChatMessage({
                 className={cn(
                   "relative z-10 w-full bg-transparent border-none outline-none resize-none text-inherit font-inherit leading-relaxed",
                   "focus:ring-0 focus:outline-none placeholder:text-current/50",
-                  "scrollbar-thin scrollbar-thumb-current/20 scrollbar-track-transparent"
+                  "scrollbar-thin scrollbar-thumb-current/20 scrollbar-track-transparent",
+                  "overflow-hidden" // Prevent scrollbar from showing unnecessarily
                 )}
                 style={{
                   fontSize: "inherit",
-                  lineHeight: "24px", // Fixed line height for consistent calculation
+                  lineHeight: "inherit",
                   fontFamily: "inherit",
                   color: "inherit",
                   width: "100%",
-                  minHeight: originalHeight ? `${originalHeight}px` : "auto",
+                  minHeight: originalWidth ? "auto" : "4rem",
                   height: "auto",
                 }}
                 autoFocus
-                rows={minRows}
+                rows={Math.max(
+                  3,
+                  Math.min(20, editedContent.split("\n").length + 1)
+                )}
                 placeholder="Edit your message..."
                 onInput={(e) => {
+                  // Auto-resize textarea to content
                   const target = e.target as HTMLTextAreaElement;
-
-                  // Calculate the height needed for current content
                   target.style.height = "auto";
-                  const scrollHeight = target.scrollHeight;
-
-                  // Use the larger of: original height or content-required height
-                  const finalHeight = originalHeight
-                    ? Math.max(originalHeight, scrollHeight)
-                    : scrollHeight;
-
-                  target.style.height = `${finalHeight}px`;
+                  target.style.height = `${target.scrollHeight}px`;
                 }}
               />
             ) : isAttachment && attachmentInfo ? (
@@ -1892,6 +1905,17 @@ export function ChatMessage({
               </div>
             )}
           </div>
+
+          {/* AI Progress Indicator - now correctly used to display live reasoning text */}
+          {!isUser && reasoningSteps && reasoningSteps.length > 0 && (
+            <div className="mt-2 text-sm">
+              <AIProgressIndicator
+                isLoading={!getAIStatusFromSteps(reasoningSteps).isComplete}
+                progressType={getAIStatusFromSteps(reasoningSteps).type}
+                progressText={getAIStatusFromSteps(reasoningSteps).text}
+              />
+            </div>
+          )}
 
           {/* Enhanced Action Buttons */}
           <div
