@@ -5237,8 +5237,7 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                         is_user_message=True
                     )
                     db.add(user_message_db)
-                    await db.commit()
-                    await db.refresh(user_message_db)
+                    await db.flush()
                     log.info(f"Saved user message {user_message_db.id} for page {page_id}")
 
                     # If it was a new page, send the ID to the client
