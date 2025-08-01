@@ -4,6 +4,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import dynamic from "next/dynamic";
 import { Inter } from "next/font/google";
+import Script from "next/script";
 import { Toaster } from "sonner";
 import "./globals.css";
 
@@ -160,6 +161,21 @@ export default function RootLayout({
             <DismissAllToasts />
             {/* This is the only new line of code being added. */}
             <CookieConsentBanner />
+            {/* DEFINITIVE FIX: Add Google Analytics scripts here using the Next.js Script component for performance and correctness. */}
+            <Script
+              src="https://www.googletagmanager.com/gtag/js?id=G-FC347BY8HV"
+              strategy="afterInteractive"
+            />
+            <Script id="google-analytics" strategy="afterInteractive">
+              {`
+   174→              window.dataLayer = window.dataLayer || [];
+   175→              function gtag(){dataLayer.push(arguments);}
+   176→              gtag('js', new Date());
+   177→    
+   178→              gtag('config', 'G-FC347BY8HV');
+   179→            `}
+              180→{" "}
+            </Script>
           </ThemeProvider>
         </body>
       </html>
