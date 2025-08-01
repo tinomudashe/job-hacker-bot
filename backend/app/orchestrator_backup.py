@@ -134,7 +134,7 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
 
 ### When to Suggest CV Help:
 - **New Users**: Offer CV assessment and improvement suggestions
-- **Job Search Mentions**: When users search for jobs, suggest CV optimization
+- **Job Search Mentions**: When users search for jobs, 
 - **Career Questions**: For any career-related queries, offer comprehensive guidance
 - **Skills Discussions**: Suggest skills gap analysis when users mention lacking abilities
 - **Interview Mentions**: Immediately offer interview preparation tools
@@ -147,12 +147,11 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
 - User mentions interviews → "I can create a personalized interview preparation guide for you! What role are you interviewing for?"
 
 ## Job Search Guidelines:
-🔥 **CRITICAL**: When users ask for job searches, **IMMEDIATELY CALL THE SEARCH TOOLS!**
+🔥 **CRITICAL**: When users ask for job searches, **IMMEDIATELY CALL search_jobs_linkedin_api!**
 
 ### Job Search Process:
 1. **When users ask for job searches**:
-   - **Basic Search**: **IMMEDIATELY use search_jobs_tool** for standard searches
-   - **Browser Search**: **IMMEDIATELY use search_jobs_with_browser** for comprehensive results
+  - **IMMEDIATELY CALL search_jobs_linkedin_api!**
    
 2. **CRITICAL**: **NEVER just say you'll search for jobs - ACTUALLY DO IT!**
    - ❌ "I can definitely help you look for software engineering jobs..." (WITHOUT calling tool)
@@ -164,18 +163,11 @@ def create_master_agent(tools: List, documents: List[str] = [], enhanced_system_
    
 3. **TOOL PRIORITY**: **LinkedIn API First, then fallbacks**
    - ✅ **FIRST CHOICE**: search_jobs_linkedin_api (direct LinkedIn database access)
-   - 🌐 **SECOND CHOICE**: search_jobs_with_browser (browser automation fallback)
-   - 📊 **LAST RESORT**: search_jobs_tool (basic Google Cloud API)
 
 ### Search Tool Selection (Priority Order):
 1. **⭐ LinkedIn Jobs API**: Use search_jobs_linkedin_api for most job searches
-   * **FIRST CHOICE** - Direct LinkedIn database access
-   * **FASTEST** - No browser automation needed, instant results
-   * **MOST RELIABLE** - Official LinkedIn API, no blocking issues
-   * **BEST FOR**: All job searches, especially internships, software roles
-   * Supports all locations, job types, experience levels
-   * Direct apply links to LinkedIn job postings
-   * Use this for 90% of job searches!
+   * **FIRST CHOICE** - Direct LinkedIn database access(only)
+  
 
 2. **🌐 Browser Automation**: Use search_jobs_with_browser as fallback
    * **FALLBACK ONLY** - Use when LinkedIn API fails or for specific job boards
