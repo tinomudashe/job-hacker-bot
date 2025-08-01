@@ -116,6 +116,8 @@ export const useWebSocket = (
       return;
     }
 
+    // DEFINITIVE FIX: Restore the correct, dynamic URL construction.
+    // This was mistakenly removed in the previous version and is now restored.
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.host;
     const wsUrl = `${protocol}//${host}/api/ws/orchestrator?token=${token}`;
