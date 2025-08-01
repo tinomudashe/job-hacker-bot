@@ -19,7 +19,10 @@ interface WebSocketMessage {
   message?: string;
 }
 
-export const useWebSocket = (currentPageId?: string) => {
+export const useWebSocket = (
+  currentPageId?: string,
+  setCurrentPageId?: (pageId: string) => void
+) => {
   const { getToken, isLoaded } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -301,6 +304,9 @@ export const useWebSocket = (currentPageId?: string) => {
               // Also update outer state if useWebSocket is used by a component that reads currentPageId from its state
               // This might need a direct setter passed from the component or a ref sync mechanism
               // For now, rely on currentPageIdRef and the effect to trigger a history load
+              if (setCurrentPageId) {
+                setCurrentPageId(pageId || "");
+              }
               console.log(`📄 [WebSocket] New page created with ID: ${pageId}`);
             } else {
               throw new Error("Failed to create new page");
