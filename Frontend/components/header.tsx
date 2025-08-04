@@ -70,20 +70,20 @@ export function Header({
         <div className="max-w-4xl mx-auto">
           {/* DEFINITIVE FIX: Replace the old div with a theme-aware Alert component. */}
           {isWebview && (
-    73→            <Alert className="mb-2 rounded-t-xl rounded-b-none backdrop-blur-xl backdrop-saturate-150">
-    74→              <AlertTriangle className="h-5 w-5 text-yellow-500" />
-    75→              <AlertTitle className="font-semibold text-yellow-700 dark:text-yellow-400">
-    76→                Login Tip
-    77→              </AlertTitle>
-    78→              <AlertDescription className="text-yellow-600 dark:text-yellow-500/80">
-    79→                For a reliable sign-in experience please use your phone&apos;s
-    80→                main browser eg Chrome or Safari
-    81→              </AlertDescription>
-    82→            </Alert>
-    83→          )}
-    84→          <header className="flex items-center justify-between w-full px-3 sm:px-4 md:px-6 py-2.5 sm:py-3 md:py-4 bg-background/60 rounded-xl sm:rounded-2xl md:rounded-3xl shadow-2xl border border-white/8 backdrop-blur-xl backdrop-saturate-150">
-    85→            {/* Logo and Title */}
-    86→            <LogoWithText className="flex-1" />
+            <Alert className="mb-2 rounded-t-xl rounded-b-none backdrop-blur-xl backdrop-saturate-150">
+              <AlertTriangle className="h-5 w-5 text-yellow-500" />
+              <AlertTitle className="font-semibold text-yellow-700 dark:text-yellow-400">
+                Login Tip
+              </AlertTitle>
+              <AlertDescription className="text-yellow-600 dark:text-yellow-500/80">
+                For a reliable signin experience please use your phone&apos;s
+                main browser eg Chrome or Safari
+              </AlertDescription>
+            </Alert>
+          )}
+          <header className="flex items-center justify-between w-full px-3 sm:px-4 md:px-6 py-2.5 sm:py-3 md:py-4 bg-background/60 rounded-xl sm:rounded-2xl md:rounded-3xl shadow-2xl border border-white/8 backdrop-blur-xl backdrop-saturate-150">
+            {/* Logo and Title */}
+            <LogoWithText className="flex-1" />
 
             {/* Desktop Actions */}
             <div className="hidden md:flex items-center gap-1.5 lg:gap-2 flex-shrink-0">
