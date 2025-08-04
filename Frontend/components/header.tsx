@@ -1,15 +1,24 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { useIsWebview } from "@/lib/hooks/use-is-webview";
 import { useSubscription } from "@/lib/hooks/use-subscription";
 import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
-import { Menu, MessageSquare, Plus, Settings, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Menu,
+  MessageSquare,
+  Plus,
+  Settings,
+  X,
+} from "lucide-react";
 import { usePathname } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
 import { ConversationDialog } from "./conversation-dialog";
 import { PricingDialog } from "./pricing-dialog";
 import { SettingsDialog } from "./settings-dialog";
+import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { LogoWithText } from "./ui/logo";
 import { SubscriptionBadge } from "./ui/subscription-badge";
 import { ThemeToggle } from "./ui/theme-toggle";
@@ -33,6 +42,7 @@ export function Header({
   const [showSettingsDialog, setShowSettingsDialog] = React.useState(false);
   const [showMobileMenu, setShowMobileMenu] = React.useState(false);
   const [isMounted, setIsMounted] = React.useState(false);
+  const isWebview = useIsWebview();
   const { subscription } = useSubscription();
   const pathname = usePathname();
   const [showPricingDialog, setShowPricingDialog] = React.useState(false);
@@ -58,6 +68,19 @@ export function Header({
     <>
       <div className="fixed top-0 left-0 right-0 z-50 bg-transparent p-2 sm:p-4 md:p-6">
         <div className="max-w-4xl mx-auto">
+          {/* DEFINITIVE FIX: Replace the old div with a theme-aware Alert component. */}
+          {isWebview && (
+            <Alert className="mb-[-8px] rounded-t-xl rounded-b-none border-yellow-500/30 bg-yellow-500/5 text-foreground">
+              <AlertTriangle className="h-5 w-5 text-yellow-500" />
+              <AlertTitle className="font-semibold text-yellow-700 dark:text-yellow-400">
+                Login Tip
+              </AlertTitle>
+              <AlertDescription className="text-yellow-600 dark:text-yellow-500/80">
+                For a reliable sign-in experience, please use your phone&apos;s
+                main browser (e.g., Chrome or Safari).
+              </AlertDescription>
+            </Alert>
+          )}
           <header className="flex items-center justify-between w-full px-3 sm:px-4 md:px-6 py-2.5 sm:py-3 md:py-4 bg-background/60 rounded-xl sm:rounded-2xl md:rounded-3xl shadow-2xl border border-white/8 backdrop-blur-xl backdrop-saturate-150">
             {/* Logo and Title */}
             <LogoWithText className="flex-1" />
