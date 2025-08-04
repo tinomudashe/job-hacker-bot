@@ -5219,28 +5219,26 @@ Remember: You are an intelligent assistant with full access to {user_name}'s dat
                     continue
                     
                 elif "content" in message_data:
-                    # New format with page context - this is a regular chat message
+                # New format with page context - this is a regular chat message
                     message_content = message_data["content"]
                     page_id = message_data.get("page_id")
                     should_process_message = True
                     
-                    # Handle page creation if needed
-                    if not page_id:
-                        page_id = None
-                        title = message_content.split('\n')[0][:50].strip() or "New Conversation"
-                        new_page = Page(user_id=user.id, title=title)
-                        db.add(new_page)
-                        await db.flush()
-                        
-                        page_id = new_page.id
-                        log.info(f"Created new page {page_id} for user {user.id}")
-
+                    # Log the received page_id for debugging
+                    log.info(f"📨 Received message with page_id: '{page_id}' (type: {type(page_id)})")
+                    
+                    # Handle missing page_id (but allow empty string for new conversations)
+                    if page_id is None:
+                        log.error("No page_id provided for message - frontend should create page first")
                         await websocket.send_json({
-                            "type": "page_created",
-                            "page_id": new_page.id,
-                            "title": new_page.title
+                            "type": "error",
+                            "message": "No conversation context. Please start a new conversation."
                         })
-                        log.info(f"Sent page_created event for new page {new_page.id}")
+                        continue
+                    
+                    # Convert empty string to None for consistency
+                    if page_id == "":
+                        page_id = None # This skips to the next iteration, so anything after this won't run
                 
             except json.JSONDecodeError:
                 # Legacy format - plain text message
