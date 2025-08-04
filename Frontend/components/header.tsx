@@ -4,14 +4,7 @@ import { Button } from "@/components/ui/button";
 import { useIsWebview } from "@/lib/hooks/use-is-webview";
 import { useSubscription } from "@/lib/hooks/use-subscription";
 import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
-import {
-  AlertTriangle,
-  Menu,
-  MessageSquare,
-  Plus,
-  Settings,
-  X,
-} from "lucide-react";
+import { Info, Menu, MessageSquare, Plus, Settings, X } from "lucide-react";
 import { usePathname } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
@@ -70,14 +63,12 @@ export function Header({
         <div className="max-w-4xl mx-auto">
           {/* DEFINITIVE FIX: Replace the old div with a theme-aware Alert component. */}
           {isWebview && (
-            <Alert className="mb-2 rounded-t-xl rounded-b-none backdrop-blur-xl backdrop-saturate-150">
-              <AlertTriangle className="h-5 w-5 text-yellow-500" />
-              <AlertTitle className="font-semibold text-yellow-700 dark:text-yellow-400">
-                Login Tip
-              </AlertTitle>
-              <AlertDescription className="text-yellow-600 dark:text-yellow-500/80">
-                For a reliable signin experience please use your phone&apos;s
-                main browser eg Chrome or Safari
+            <Alert className="mb-2 rounded-t-xl rounded-b-none bg-background/60 backdrop-blur-xl backdrop-saturate-150 border border-blue-500/30">
+              <Info className="h-5 w-5 text-blue-500" />
+              <AlertTitle className="font-semibold">Login Tip</AlertTitle>
+              <AlertDescription className="text-muted-foreground">
+                For a reliable sign-in experience, please use your phone&apos;s
+                main browser (e.g., Chrome or Safari).
               </AlertDescription>
             </Alert>
           )}
