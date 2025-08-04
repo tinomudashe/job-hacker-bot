@@ -32,6 +32,7 @@ app = FastAPI()
 # Configure CORS
 origins = [
     "https://jobhackerbot.com",
+    "https://localhost:3000",
 ]
 
 app.add_middleware(

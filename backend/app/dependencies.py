@@ -128,8 +128,7 @@ async def get_current_user(
                 active=True
             )
             db.add(user)
-            await db.commit()
-            await db.flush() 
+            await db.flush() # Use flush, not commit, in a dependency
             await db.refresh(user)
         else:
             # If the user already exists, check for null or empty fields in the local
@@ -162,8 +161,7 @@ async def get_current_user(
             # If any fields were updated, commit the changes to the database.
             if update_needed:
                 logger.info(f"User profile for {user.external_id} enriched from Clerk.")
-                await db.commit()
-                await db.flush() 
+                await db.flush() # Use flush, not commit, in a dependency
                 await db.refresh(user)
             
         logger.info(f"Successfully authenticated user: {user.external_id}")
@@ -229,8 +227,7 @@ async def get_current_active_user_ws(
                 active=True
             )
             db.add(user)
-            await db.commit()
-            await db.flush() 
+            await db.flush() # Use flush, not commit, in a dependency
             await db.refresh(user)
         else:
             # Enrich profile only if needed, and only commit if changes were made.
@@ -258,8 +255,7 @@ async def get_current_active_user_ws(
             
             if update_needed:
                 logger.info(f"WS Auth: User profile for {user.external_id} enriched from Clerk.")
-                await db.commit()
-                await db.flush() 
+                await db.flush() # Use flush, not commit, in a dependency
                 await db.refresh(user)
 
         if not user.active:
@@ -309,12 +305,11 @@ async def get_current_user_from_ws(
                 active=True
             )
             db.add(user)
-            await db.commit()
-            await db.flush() 
+            await db.flush() # Use flush, not commit
             await db.refresh(user)
 
         return user
     except Exception as e:
         logger.error(f"Error in get_current_user_from_ws: {e}")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return None 
+        return None

@@ -13,8 +13,14 @@ export async function GET(
       return new NextResponse("Unauthorized", { status: 401 });
     }
 
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL;
+
+    if (!backendUrl) {
+      return new NextResponse("API URL is not configured", { status: 500 });
+    }
+
     const response = await fetch(
-      `http://127.0.0.1:8000/api/messages/${params.pageId}`,
+      `${backendUrl}/api/messages/${params.pageId}`,
       {
         headers: {
           Authorization: `Bearer ${token}`,
