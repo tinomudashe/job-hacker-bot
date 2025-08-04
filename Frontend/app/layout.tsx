@@ -168,13 +168,12 @@ export default function RootLayout({
             />
             <Script id="google-analytics" strategy="afterInteractive">
               {`
-   174→              window.dataLayer = window.dataLayer || [];
-   175→              function gtag(){dataLayer.push(arguments);}
-   176→              gtag('js', new Date());
-   177→    
-   178→              gtag('config', 'G-FC347BY8HV');
-   179→            `}
-              180→{" "}
+               window.dataLayer = window.dataLayer || [];
+               function gtag(){dataLayer.push(arguments);}
+                gtag('js', new Date());
+      
+              gtag('config', 'G-FC347BY8HV');
+             `}{" "}
             </Script>
           </ThemeProvider>
         </body>

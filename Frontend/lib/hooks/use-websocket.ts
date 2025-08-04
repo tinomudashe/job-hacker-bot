@@ -17,6 +17,8 @@ interface Message {
 interface WebSocketMessage {
   type: string;
   message?: string;
+  page_id?: string;
+  title?: string;
 }
 
 export const useWebSocket = (
@@ -177,6 +179,18 @@ export const useWebSocket = (
         console.error(`❌ [WebSocket Error]: ${parsedData.message}`);
         toast.error(parsedData.message || "Unknown error");
         setIsLoading(false);
+      } else if (parsedData.type === "page_created") {
+        // NEW: Handle page creation
+        const { page_id } = parsedData;
+
+        // Ensure page_id is a string before using it.
+        if (page_id) {
+          console.log(`📄 Page created by WebSocket: ${page_id}`);
+          if (setCurrentPageId) {
+            setCurrentPageId(page_id);
+          }
+          currentPageIdRef.current = page_id;
+        }
       } else {
         console.warn(
           `⁉️ [WebSocket] Unknown message type: ${parsedData.type}`,
