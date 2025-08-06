@@ -182,8 +182,7 @@ export const useWebSocket = (
       } else if (parsedData.type === "page_created") {
         // NEW: Handle page creation
         const { page_id } = parsedData;
-
-        // Ensure page_id is a string before using it.
+           // Ensure page_id is a string before using it.
         if (page_id) {
           console.log(`📄 Page created by WebSocket: ${page_id}`);
           if (setCurrentPageId) {

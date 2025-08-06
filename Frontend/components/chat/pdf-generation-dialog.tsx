@@ -128,7 +128,7 @@ export function PDFGenerationDialog({
   const [additionalSections, setAdditionalSections] = React.useState("");
 
   const [projects, setProjects] = React.useState([
-    { name: "", description: "", technologies: "", url: "" },
+    { name: "", description: "", technologies: [] as string[], url: "" },
   ]);
   const [certifications, setCertifications] = React.useState([
     { name: "", issuing_organization: "", date_issued: "" },
@@ -408,7 +408,12 @@ export function PDFGenerationDialog({
               setProjects(
                 resumeData.projects.map((p: any) => ({
                   ...p,
-                  technologies: (p.technologies || []).join(", "),
+                  technologies: Array.isArray(p.technologies)
+                    ? p.technologies
+                    : (p.technologies || "")
+                        .split(",")
+                        .map((s: string) => s.trim())
+                        .filter((s: string) => s),
                 }))
               );
             }
@@ -561,7 +566,7 @@ export function PDFGenerationDialog({
         setSkillsArray([]);
         setSkills("");
         setAdditionalSections("");
-        setProjects([{ name: "", description: "", technologies: "", url: "" }]);
+        setProjects([{ name: "", description: "", technologies: [], url: "" }]);
         setCertifications([
           { name: "", issuing_organization: "", date_issued: "" },
         ]);
@@ -753,7 +758,7 @@ export function PDFGenerationDialog({
           .map((p) => ({
             title: p.name,
             description: p.description,
-            technologies: p.technologies,
+            technologies: Array.isArray(p.technologies) ? p.technologies : [],
             url: p.url,
           })),
         certifications: certifications.filter((c) => c.name),
@@ -825,14 +830,22 @@ export function PDFGenerationDialog({
     value: string
   ) => {
     const updated = [...projects];
-    updated[index][field] = value;
+    if (field === "technologies") {
+      // Convert comma-separated string to array
+      updated[index][field] = value
+        .split(",")
+        .map((s: string) => s.trim())
+        .filter((s: string) => s);
+    } else {
+      (updated[index] as any)[field] = value;
+    }
     setProjects(updated);
   };
 
   const addProject = () => {
     setProjects([
       ...projects,
-      { name: "", description: "", technologies: "", url: "" },
+      { name: "", description: "", technologies: [], url: "" },
     ]);
   };
 
@@ -2066,7 +2079,11 @@ export function PDFGenerationDialog({
                               </Label>
                               <Input
                                 placeholder="e.g., React, Next.js, Vercel"
-                                value={project.technologies}
+                                value={
+                                  Array.isArray(project.technologies)
+                                    ? project.technologies.join(", ")
+                                    : project.technologies || ""
+                                }
                                 onChange={(e) =>
                                   handleProjectChange(
                                     index,
