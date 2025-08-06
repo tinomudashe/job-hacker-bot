@@ -778,6 +778,9 @@ export function PDFGenerationDialog({
         languages: languages.filter((l) => l.name),
       };
 
+      // Add logging to see what we're sending
+      console.log("Sending resume payload:", resumePayload);
+
       const response = await fetch("/api/resume/full", {
         method: "PUT",
         headers: {
@@ -788,15 +791,59 @@ export function PDFGenerationDialog({
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        throw new Error(errorData?.detail || "Failed to save the resume.");
+        let errorMessage = `Failed to save resume (Status: ${response.status})`;
+
+        try {
+          const errorText = await response.text();
+          console.log("Error response text:", errorText);
+
+          // Try to parse as JSON
+          try {
+            const errorData = JSON.parse(errorText);
+            if (errorData?.detail) {
+              errorMessage = errorData.detail;
+            } else if (errorData?.message) {
+              errorMessage = errorData.message;
+            } else if (errorData?.error) {
+              errorMessage = errorData.error;
+            } else {
+              errorMessage = `Server error: ${errorText}`;
+            }
+          } catch (parseError) {
+            // If not JSON, use the raw text
+            errorMessage =
+              errorText || `HTTP ${response.status}: ${response.statusText}`;
+          }
+        } catch (textError) {
+          errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        }
+
+        throw new Error(errorMessage);
       }
 
       toast.success("Resume saved successfully!", { id: "save-resume-toast" });
     } catch (error) {
-      console.error("Error saving resume:", error);
-      const message =
-        error instanceof Error ? error.message : "An unknown error occurred.";
+      console.error("Full error object:", error);
+
+      let message = "An unknown error occurred while saving your resume.";
+
+      if (error instanceof Error) {
+        message = error.message;
+      } else if (typeof error === "string") {
+        message = error;
+      } else if (error && typeof error === "object") {
+        // Handle different error object structures
+        if (error.detail) {
+          message = error.detail;
+        } else if (error.message) {
+          message = error.message;
+        } else if (error.error) {
+          message = error.error;
+        } else {
+          message = `Server error: ${JSON.stringify(error)}`;
+        }
+      }
+
       toast.error(message, { id: "save-resume-toast" });
     } finally {
       setIsSaving(false);
