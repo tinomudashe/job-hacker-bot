@@ -167,15 +167,21 @@ export function PDFGenerationDialog({
 
   // Skills management functions
   const addSkill = () => {
+    const trimmedSkill = newSkill.trim();
     if (
-      newSkill.trim() &&
-      !skillsArray.includes(newSkill.trim()) &&
+      trimmedSkill &&
+      !skillsArray.includes(trimmedSkill) &&
       skillsArray.length < 15
     ) {
-      setSkillsArray([...skillsArray, newSkill.trim()]);
+      const newSkillsArray = [...skillsArray, trimmedSkill];
+      setSkillsArray(newSkillsArray);
       setNewSkill("");
       // Also update the skills text for backward compatibility
-      setSkills([...skillsArray, newSkill.trim()].join(", "));
+      setSkills(newSkillsArray.join(", "));
+    } else if (skillsArray.length >= 15) {
+      toast.error("Maximum 15 skills allowed");
+    } else if (skillsArray.includes(trimmedSkill)) {
+      toast.error("Skill already exists");
     }
   };
 
