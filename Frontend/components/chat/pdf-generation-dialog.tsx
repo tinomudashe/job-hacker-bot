@@ -606,23 +606,29 @@ export function PDFGenerationDialog({
     if (contentType === "resume") {
       // For resumes, check if at least personal info or work experience has content
       const hasPersonalInfo = Object.values(personalInfo).some(
-        (val) => val.trim().length > 0
+        (val) => val && typeof val === "string" && val.trim().length > 0
       );
       const hasWorkExperience = workExperience.some(
         (job) =>
-          job.title.trim() || job.company.trim() || job.description.trim()
+          (job.title && job.title.trim()) ||
+          (job.company && job.company.trim()) ||
+          (job.description && job.description.trim())
       );
       const hasEducation = education.some(
         (edu) =>
-          edu.degree.trim() || edu.school.trim() || edu.description.trim()
+          (edu.degree && edu.degree.trim()) ||
+          (edu.school && edu.school.trim()) ||
+          (edu.description && edu.description.trim())
       );
-      const hasSkills = skills.trim().length > 0 || skillsArray.length > 0;
+      const hasSkills =
+        (skills && skills.trim().length > 0) || skillsArray.length > 0;
 
       const hasProjects = projects.some(
-        (p) => p.name.trim() || p.description.trim()
+        (p) =>
+          (p.name && p.name.trim()) || (p.description && p.description.trim())
       );
-      const hasCerts = certifications.some((c) => c.name.trim());
-      const hasLangs = languages.some((l) => l.name.trim());
+      const hasCerts = certifications.some((c) => c.name && c.name.trim());
+      const hasLangs = languages.some((l) => l.name && l.name.trim());
 
       return (
         hasPersonalInfo ||
@@ -643,6 +649,7 @@ export function PDFGenerationDialog({
     workExperience,
     education,
     skills,
+    skillsArray,
     projects,
     certifications,
     languages,
