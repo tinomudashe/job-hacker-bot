@@ -32,6 +32,11 @@ class ExtractedExperience(BaseModel):
     duration: Optional[str] = None
     description: Optional[str] = None
 
+class ExtractedProject(BaseModel):
+    title: Optional[str] = None
+    duration: Optional[str] = None
+    description: Optional[str] = None
+
 class ExtractedEducation(BaseModel):
     degree: Optional[str] = None
     institution: Optional[str] = None
@@ -48,6 +53,7 @@ class CVExtractionResult(BaseModel):
     personal_info: ExtractedPersonalInfo
     experience: List[ExtractedExperience] = []
     education: List[ExtractedEducation] = []
+    projects: List[ExtractedProject] = []
     skills: ExtractedSkills
     raw_text: str
     confidence_score: float = 0.0
