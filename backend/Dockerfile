@@ -1,6 +1,6 @@
 # Stage 1: Build stage for dependencies
 # Use a specific Python version to ensure consistency
-FROM python:3.10-slim AS builder
+FROM python:3.14.0rc1-slim AS builder
 
 # Install curl, gnupg for adding repositories, and build tools
 RUN apt-get update && \
@@ -30,7 +30,7 @@ RUN playwright install --with-deps chromium
 # ---
 
 # Stage 2: Final runtime stage
-FROM python:3.10-slim
+FROM python:3.14.0rc1-slim
 
 # Install Node.js runtime
 RUN apt-get update && \
