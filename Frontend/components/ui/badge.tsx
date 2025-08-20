@@ -4,7 +4,7 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 const badgeVariants = cva(
-  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
   {
     variants: {
       variant: {
@@ -15,9 +15,13 @@ const badgeVariants = cva(
         destructive:
           "border-transparent bg-destructive/20 text-destructive-foreground hover:bg-destructive/30 backdrop-blur-sm",
         outline: "text-foreground border-white/10 backdrop-blur-sm",
-        pro: "bg-blue-50/95 dark:bg-blue-950/95 border-blue-200/70 dark:border-blue-800/70 text-blue-700 dark:text-blue-400 shadow-sm",
+        pro: "border border-blue-400/30 dark:border-blue-600/30 text-blue-600 dark:text-blue-400 bg-blue-500/10 dark:bg-blue-500/10 hover:bg-blue-500/20 dark:hover:bg-blue-500/20 shadow-sm",
         trial:
-          "bg-amber-50/95 dark:bg-amber-950/95 border-amber-200/70 dark:border-amber-800/70 text-amber-700 dark:text-amber-400 shadow-sm",
+          "border border-amber-400/30 dark:border-amber-600/30 text-amber-600 dark:text-amber-400 bg-amber-500/10 dark:bg-amber-500/10 hover:bg-amber-500/20 dark:hover:bg-amber-500/20 shadow-sm",
+        premium:
+          "border border-purple-400/30 dark:border-purple-600/30 text-purple-600 dark:text-purple-400 bg-gradient-to-r from-purple-500/10 to-pink-500/10 hover:from-purple-500/20 hover:to-pink-500/20 shadow-sm",
+        success:
+          "border border-green-400/30 dark:border-green-600/30 text-green-600 dark:text-green-400 bg-green-500/10 dark:bg-green-500/10 hover:bg-green-500/20 dark:hover:bg-green-500/20 shadow-sm",
       },
     },
     defaultVariants: {

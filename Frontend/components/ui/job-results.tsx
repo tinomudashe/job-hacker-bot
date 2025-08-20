@@ -3,7 +3,7 @@
 import { cn } from "@/lib/utils"
 import { Button } from "./button"
 import { Badge } from "./badge"
-import { ExternalLink, MapPin, Building, DollarSign, Clock, Copy, Check } from "lucide-react"
+import { ExternalLink, MapPin, Building, DollarSign, Clock, Copy, Check, Search, Lightbulb } from "lucide-react"
 import { useState } from "react"
 
 interface JobResult {
@@ -72,20 +72,21 @@ export function JobResults({ results, className }: JobResultsProps) {
   return (
     <div className={cn("space-y-6", className)}>
       {/* Search Summary */}
-      <div className="p-4 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-950/30 dark:to-purple-950/30 rounded-2xl border border-blue-200 dark:border-blue-800">
-        <h3 className="font-semibold text-lg mb-2 flex items-center gap-2">
-          🔍 <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">Job Search Results</span>
+      <div className="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-xl border border-blue-200 dark:border-blue-800">
+        <h3 className="font-semibold text-lg mb-3 flex items-center gap-2">
+          <Search className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          <span className="text-foreground">Job Search Results</span>
         </h3>
-        <div className="flex flex-wrap gap-3 text-sm">
-          <Badge variant="secondary" className="bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200">
+        <div className="flex flex-wrap gap-2">
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
             Query: {jobData.search_query}
-          </Badge>
-          <Badge variant="secondary" className="bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200">
+          </span>
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
             Location: {jobData.location}
-          </Badge>
-          <Badge variant="secondary" className="bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200">
+          </span>
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 border border-green-200 dark:border-green-800">
             Found: {jobData.total_jobs} jobs
-          </Badge>
+          </span>
         </div>
       </div>
 
@@ -95,7 +96,7 @@ export function JobResults({ results, className }: JobResultsProps) {
           <>
             <div
               key={index}
-              className="group p-8 border border-border/50 rounded-2xl hover:shadow-xl transition-all duration-300 bg-gradient-to-br from-background to-background/80 hover:border-primary/30 hover:bg-gradient-to-br hover:from-primary/5 hover:to-background"
+              className="p-6 border border-border rounded-xl hover:shadow-lg transition-all duration-200 bg-card hover:border-primary/50"
             >
               {/* Job Header */}
               <div className="flex justify-between items-start mb-6">
@@ -141,7 +142,7 @@ export function JobResults({ results, className }: JobResultsProps) {
               )}
 
               {/* Apply Section */}
-              <div className="flex items-center justify-between pt-6 border-t border-border/30">
+              <div className="flex items-center justify-between pt-6 border-t border-border/50">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Clock className="h-3 w-3" />
                   <span>Posted recently</span>
@@ -171,7 +172,7 @@ export function JobResults({ results, className }: JobResultsProps) {
                       
                       <Button
                         onClick={() => handleApply(job)}
-                        className="gap-2 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105"
+                        className="gap-2 bg-primary hover:bg-primary/90 text-primary-foreground"
                       >
                         <ExternalLink className="h-4 w-4" />
                         Apply Now
@@ -193,8 +194,9 @@ export function JobResults({ results, className }: JobResultsProps) {
 
       {/* Footer */}
       <div className="text-center p-4 bg-muted/20 rounded-xl border border-border/30">
-        <p className="text-xs text-muted-foreground">
-          💡 <strong>Tip:</strong> Click "Apply Now" to visit the company's job posting page, or "Copy Link" to save for later
+        <p className="text-xs text-muted-foreground flex items-center justify-center gap-2">
+          <Lightbulb className="h-3 w-3" />
+          <span><strong>Tip:</strong> Click "Apply Now" to visit the company's job posting page, or "Copy Link" to save for later</span>
         </p>
       </div>
     </div>

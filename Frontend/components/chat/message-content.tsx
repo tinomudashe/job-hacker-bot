@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { ExternalLink, File, FileText, Image, Send } from "lucide-react";
+import { ExternalLink, File, FileText, Image, Send, MapPin, Calendar, Link2, Target, Sparkles } from "lucide-react";
 import React, { MouseEvent } from "react";
 import ReactMarkdown, { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -179,12 +179,134 @@ const AttachmentRenderer = ({
   );
 };
 
+// Badge component for triggers
+const TriggerBadge: React.FC<{ type: string }> = ({ type }) => {
+  const getBadgeInfo = (triggerType: string) => {
+    switch (triggerType) {
+      case "RESUME":
+        return { label: "📄 Resume Ready", color: "blue" };
+      case "COVER_LETTER":
+        return { label: "📝 Cover Letter Ready", color: "green" };
+      case "CV":
+        return { label: "📋 CV Ready", color: "purple" };
+      default:
+        return { label: "📥 Download Ready", color: "gray" };
+    }
+  };
+
+  const { label, color } = getBadgeInfo(type);
+  
+  const colorClasses = {
+    blue: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30",
+    green: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/30",
+    purple: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/30",
+    gray: "bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/30"
+  };
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-sm font-medium",
+        "border",
+        colorClasses[color as keyof typeof colorClasses]
+      )}
+    >
+      {label}
+    </span>
+  );
+};
+
+// Function to replace job listing emojis with clean text formatting
+const processJobListings = (text: string) => {
+  // Check if this is a job listing format
+  if (!text.includes('📍') && !text.includes('📅') && !text.includes('🔗') && !text.includes('🎯')) {
+    return text;
+  }
+  
+  // Replace emojis with clean markdown formatting
+  let processed = text
+    .replace(/🎯\s*\*\*/g, '## ')  // Replace target with heading
+    .replace(/📍\s*\*\*/g, '**')  // Remove location emoji, keep bold
+    .replace(/📅\s*\*\*/g, '**')  // Remove calendar emoji, keep bold  
+    .replace(/🔗\s*\*\*/g, '**')  // Remove link emoji, keep bold
+    .replace(/✨\s*/g, '### ')  // Replace sparkles with smaller heading
+    .replace(/💡\s*/g, '> ');  // Replace lightbulb with blockquote
+    
+  return processed;
+};
+
+// Function to clean markdown formatting from cover letters
+const cleanCoverLetterFormatting = (text: string) => {
+  // Check if this appears to be a cover letter
+  const isCoverLetter = text.includes('cover letter') || 
+                        text.includes('Cover Letter') || 
+                        text.includes('[DOWNLOADABLE_COVER_LETTER]') ||
+                        text.includes('Dear Hiring') ||
+                        text.includes('position') && text.includes('excited') ||
+                        text.includes('JavaScript') && text.includes('experience');
+  
+  if (!isCoverLetter) {
+    return text;
+  }
+  
+  // Remove triple asterisks but keep the text
+  let cleaned = text
+    .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')  // Remove *** formatting
+    .replace(/\*\*([^*]+)\*\*/g, '$1')      // Remove ** formatting  
+    .replace(/\*([^*]+)\*/g, '$1');          // Remove * formatting
+    
+  return cleaned;
+};
+
+// Function to process text and replace triggers with badges
+const processTextWithBadges = (text: string) => {
+  // Pattern to match triggers
+  const triggerPattern = /\[(DOWNLOADABLE_RESUME|DOWNLOADABLE_COVER_LETTER|DOWNLOADABLE_CV)\]/g;
+  
+  // Debug logging
+  if (text.includes("[DOWNLOADABLE_")) {
+    console.log("🔍 processTextWithBadges - Processing text with trigger:", text.substring(0, 200));
+  }
+  
+  const parts: (string | React.ReactElement)[] = [];
+  let lastIndex = 0;
+  let match;
+  let keyIndex = 0;
+  
+  while ((match = triggerPattern.exec(text)) !== null) {
+    console.log("✅ Found trigger match:", match[0], "Type:", match[1]);
+    // Add text before the trigger
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    
+    // Add the badge component
+    const triggerType = match[1].replace('DOWNLOADABLE_', '');
+    parts.push(<TriggerBadge key={`badge-${keyIndex++}`} type={triggerType} />);
+    
+    lastIndex = match.index + match[0].length;
+  }
+  
+  // Add remaining text
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+  
+  // If no triggers found, return null to let markdown handle it
+  return parts.length > 1 ? parts : null;
+};
+
 // Main content dispatcher
 export function MessageContent({ content, isUser }: MessageContentProps) {
   if (!content) return null;
 
   const text = typeof content === "string" ? content : content.message || "";
   if (typeof text !== "string") return null;
+  
+  // Debug logging for trigger detection
+  if (text.includes("[DOWNLOADABLE_")) {
+    console.log("🎯 MessageContent - Found DOWNLOADABLE trigger in text:", text.substring(0, 200));
+  }
 
   // Detect if this is an attachment message
   const attachmentInfo = detectContentType(text);
@@ -199,7 +321,7 @@ export function MessageContent({ content, isUser }: MessageContentProps) {
       />
     );
   }
-
+  
   // Define markdown components with proper typing
   const components: Components = {
     a: ({ href, children }) => {
@@ -265,10 +387,39 @@ export function MessageContent({ content, isUser }: MessageContentProps) {
     ),
   };
 
-  // Regular message content with enhanced link handling
+  // Check if text contains triggers and process them
+  const badgeContent = processTextWithBadges(text);
+  if (badgeContent) {
+    return (
+      <div className="inline-flex flex-wrap items-center gap-2">
+        {badgeContent.map((part, index) => {
+          if (typeof part === 'string') {
+            // Process job listings for string parts
+            const processedPart = processJobListings(part);
+            // Render string parts with markdown
+            return (
+              <ReactMarkdown 
+                key={`text-${index}`}
+                remarkPlugins={[remarkGfm]} 
+                components={components}
+              >
+                {processedPart}
+              </ReactMarkdown>
+            );
+          }
+          return part; // Return badge components as-is
+        })}
+      </div>
+    );
+  }
+
+  // Regular message content with enhanced link handling (process job listings and clean cover letters)
+  let processedText = processJobListings(text);
+  processedText = cleanCoverLetterFormatting(processedText);
+  
   return (
     <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-      {text}
+      {processedText}
     </ReactMarkdown>
   );
 }

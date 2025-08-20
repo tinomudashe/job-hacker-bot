@@ -1,32 +1,17 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { Brain, Building, FileText } from "lucide-react";
-
-const exampleMessages = [
-  {
-    heading: "Generate cover letter from URL",
-    message: "Paste any job link for a tailored cover letter",
-    fullMessage:
-      "Generate a cover letter from this job URL: [paste LinkedIn, Indeed, or company career page URL here]",
-    icon: FileText,
-    color: "emerald",
-  },
-  {
-    heading: "Search for jobs",
-    message: "Assist with job search in my location",
-    fullMessage: "Get me job vacancies in my location",
-    icon: Building,
-    color: "violet",
-  },
-  {
-    heading: "Create professional resume PDF",
-    message: "Download with beautiful formatting",
-    fullMessage: "Download my resume as PDF with professional styling",
-    icon: Brain,
-    color: "amber",
-  },
-];
+import { 
+  Sparkles, 
+  Briefcase, 
+  FileText, 
+  TrendingUp,
+  Zap,
+  Target,
+  Rocket,
+  Mail,
+  Clock
+} from "lucide-react";
+import { motion } from "framer-motion";
 
 interface EmptyScreenProps {
   onSendMessage: (message: string) => void;
@@ -34,81 +19,92 @@ interface EmptyScreenProps {
 
 export function EmptyScreen({ onSendMessage }: EmptyScreenProps) {
   return (
-    <div className="flex flex-col items-center justify-center h-full px-6 py-12">
-      {/* Hero Section */}
-      <div className="mb-12 text-center max-w-2xl">
-        <h1 className="text-3xl font-bold bg-gradient-to-r from-foreground via-foreground/90 to-foreground/70 bg-clip-text text-transparent mb-4">
-          Hello there!
+    <div className="flex flex-col items-center justify-center h-full px-4 sm:px-6 py-8 sm:py-12 pb-44 relative">
+      {/* Animated background elements */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
+        <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-primary/5 rounded-full blur-3xl animate-pulse" />
+        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-primary/3 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '2s' }} />
+      </div>
+
+      {/* Hero Section with modern typography */}
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="mb-10 sm:mb-12 text-center max-w-3xl relative z-10"
+      >
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 mb-6 rounded-full bg-primary/10 border border-primary/20 backdrop-blur-sm">
+          <Sparkles className="w-4 h-4 text-primary animate-pulse" />
+          <span className="text-xs font-medium text-primary">AI-Powered Career Assistant</span>
+        </div>
+        
+        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold mb-6 leading-tight">
+          <span className="bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent">
+            How can I help you
+          </span>
+          <br />
+          <span className="bg-gradient-to-r from-primary via-primary/80 to-primary bg-clip-text text-transparent">
+            with your career today?
+          </span>
         </h1>
-        <p className="text-lg text-muted-foreground/80 leading-relaxed">
-          I'm your AI-powered job search assistant. Ready to help you find
-          opportunities, craft perfect applications, and land your dream job!
+        
+        <p className="text-lg sm:text-xl text-muted-foreground leading-relaxed max-w-2xl mx-auto">
+          Continue where we left off or start something new. I'm here to help with resumes, cover letters, job search, and career guidance.
         </p>
-      </div>
+      </motion.div>
 
-      {/* Suggestion Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 max-w-5xl w-full">
-        {exampleMessages.map((item, index) => {
-          const IconComponent = item.icon;
-          const colorClasses = {
-            emerald: "bg-emerald-500 hover:bg-emerald-600",
-            violet: "bg-violet-500 hover:bg-violet-600",
-            amber: "bg-amber-500 hover:bg-amber-600",
-          }[item.color];
-
-          return (
-            <Button
-              key={index}
-              variant="ghost"
-              className="group relative h-[160px] p-6 text-left flex flex-col items-start justify-start rounded-2xl bg-background/70 backdrop-blur-xl border border-border/40 hover:border-border/70 hover:bg-background/85 transition-all duration-300 hover:scale-[1.01] hover:shadow-lg shadow-sm"
-              onClick={() => onSendMessage(item.fullMessage)}
+      {/* Popular Actions - 2025 Style Pills */}
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.5, delay: 0.3 }}
+        className="mt-6 sm:mt-8 relative z-10"
+      >
+        <p className="text-xs uppercase tracking-wider text-muted-foreground/60 mb-3 text-center">
+          Quick Actions
+        </p>
+        <div className="flex flex-wrap gap-2 justify-center max-w-3xl">
+          {[
+            { icon: FileText, text: "Update my resume", gradient: "from-emerald-400 to-teal-600" },
+            { icon: Briefcase, text: "Generate cover letter", gradient: "from-violet-400 to-purple-600" },
+            { icon: Rocket, text: "Find remote jobs", gradient: "from-amber-400 to-orange-600" },
+            { icon: Mail, text: "Write job application email", gradient: "from-blue-400 to-indigo-600" },
+            { icon: Clock, text: "Follow-up on application", gradient: "from-pink-400 to-rose-600" },
+            { icon: Target, text: "Review my resume", gradient: "from-blue-400 to-cyan-600" },
+            { icon: TrendingUp, text: "Career advice", gradient: "from-purple-400 to-pink-600" },
+            { icon: Zap, text: "Interview prep", gradient: "from-yellow-400 to-red-600" },
+          ].map((action, i) => (
+            <motion.button
+              key={i}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className="group flex items-center gap-2 px-4 py-2 rounded-full border border-border/50 bg-background/50 backdrop-blur-sm hover:bg-background/80 hover:border-primary/30 transition-all duration-300 relative z-10"
+              onClick={() => onSendMessage(action.text)}
             >
-              {/* Icon */}
-              <div
-                className={`flex items-center justify-center w-12 h-12 rounded-xl ${colorClasses} shadow-md mb-4 transition-all duration-300 group-hover:scale-105 flex-shrink-0`}
-              >
-                <IconComponent className="w-6 h-6 text-white" />
+              <div className={`p-1 rounded-full bg-gradient-to-br ${action.gradient}`}>
+                <action.icon className="w-3 h-3 text-white" />
               </div>
+              <span className="text-xs font-medium text-muted-foreground group-hover:text-foreground transition-colors">
+                {action.text}
+              </span>
+            </motion.button>
+          ))}
+        </div>
+      </motion.div>
 
-              {/* Content */}
-              <div className="flex-1 space-y-2">
-                <h3 className="text-lg font-semibold text-foreground leading-tight">
-                  {item.heading}
-                </h3>
-                <p className="text-sm text-muted-foreground/90 leading-relaxed">
-                  {item.message}
-                </p>
-              </div>
-
-              {/* Subtle hover indicator */}
-              <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                <div className="w-6 h-6 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center">
-                  <svg
-                    className="w-3 h-3 text-foreground/60"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 5l7 7-7 7"
-                    />
-                  </svg>
-                </div>
-              </div>
-            </Button>
-          );
-        })}
-      </div>
-
-      {/* Footer hint */}
-      <div className="mt-8 text-center">
-        <p className="text-sm text-muted-foreground/60">
-          Or type your own message below to get started
-        </p>
-      </div>
+      {/* Footer hint with modern styling */}
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.5, delay: 0.5 }}
+        className="mt-8 mb-4 text-center relative z-10"
+      >
+        <div className="inline-flex items-center gap-2 text-sm text-muted-foreground/60">
+          <div className="w-1 h-1 rounded-full bg-muted-foreground/40 animate-pulse" />
+          <span>Type a message to continue our conversation</span>
+          <div className="w-1 h-1 rounded-full bg-muted-foreground/40 animate-pulse" style={{ animationDelay: '0.5s' }} />
+        </div>
+      </motion.div>
     </div>
   );
 }

@@ -101,9 +101,18 @@ export const CreativeResumeTemplate: React.FC<{ data: PreviewData }> = ({
                   <p className="text-xs text-gray-400 mb-1">
                     {job.dates?.start} - {job.dates?.end || "Present"}
                   </p>
-                  <p className="text-sm leading-relaxed whitespace-pre-line">
-                    {job.description}
-                  </p>
+                  <ul className="text-sm leading-relaxed space-y-1">
+                    {job.description
+                      .replace(/\n(?![•▪\-])/g, ' ') // Replace single newlines with spaces
+                      .split(/[•▪]|\n\s*[-•▪]/) // Split on bullets or newlines followed by bullets
+                      .filter(p => p.trim())
+                      .map((point, idx) => (
+                      <li key={idx} className="flex">
+                        <span className="mr-2 text-blue-500">•</span>
+                        <span>{point.trim()}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               ))}
             </div>

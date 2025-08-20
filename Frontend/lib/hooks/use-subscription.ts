@@ -21,7 +21,13 @@ export function useSubscription() {
     setLoading(true);
     try {
       const token = await getToken();
-      const response = await fetch("/api/billing/subscription", {
+      // Don't make API call if no token (user is signed out)
+      if (!token || token === "null" || token === "undefined") {
+        setSubscription({ plan: "free", is_active: false, status: "inactive" });
+        return;
+      }
+      
+      const response = await fetch(`/api/billing/subscription`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!response.ok) {
@@ -67,6 +73,11 @@ export function useSubscription() {
     setLoading(true);
     try {
       const token = await getToken();
+      if (!token) {
+        toast.error("Please sign in to subscribe.");
+        return;
+      }
+      
       const response = await fetch("/api/billing/create-checkout-session", {
         method: "POST",
         headers: {
@@ -92,6 +103,11 @@ export function useSubscription() {
     setPortalLoading(true);
     try {
       const token = await getToken();
+      if (!token) {
+        toast.error("Please sign in to manage your subscription.");
+        return;
+      }
+      
       const response = await fetch("/api/billing/create-portal-session", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },

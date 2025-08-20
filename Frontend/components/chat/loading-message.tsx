@@ -14,7 +14,11 @@ type ProgressType =
   | "calling api"
   | "browser_automation"
   | "job_search"
-  | "linkedin_api";
+  | "linkedin_api"
+  | "conversation"
+  | "tool_execution"
+  | "data_persistence"
+  | "response_formatting";
 
 interface ReasoningStep {
   type: "reasoning_start" | "reasoning_chunk" | "reasoning_complete";
@@ -45,11 +49,41 @@ export function LoadingMessage({
       ? reasoningSteps[reasoningSteps.length - 1]
       : null;
 
-  // Use the live content from the stream if it exists.
-  const displayText = lastStep ? lastStep.content : customMessage;
-  const displayType: ProgressType = lastStep
-    ? (lastStep.step as ProgressType) || "thinking"
-    : progressType;
+  // Extract meaningful information from the last step
+  let displayText = customMessage;
+  let displayType: ProgressType = progressType;
+  
+  if (lastStep) {
+    // Check for specific node names from LangGraph
+    if (lastStep.step?.includes("conversation")) {
+      displayType = "conversation" as ProgressType;
+      displayText = lastStep.content || "Understanding your request...";
+    } else if (lastStep.step?.includes("tool_execution")) {
+      displayType = "tool_execution" as ProgressType;
+      displayText = lastStep.tool_name || lastStep.content || "Executing tools...";
+    } else if (lastStep.step?.includes("data_persistence")) {
+      displayType = "data_persistence" as ProgressType;
+      displayText = lastStep.content || "Saving data...";
+    } else if (lastStep.step?.includes("response_formatting")) {
+      displayType = "response_formatting" as ProgressType;
+      displayText = lastStep.content || "Formatting response...";
+    } else if (lastStep.tool_name) {
+      // If we have a tool name, show it
+      displayType = "calling tool";
+      displayText = lastStep.tool_name;
+    } else if (lastStep.content) {
+      // Use the content if available
+      displayText = lastStep.content;
+      // Try to infer type from content
+      if (lastStep.content.toLowerCase().includes("search")) {
+        displayType = "searching";
+      } else if (lastStep.content.toLowerCase().includes("generat")) {
+        displayType = "generating";
+      } else if (lastStep.content.toLowerCase().includes("download")) {
+        displayType = "downloading";
+      }
+    }
+  }
 
   return (
     <div className="flex items-start gap-3 py-2">

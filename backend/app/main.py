@@ -1,7 +1,13 @@
+import os
 from dotenv import load_dotenv
 load_dotenv()
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+import logging
+
+logger = logging.getLogger(__name__)
 from app.users import router as users_router
 from app.documents import router as documents_router
 from app.rag import router as rag_router
@@ -26,12 +32,14 @@ from app.pdf_generator import router as pdf_router
 from app.cover_letter_documents import router as cover_letter_documents_router
 from app.marketing import router as marketing_router
 from app.admin import router as admin_router
+from app.email_api import router as email_router
 
 app = FastAPI()
 
+app_url = os.getenv("APP_URL", "https://jobhackerbot.com")
 # Configure CORS
 origins = [
-    "https://jobhackerbot.com",
+    app_url
 ]
 
 app.add_middleware(
@@ -69,6 +77,18 @@ app.include_router(pdf_router, prefix="/api", tags=["pdf"])
 app.include_router(cover_letter_documents_router, prefix="/api", tags=["cover-letter-documents"])
 app.include_router(marketing_router, tags=["marketing"])
 app.include_router(admin_router, tags=["admin"])
+app.include_router(email_router, tags=["email"])
+
+# Add validation error handler to see what's failing
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    logger.error(f"Validation error for {request.url}: {exc.errors()}")
+    logger.error(f"Request body: {exc.body}")
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": exc.errors(), "body": str(exc.body)[:500]},
+    )
+
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Job Application Automation API"} 

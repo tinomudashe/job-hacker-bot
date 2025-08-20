@@ -11,8 +11,8 @@ import * as React from "react";
 import { toast } from "sonner";
 
 export default function Home() {
-  // Start with empty state - will be populated by fetchMostRecentPage if needed
-  const [currentPageId, setCurrentPageId] = React.useState<string>("");
+  // Start with undefined - will be populated on mount
+  const [currentPageId, setCurrentPageId] = React.useState<string | undefined>(undefined);
   const [isLoadingRecentPage, setIsLoadingRecentPage] = React.useState(true);
   const [hasInitialized, setHasInitialized] = React.useState(false);
 
@@ -30,6 +30,7 @@ export default function Home() {
     error,
     isConnected,
     isHistoryLoading,
+    isLimitReached,
   } = useWebSocket(currentPageId, setCurrentPageId);
   const { user } = useUser();
   const { getToken, isLoaded, isSignedIn } = useAuth();
@@ -53,84 +54,83 @@ export default function Home() {
     }
   }, [fetchSubscription]);
 
-  // Function to fetch the most recent conversation (only on initial load)
-  const fetchMostRecentPage = React.useCallback(async () => {
-    if (!isLoaded || hasInitialized) {
-      return;
-    }
 
-    try {
-      const token = await getToken();
-      if (!token) {
-        setIsLoadingRecentPage(false);
-        setHasInitialized(true);
+  // Load the most recent conversation on page load (only once)
+  React.useEffect(() => {
+    const loadInitialPage = async () => {
+      console.log("🔍 [loadInitialPage] Starting initial page load");
+      
+      if (!isLoaded || !user || hasInitialized) {
+        console.log("🔍 [loadInitialPage] Skipping:", { isLoaded, user: !!user, hasInitialized });
+        if (isLoaded && !user) {
+          setIsLoadingRecentPage(false);
+          setHasInitialized(true);
+        }
         return;
       }
 
-      const cachedId = localStorage.getItem("lastConversationId");
-      if (cachedId) {
-        try {
-          // FIX: The validation fetch call was incorrect. The Next.js proxy will
-          // automatically forward this request to the backend.
+      setIsLoadingRecentPage(true);
+      
+      try {
+        const token = await getToken();
+        if (!token) {
+          console.log("🔍 [loadInitialPage] No token");
+          setCurrentPageId("");
+          return;
+        }
+
+        // Check localStorage first
+        const cachedId = localStorage.getItem("lastConversationId");
+        console.log("🔍 [loadInitialPage] Cached ID:", cachedId);
+        
+        if (cachedId) {
+          // Validate cached page exists
           const validateResponse = await fetch(`/api/pages/${cachedId}`, {
             headers: { Authorization: `Bearer ${token}` },
           });
-
+          
           if (validateResponse.ok) {
+            console.log("✅ [loadInitialPage] Loading cached page:", cachedId);
             setCurrentPageId(cachedId);
             setIsLoadingRecentPage(false);
             setHasInitialized(true);
             return;
-          } else {
-            // If the cached ID is invalid, remove it from localStorage.
-            localStorage.removeItem("lastConversationId");
           }
-        } catch (error) {
-          console.warn("Failed to validate cached conversation:", error);
+          
+          console.log("❌ [loadInitialPage] Cached page invalid");
           localStorage.removeItem("lastConversationId");
         }
-      }
 
-      // If no valid cached ID is found, fetch the most recent page.
-      const response = await fetch("/api/pages/recent", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (response.ok) {
-        const recentPage = await response.json();
-        if (recentPage && recentPage.id) {
-          setCurrentPageId(recentPage.id);
-          localStorage.setItem("lastConversationId", recentPage.id);
+        // No cache or invalid, get most recent
+        console.log("🔍 [loadInitialPage] Fetching most recent page");
+        const recentResponse = await fetch("/api/pages/recent", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        
+        if (recentResponse.ok) {
+          const recentPage = await recentResponse.json();
+          console.log("✅ [loadInitialPage] Got recent page:", recentPage);
+          if (recentPage?.id) {
+            setCurrentPageId(recentPage.id);
+            localStorage.setItem("lastConversationId", recentPage.id);
+          } else {
+            setCurrentPageId("");
+          }
+        } else {
+          console.log("🔍 [loadInitialPage] No pages found, starting fresh");
+          setCurrentPageId("");
         }
-      } else if (response.status !== 404) {
-        console.warn(`Failed to fetch recent page, status: ${response.status}`);
+      } catch (error) {
+        console.error("[loadInitialPage] Error:", error);
+        setCurrentPageId("");
+      } finally {
+        setIsLoadingRecentPage(false);
+        setHasInitialized(true);
       }
-    } catch (error) {
-      console.error("Failed to fetch most recent page:", error);
-    } finally {
-      setIsLoadingRecentPage(false);
-      setHasInitialized(true);
-    }
-  }, [getToken, hasInitialized, isLoaded]);
+    };
 
-  // Load the most recent conversation on page load (only once)
-  React.useEffect(() => {
-    if (isLoaded && user && !hasInitialized) {
-      console.log(
-        "📋 [page.tsx] useEffect triggered - calling fetchMostRecentPage"
-      );
-      fetchMostRecentPage();
-    } else {
-      console.log(
-        "📋 [page.tsx] useEffect skipped - isLoaded:",
-        isLoaded,
-        "user:",
-        !!user,
-        "hasInitialized:",
-        hasInitialized
-      );
-    }
-  }, [isLoaded, user, hasInitialized]); // Removed fetchMostRecentPage from deps to prevent re-runs
+    loadInitialPage();
+  }, [isLoaded, user, hasInitialized, getToken]);
 
   const handleSelectPage = (pageId: string) => {
     console.log(`📋 [page.tsx] handleSelectPage called with ID: ${pageId}`);
@@ -185,13 +185,13 @@ export default function Home() {
         <Header
           onNewChat={handleNewChat}
           onClearChat={clearAllChats}
-          currentPageId={currentPageId}
+          currentPageId={currentPageId || undefined}
           onSelectPage={handleSelectPage}
           isLoginPage={!isSignedIn}
         />
         <main className="flex-1 overflow-hidden pt-14 sm:pt-16 md:pt-20">
           <SignedIn>
-            {isLoadingRecentPage || subscriptionLoading ? (
+            {(isLoadingRecentPage || subscriptionLoading) ? (
               <div className="flex items-center justify-center h-full">
                 <div className="flex flex-col items-center gap-4">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -210,10 +210,12 @@ export default function Home() {
                 onDeleteMessage={deleteMessage}
                 onEditMessage={editMessage}
                 onRegenerateMessage={regenerateMessage}
+                onStartNewChat={startNewChat}
                 onStopGeneration={stopGeneration}
                 isLoading={isLoading}
                 isHistoryLoading={isHistoryLoading}
                 isConnected={isConnected}
+                isLimitReached={isLimitReached}
                 error={error || undefined}
               />
             ) : (

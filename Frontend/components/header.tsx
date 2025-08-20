@@ -11,7 +11,7 @@ import { ConversationDialog } from "./conversation-dialog";
 import { PricingDialog } from "./pricing-dialog";
 import { SettingsDialog } from "./settings-dialog";
 import { LogoWithText } from "./ui/logo";
-import { SubscriptionBadge } from "./ui/subscription-badge";
+import { ModernSubscriptionBadge } from "./ui/modern-subscription-badge";
 import { ThemeToggle } from "./ui/theme-toggle";
 
 interface HeaderProps {
@@ -100,7 +100,12 @@ export function Header({
                   </Button>
                   <SignedIn>
                     {subscription && (
-                      <SubscriptionBadge subscription={subscription} />
+                      <ModernSubscriptionBadge 
+                        subscription={subscription}
+                        variant="glassmorphic"
+                        showPulse={subscription.plan === "pro"}
+                        onClick={() => setShowSettingsDialog(true)}
+                      />
                     )}
                   </SignedIn>
                   <div className="h-6 w-px bg-border/50 mx-1" />
@@ -141,7 +146,12 @@ export function Header({
             <div className="flex md:hidden items-center space-x-1.5 sm:space-x-2">
               <SignedIn>
                 {subscription && (
-                  <SubscriptionBadge subscription={subscription} />
+                  <ModernSubscriptionBadge 
+                    subscription={subscription}
+                    variant="minimal"
+                    showPulse={false}
+                    className="mr-2"
+                  />
                 )}
                 <UserButton />
               </SignedIn>

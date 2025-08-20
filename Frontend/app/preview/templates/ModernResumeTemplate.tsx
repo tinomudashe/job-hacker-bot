@@ -71,9 +71,18 @@ export const ModernResumeTemplate: React.FC<{ data: PreviewData }> = ({
                 <p className="font-medium text-gray-600 dark:text-gray-300 mb-2">
                   {job.company}
                 </p>
-                <p className="text-gray-600 dark:text-gray-400 whitespace-pre-line">
-                  {job.description}
-                </p>
+                <ul className="text-gray-600 dark:text-gray-400 mt-2 space-y-1">
+                  {job.description
+                    .replace(/\n(?![•▪\-])/g, ' ') // Replace single newlines with spaces
+                    .split(/[•▪]|\n\s*[-•▪]/) // Split on bullets or newlines followed by bullets
+                    .filter(p => p.trim())
+                    .map((point, idx) => (
+                    <li key={idx} className="flex text-sm">
+                      <span className="mr-2 text-blue-500">▪</span>
+                      <span>{point.trim()}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             ))}
           </section>
@@ -99,14 +108,17 @@ export const ModernResumeTemplate: React.FC<{ data: PreviewData }> = ({
                     {project.url}
                   </a>
                 )}
-                <p className="mt-2 text-gray-600 dark:text-gray-400 whitespace-pre-line">
+                <p className="mt-2 text-gray-600 dark:text-gray-400 text-sm">
                   {project.description}
                 </p>
                 {project.technologies && project.technologies.length > 0 && (
-                  <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                    <span className="font-semibold">Technologies:</span>{" "}
-                    {project.technologies.join(", ")}
-                  </p>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {project.technologies.map((tech, idx) => (
+                      <span key={idx} className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full">
+                        {tech}
+                      </span>
+                    ))}
+                  </div>
                 )}
               </div>
             ))}
@@ -155,18 +167,19 @@ export const ModernResumeTemplate: React.FC<{ data: PreviewData }> = ({
               <h2 className="text-lg uppercase font-bold tracking-widest text-gray-700 dark:text-gray-300 mb-4">
                 Certifications
               </h2>
-              <ul className="space-y-2">
+              <div className="space-y-3">
                 {certifications.map((cert, index) => (
-                  <li key={index} className="text-gray-600 dark:text-gray-400">
-                    <span className="font-semibold">{cert.name}</span>
-                    {cert.issuing_organization && (
-                      <span className="block text-sm italic">
-                        {cert.issuing_organization}
-                      </span>
-                    )}
-                  </li>
+                  <div key={index} className="bg-gray-50 dark:bg-gray-800/50 p-2 rounded">
+                    <p className="font-semibold text-sm text-gray-800 dark:text-gray-200">
+                      {cert.name}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      {cert.issuing_organization}
+                      {cert.date_issued && ` • ${cert.date_issued}`}
+                    </p>
+                  </div>
                 ))}
-              </ul>
+              </div>
             </section>
           )}
 
@@ -175,14 +188,27 @@ export const ModernResumeTemplate: React.FC<{ data: PreviewData }> = ({
               <h2 className="text-lg uppercase font-bold tracking-widest text-gray-700 dark:text-gray-300 mb-4">
                 Languages
               </h2>
-              <ul className="space-y-1">
-                {languages.map((lang, index) => (
-                  <li key={index} className="text-gray-600 dark:text-gray-400">
-                    <span className="font-semibold">{lang.name}</span>
-                    {lang.proficiency && `: ${lang.proficiency}`}
-                  </li>
-                ))}
-              </ul>
+              <div className="space-y-2">
+                {languages.map((lang, index) => {
+                  const getProficiencyDots = (level: string) => {
+                    const levels: Record<string, number> = {
+                      'Native': 5, 'Fluent': 4, 'Professional': 3, 'Intermediate': 2, 'Basic': 1
+                    };
+                    const dots = levels[level] || 3;
+                    return '●'.repeat(dots) + '○'.repeat(5 - dots);
+                  };
+                  return (
+                    <div key={index} className="flex justify-between items-center">
+                      <span className="font-medium text-sm text-gray-700 dark:text-gray-300">
+                        {lang.name}
+                      </span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">
+                        {getProficiencyDots(lang.proficiency || 'Intermediate')}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </section>
           )}
         </div>

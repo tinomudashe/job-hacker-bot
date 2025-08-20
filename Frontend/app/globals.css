@@ -237,6 +237,90 @@
     }
   }
 
+  /* New Homepage Animations */
+  .animate-fade-in-up {
+    animation: fade-in-up 0.8s ease-out both;
+  }
+  @keyframes fade-in-up {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+  @keyframes float {
+    0%, 100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-10px);
+    }
+  }
+
+  .animate-text-shimmer {
+    background-size: 200% 100%;
+    animation: text-shimmer 6s linear infinite;
+  }
+  @keyframes text-shimmer {
+    to {
+      background-position: -200% 0;
+    }
+  }
+
+  /* Animation delays for stagger effect */
+  .animation-delay-200 {
+    animation-delay: 200ms;
+  }
+  .animation-delay-400 {
+    animation-delay: 400ms;
+  }
+  .animation-delay-600 {
+    animation-delay: 600ms;
+  }
+  .animation-delay-700 {
+    animation-delay: 700ms;
+  }
+  .animation-delay-800 {
+    animation-delay: 800ms;
+  }
+
+  /* Grid background animation */
+  .animate-grid-float {
+    animation: grid-float 20s ease-in-out infinite;
+  }
+  @keyframes grid-float {
+    0%, 100% {
+      transform: translate(0, 0);
+    }
+    50% {
+      transform: translate(-10px, -10px);
+    }
+  }
+
+  /* Tagline banner glow effect */
+  .tagline-glow {
+    box-shadow: 
+      0 0 20px rgba(16, 185, 129, 0.1),
+      0 0 40px rgba(16, 185, 129, 0.05),
+      0 4px 6px -1px rgba(0, 0, 0, 0.1),
+      0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  }
+  
+  .dark .tagline-glow {
+    box-shadow: 
+      0 0 20px rgba(16, 185, 129, 0.2),
+      0 0 40px rgba(16, 185, 129, 0.1),
+      0 4px 6px -1px rgba(0, 0, 0, 0.3),
+      0 2px 4px -1px rgba(0, 0, 0, 0.2);
+  }
+
   /* Touch-friendly utilities */
   .touch-manipulation {
     touch-action: manipulation;

@@ -57,6 +57,7 @@ async def get_chats(
     result = await db.execute(
         select(ChatMessage)
         .where(ChatMessage.user_id == current_user.id)
+        .where(ChatMessage.deleted_at.is_(None))  # Filter out soft-deleted messages
         .order_by(ChatMessage.created_at.desc())
     )
     messages = result.scalars().all()
@@ -86,7 +87,11 @@ async def get_messages(
     Retrieve chat messages for the current user, optionally filtered by page.
     Supports pagination for better performance with large conversations.
     """
-    query = select(ChatMessage).where(ChatMessage.user_id == current_user.id)
+    query = select(ChatMessage).where(
+        ChatMessage.user_id == current_user.id
+    ).where(
+        ChatMessage.deleted_at.is_(None)  # Filter out soft-deleted messages
+    )
     
     if page_id:
         query = query.where(ChatMessage.page_id == page_id)
@@ -108,6 +113,23 @@ async def clear_history(
 ):
     """
     Delete all chat messages for the current user.
+    """
+    await db.execute(
+        ChatMessage.__table__.delete().where(ChatMessage.user_id == current_user.id)
+    )
+    await db.execute(
+        Page.__table__.delete().where(Page.user_id == current_user.id)
+    )
+    await db.commit()
+    return
+
+@router.delete("/chat/clear-history", status_code=204)
+async def clear_chat_history(
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Delete all chat messages for the current user (alternate endpoint for frontend compatibility).
     """
     await db.execute(
         ChatMessage.__table__.delete().where(ChatMessage.user_id == current_user.id)
@@ -142,22 +164,38 @@ async def delete_message(
     if message.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to delete this message")
     
+    print(f"Delete request: message_id={message_id}, page_id={message.page_id}, cascade={cascade}, above={above}")
+    
     if cascade:
-        operator = ">=" if not above else ">"
         # Get all messages after the one to be deleted
-        result = await db.execute(
-            select(ChatMessage)
-            .where(ChatMessage.user_id == current_user.id)
-            .where(
-                ChatMessage.created_at >= message.created_at if not above else
-                ChatMessage.created_at > message.created_at
+        if above:
+            # Delete messages after the specified message (for regeneration)
+            result = await db.execute(
+                select(ChatMessage)
+                .where(ChatMessage.user_id == current_user.id)
+                .where(ChatMessage.page_id == message.page_id)
+                .where(ChatMessage.created_at > message.created_at)
+                .order_by(ChatMessage.created_at)
             )
-        )
+        else:
+            # Delete the message and all subsequent messages
+            result = await db.execute(
+                select(ChatMessage)
+                .where(ChatMessage.user_id == current_user.id)
+                .where(ChatMessage.page_id == message.page_id)
+                .where(ChatMessage.created_at >= message.created_at)
+                .order_by(ChatMessage.created_at)
+            )
         messages_to_delete = result.scalars().all()
+        print(f"Soft deleting {len(messages_to_delete)} messages (cascade={cascade}, above={above})")
+        from datetime import datetime
         for msg in messages_to_delete:
-            await db.delete(msg)
+            print(f"  - Soft deleting message {msg.id}: {msg.message[:50]}...")
+            msg.deleted_at = datetime.utcnow()
     else:
-        await db.delete(message)
+        from datetime import datetime
+        message.deleted_at = datetime.utcnow()
+        print(f"Soft deleting single message {message.id}")
         
     await db.commit()
     return
@@ -203,7 +241,8 @@ async def get_orphaned_messages(
     """
     query = select(ChatMessage).where(
         ChatMessage.user_id == current_user.id,
-        ChatMessage.page_id.is_(None)
+        ChatMessage.page_id.is_(None),
+        ChatMessage.deleted_at.is_(None)  # Filter out soft-deleted messages
     ).order_by(ChatMessage.created_at.desc())
     
     result = await db.execute(query)

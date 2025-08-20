@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { PreviewData } from "../types";
+import { parseBasicMarkdown, renderMarkdownLine } from "@/lib/utils/markdown";
 
 // EDIT: This is the existing CoverLetterTemplate component, moved into its own file.
 // This will serve as our "Modern" style, matching the original implementation.
@@ -62,8 +63,27 @@ export const ModernCoverLetterTemplate: React.FC<{
         </h2>
 
         {/* Body of the letter */}
-        <div className="whitespace-pre-line text-justify text-gray-700 dark:text-gray-300">
-          {content}
+        <div className="whitespace-pre-line text-justify text-gray-700 dark:text-gray-300 space-y-4">
+          {parseBasicMarkdown(content).split("\n").map((paragraph, index) => {
+            // Skip empty paragraphs
+            if (!paragraph.trim()) return null;
+            
+            // Handle bullet points
+            if (paragraph.trim().startsWith("•")) {
+              return (
+                <p key={index} className="ml-4">
+                  {renderMarkdownLine(paragraph)}
+                </p>
+              );
+            }
+            
+            // Regular paragraphs
+            return (
+              <p key={index}>
+                {renderMarkdownLine(paragraph)}
+              </p>
+            );
+          })}
         </div>
       </div>
     </div>

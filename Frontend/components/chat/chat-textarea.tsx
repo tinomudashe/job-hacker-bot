@@ -139,8 +139,37 @@ export function ChatTextarea({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Check file size (10MB limit)
     if (file.size > 10 * 1024 * 1024) {
       toast.error("File size must be less than 10MB");
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      return;
+    }
+
+    // Define allowed file types
+    const allowedTypes = [
+      'application/pdf',  // PDF
+      'text/plain',  // TXT
+      'text/csv',  // CSV
+      'application/vnd.ms-excel',  // XLS
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',  // XLSX
+      'application/msword',  // DOC
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  // DOCX
+    ];
+
+    const allowedExtensions = ['.pdf', '.txt', '.csv', '.doc', '.docx', '.xls', '.xlsx'];
+    const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
+
+    // Check if file type is allowed
+    if (!allowedTypes.includes(file.type) && !allowedExtensions.includes(fileExtension)) {
+      toast.error("Invalid file type", {
+        description: "Only PDF, TXT, CSV, and DOC/DOCX files are allowed"
+      });
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
       return;
     }
 
@@ -507,7 +536,7 @@ export function ChatTextarea({
                 ref={fileInputRef}
                 onChange={handleFileChange}
                 className="hidden"
-                accept=".pdf,.doc,.docx,.txt,.rtf,.xls,.xlsx,.csv,image/*,video/*,audio/*"
+                accept=".pdf,.doc,.docx,.txt,.csv,.xls,.xlsx"
               />
 
               {/* Text input area */}

@@ -76,6 +76,18 @@ const PDF_STYLES = [
   },
 ];
 
+// Function to clean markdown formatting from text
+const cleanMarkdownFormatting = (text: string): string => {
+  return text
+    .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')  // Remove *** formatting
+    .replace(/\*\*([^*]+)\*\*/g, '$1')      // Remove ** formatting
+    .replace(/\*([^*]+)\*/g, '$1')          // Remove * formatting
+    .replace(/^#+\s+/gm, '')                 // Remove heading markers
+    .replace(/^>\s+/gm, '')                  // Remove blockquote markers
+    .replace(/^[-*+]\s+/gm, '• ')            // Convert list markers to bullets
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1'); // Remove link formatting, keep text
+};
+
 export function PDFGenerationDialog({
   open,
   onOpenChange,
@@ -86,7 +98,9 @@ export function PDFGenerationDialog({
   jobTitle = "",
 }: PDFGenerationDialogProps) {
   const [selectedStyle, setSelectedStyle] = React.useState("modern");
-  const [editedContent, setEditedContent] = React.useState(initialContent);
+  const [editedContent, setEditedContent] = React.useState(
+    cleanMarkdownFormatting(initialContent)
+  );
   const [editedCompanyName, setEditedCompanyName] = React.useState(companyName);
   const [editedJobTitle, setEditedJobTitle] = React.useState(jobTitle);
   const [recipientName, setRecipientName] = React.useState("");
@@ -288,14 +302,24 @@ export function PDFGenerationDialog({
           setEditedJobTitle(parsedCoverLetterData?.job_title || jobTitle);
           setRecipientName(parsedCoverLetterData?.recipient_name || "");
           setRecipientTitle(parsedCoverLetterData?.recipient_title || "");
-          setEditedContent(parsedCoverLetterData?.body || "");
+          setEditedContent(
+            cleanMarkdownFormatting(parsedCoverLetterData?.body || "")
+          );
         } else if (contentType === "resume") {
+          // Add a delay if this is a newly generated resume to ensure backend has saved it
+          if (initialContent.includes("[DOWNLOADABLE_RESUME]")) {
+            await new Promise(resolve => setTimeout(resolve, 1500));
+          }
+          
           const [profileResponse, resumeResponse] = await Promise.all([
             fetch("/api/profile", {
               headers: { Authorization: `Bearer ${token}` },
             }),
-            fetch("/api/resume", {
-              headers: { Authorization: `Bearer ${token}` },
+            fetch(`/api/resume?t=${Date.now()}`, { // Add timestamp to bypass cache
+              headers: { 
+                Authorization: `Bearer ${token}`,
+                'Cache-Control': 'no-cache',
+              },
             }),
           ]);
 
@@ -313,38 +337,6 @@ export function PDFGenerationDialog({
               profileData.email ||
               profileData.phone
             );
-
-            // EDIT: The data loading logic is now more robust. It prioritizes the comprehensive
-            // /api/resume endpoint as the source of truth and uses /api/profile only as a fallback.
-            // This prevents race conditions where the faster but less complete profile data could
-            // overwrite the more detailed resume data.
-            const finalPersonalInfo = {
-              fullName:
-                resumeData?.personalInfo?.name ||
-                `${profileData?.first_name || ""} ${
-                  profileData?.last_name || ""
-                }`.trim() ||
-                profileData?.name ||
-                "",
-              email:
-                resumeData?.personalInfo?.email || profileData?.email || "",
-              phone:
-                resumeData?.personalInfo?.phone || profileData?.phone || "",
-              address:
-                resumeData?.personalInfo?.location ||
-                profileData?.address ||
-                "",
-              linkedin:
-                resumeData?.personalInfo?.linkedin ||
-                profileData?.linkedin ||
-                "",
-              website: resumeData?.personalInfo?.website || "", // Profile doesn't have this
-              summary:
-                resumeData?.personalInfo?.summary ||
-                profileData?.profile_headline ||
-                "",
-            };
-            setPersonalInfo(finalPersonalInfo);
           }
 
           if (resumeResponse.ok) {
@@ -357,19 +349,39 @@ export function PDFGenerationDialog({
               (resumeData.education && resumeData.education.length > 0) ||
               (resumeData.skills && resumeData.skills.length > 0)
             );
+          }
 
-            // Update personal info with resume data if available
-            if (resumeData.personalInfo) {
-              setPersonalInfo((prev) => ({
-                fullName: resumeData.personalInfo.name || prev.fullName,
-                email: resumeData.personalInfo.email || prev.email,
-                phone: resumeData.personalInfo.phone || prev.phone,
-                address: resumeData.personalInfo.location || prev.address,
-                linkedin: resumeData.personalInfo.linkedin || prev.linkedin,
-                website: prev.website,
-                summary: resumeData.personalInfo.summary || prev.summary,
-              }));
-            }
+          // Set personal info - prioritize resume data over profile data
+          const finalPersonalInfo = {
+            fullName:
+              resumeData?.personalInfo?.name ||
+              `${profileData?.first_name || ""} ${
+                profileData?.last_name || ""
+              }`.trim() ||
+              profileData?.name ||
+              "",
+            email:
+              resumeData?.personalInfo?.email || profileData?.email || "",
+            phone:
+              resumeData?.personalInfo?.phone || profileData?.phone || "",
+            address:
+              resumeData?.personalInfo?.location ||
+              profileData?.address ||
+              "",
+            linkedin:
+              resumeData?.personalInfo?.linkedin ||
+              profileData?.linkedin ||
+              "",
+            website: resumeData?.personalInfo?.website || "",
+            summary:
+              resumeData?.personalInfo?.summary ||
+              profileData?.profile_headline ||
+              "",
+          };
+          setPersonalInfo(finalPersonalInfo);
+
+          // Only populate other resume fields if resumeData exists
+          if (resumeData) {
 
             // Populate work experience
             if (resumeData.experience && resumeData.experience.length > 0) {
@@ -407,8 +419,12 @@ export function PDFGenerationDialog({
             if (resumeData.projects && resumeData.projects.length > 0) {
               setProjects(
                 resumeData.projects.map((p: any) => ({
-                  ...p,
-                  technologies: (p.technologies || []).join(", "),
+                  name: p.title || p.name || "",  // Map backend 'title' to frontend 'name'
+                  description: p.description || "",
+                  technologies: Array.isArray(p.technologies) 
+                    ? p.technologies.join(", ")
+                    : (p.technologies || ""),
+                  url: p.url || "",
                 }))
               );
             }
@@ -523,7 +539,7 @@ export function PDFGenerationDialog({
   // Initialize content
   React.useEffect(() => {
     if (initialContent && !editedContent) {
-      setEditedContent(initialContent);
+      setEditedContent(cleanMarkdownFormatting(initialContent));
     }
   }, [initialContent]);
 
@@ -571,20 +587,47 @@ export function PDFGenerationDialog({
     }
   }, [open]);
 
-  // EDIT: Simplified handlePreview to remove sessionStorage dependency for resumes.
-  // The preview page is now always responsible for fetching its own data from the database.
-  const handlePreview = () => {
-    const previewUrl = `/preview?type=${contentType}&style=${selectedStyle}${
-      contentId ? `&content_id=${contentId}` : ""
-    }`;
+  // Enhanced handlePreview to save changes before opening preview
+  const handlePreview = async () => {
+    // First save the current changes
+    toast.loading("Saving your changes before preview...", { id: "preview-save" });
+    
+    try {
+      let saveSuccess = false;
+      
+      // Save based on content type
+      if (contentType === "resume") {
+        saveSuccess = await handleSaveResume();
+      } else {
+        saveSuccess = await handleSaveCoverLetter();
+      }
+      
+      if (!saveSuccess) {
+        toast.error("Failed to save changes. Please try saving manually first.", { id: "preview-save" });
+        return;
+      }
+      
+      // Wait longer for the database to fully commit the changes
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Add timestamp to prevent caching
+      const timestamp = Date.now();
+      const previewUrl = `/preview?type=${contentType}&style=${selectedStyle}&t=${timestamp}${
+        contentId ? `&content_id=${contentId}` : ""
+      }`;
 
-    const newWindow = window.open(previewUrl, "_blank", "noopener,noreferrer");
+      console.log("Opening preview with URL:", previewUrl);
+      const newWindow = window.open(previewUrl, "_blank", "noopener,noreferrer");
 
-    if (newWindow) {
-      newWindow.focus();
-      toast.success("Preview opened in a new tab.");
-    } else {
-      toast.error("Please allow pop-ups to view the preview.");
+      if (newWindow) {
+        newWindow.focus();
+        toast.success("Preview opened in a new tab.", { id: "preview-save" });
+      } else {
+        toast.error("Please allow pop-ups to view the preview.", { id: "preview-save" });
+      }
+    } catch (error) {
+      console.error("Error saving before preview:", error);
+      toast.error("Failed to save changes. Please try again.", { id: "preview-save" });
     }
   };
 
@@ -601,23 +644,23 @@ export function PDFGenerationDialog({
     if (contentType === "resume") {
       // For resumes, check if at least personal info or work experience has content
       const hasPersonalInfo = Object.values(personalInfo).some(
-        (val) => val.trim().length > 0
+        (val) => val?.trim().length > 0
       );
       const hasWorkExperience = workExperience.some(
         (job) =>
-          job.title.trim() || job.company.trim() || job.description.trim()
+          job.title?.trim() || job.company?.trim() || job.description?.trim()
       );
       const hasEducation = education.some(
         (edu) =>
-          edu.degree.trim() || edu.school.trim() || edu.description.trim()
+          edu.degree?.trim() || edu.school?.trim() || edu.description?.trim()
       );
-      const hasSkills = skills.trim().length > 0 || skillsArray.length > 0;
+      const hasSkills = skills?.trim().length > 0 || skillsArray?.length > 0;
 
       const hasProjects = projects.some(
-        (p) => p.name.trim() || p.description.trim()
+        (p) => p.name?.trim() || p.description?.trim()
       );
-      const hasCerts = certifications.some((c) => c.name.trim());
-      const hasLangs = languages.some((l) => l.name.trim());
+      const hasCerts = certifications.some((c) => c.name?.trim());
+      const hasLangs = languages.some((l) => l.name?.trim());
 
       return (
         hasPersonalInfo ||
@@ -644,7 +687,7 @@ export function PDFGenerationDialog({
   ]);
 
   const handleSaveCoverLetter = async () => {
-    if (isSaving || !isContentValid) return;
+    if (isSaving || !isContentValid) return Promise.resolve(false);
 
     setIsSaving(true);
     toast.loading("Saving your changes...", { id: "save-toast" });
@@ -654,7 +697,7 @@ export function PDFGenerationDialog({
       if (!token) {
         toast.error("Authentication session not found.", { id: "save-toast" });
         setIsSaving(false);
-        return;
+        return false;
       }
 
       const coverLetterPayload = {
@@ -676,6 +719,8 @@ export function PDFGenerationDialog({
         content: JSON.stringify(coverLetterPayload),
       };
 
+      console.log("Saving cover letter payload:", requestBody);
+
       const response = await fetch("/api/documents/cover-letters/latest", {
         method: "PUT",
         headers: {
@@ -687,17 +732,21 @@ export function PDFGenerationDialog({
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => null);
+        console.error("Save failed with error:", errorData);
         throw new Error(
           errorData?.detail || "Failed to save the cover letter."
         );
       }
 
+      console.log("Cover letter saved successfully");
       toast.success("Cover letter saved successfully!", { id: "save-toast" });
+      return true;
     } catch (error) {
       console.error("Error saving cover letter:", error);
       const message =
         error instanceof Error ? error.message : "An unknown error occurred.";
       toast.error(message, { id: "save-toast" });
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -705,7 +754,7 @@ export function PDFGenerationDialog({
 
   // EDIT: Added a new save handler specifically for resumes.
   const handleSaveResume = async () => {
-    if (isSaving || !isContentValid) return;
+    if (isSaving || !isContentValid) return Promise.resolve(false);
 
     setIsSaving(true);
     toast.loading("Saving your resume...", { id: "save-resume-toast" });
@@ -717,7 +766,7 @@ export function PDFGenerationDialog({
           id: "save-resume-toast",
         });
         setIsSaving(false);
-        return;
+        return false;
       }
 
       const resumePayload = {
@@ -744,7 +793,7 @@ export function PDFGenerationDialog({
             id: edu.id || crypto.randomUUID(),
             degree: edu.degree,
             institution: edu.school,
-            dates: edu.year,
+            dates: { end: edu.year },  // Fixed: dates should be an object with 'end' property
             description: edu.description,
           })),
         skills: skillsArray.filter((s) => s.trim()),
@@ -753,12 +802,16 @@ export function PDFGenerationDialog({
           .map((p) => ({
             title: p.name,
             description: p.description,
-            technologies: p.technologies,
+            technologies: p.technologies 
+              ? p.technologies.split(",").map((t: string) => t.trim()).filter((t: string) => t)
+              : [],
             url: p.url,
           })),
         certifications: certifications.filter((c) => c.name),
         languages: languages.filter((l) => l.name),
       };
+
+      console.log("Saving resume payload:", resumePayload);
 
       const response = await fetch("/api/resume/full", {
         method: "PUT",
@@ -771,15 +824,21 @@ export function PDFGenerationDialog({
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => null);
+        console.error("Save failed with error:", errorData);
         throw new Error(errorData?.detail || "Failed to save the resume.");
       }
 
+      const savedData = await response.json();
+      console.log("Resume saved successfully:", savedData);
+      
       toast.success("Resume saved successfully!", { id: "save-resume-toast" });
+      return true;
     } catch (error) {
       console.error("Error saving resume:", error);
       const message =
         error instanceof Error ? error.message : "An unknown error occurred.";
       toast.error(message, { id: "save-resume-toast" });
+      return false;
     } finally {
       setIsSaving(false);
     }

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { SignIn } from "@clerk/nextjs";
 import { X } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { EmbeddedBrowserWarning } from "@/components/embedded-browser-warning";
 
 export default function SignInPage() {
   const router = useRouter();
@@ -19,8 +20,19 @@ export default function SignInPage() {
       >
         <X className="h-4 w-4" />
       </Button>
+      <EmbeddedBrowserWarning />
       <div className="mt-4 flex items-center text-sm text-gray-500">
-        <SignIn />
+        <SignIn 
+          routing="path"
+          path="/sign-in"
+          signUpUrl="/sign-up"
+          appearance={{
+            elements: {
+              rootBox: "w-full",
+              card: "shadow-none",
+            },
+          }}
+        />
       </div>
     </div>
   );

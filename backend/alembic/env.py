@@ -45,6 +45,11 @@ if not database_url:
 
 # Escape the '%' character for the config parser by replacing it with '%%'
 # This is necessary because the config parser interprets '%' as a special character.
+if database_url and "postgresql+asyncpg://" in database_url:
+    database_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
+
+# Escape the '%' character for the config parser by replacing it with '%%'
+# This is necessary because the config parser interprets '%' as a special character.
 escaped_database_url = database_url.replace("%", "%%")
 config.set_main_option("sqlalchemy.url", escaped_database_url)
 

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import * as React from "react";
 import { PreviewData } from "../types";
+import { parseBasicMarkdown, renderMarkdownLine } from "@/lib/utils/markdown";
 
 // EDIT: This is a brand new template for the "Creative" cover letter style.
 // It uses a modern, two-column layout with icons and accent colors.
@@ -82,9 +83,26 @@ export const CreativeCoverLetterTemplate: React.FC<{
               The AI-generated content now provides the full closing, which fits the creative style better. */}
           <div className="whitespace-pre-line leading-7 text-gray-800 dark:text-gray-200 space-y-4 mt-8">
             <p>Dear Hiring Team at {company_name},</p>
-            {content.split("\n\n").map((paragraph, index) => (
-              <p key={index}>{paragraph}</p>
-            ))}
+            {parseBasicMarkdown(content).split("\n").map((paragraph, index) => {
+              // Skip empty paragraphs
+              if (!paragraph.trim()) return null;
+              
+              // Handle bullet points
+              if (paragraph.trim().startsWith("•")) {
+                return (
+                  <p key={index} className="ml-4">
+                    {renderMarkdownLine(paragraph)}
+                  </p>
+                );
+              }
+              
+              // Regular paragraphs
+              return (
+                <p key={index}>
+                  {renderMarkdownLine(paragraph)}
+                </p>
+              );
+            })}
           </div>
         </main>
       </div>

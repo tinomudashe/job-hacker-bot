@@ -28,10 +28,17 @@ import React, { useEffect, useRef, useState } from "react";
 import { Button } from "../ui/button";
 import { ConfirmationDialog } from "../ui/confirmation-dialog";
 import { Logo } from "../ui/logo";
+import { InterviewPrep } from "../interview/interview-prep";
+import { ATSScoreCard } from "../ats/ats-score-card";
 import { FlashcardDialog } from "./flashcard-dialog";
 import { MessageContent } from "./message-content";
 import { PDFGenerationDialog } from "./pdf-generation-dialog";
 import { ReasoningStream } from "./reasoning-stream";
+import { JobDisplay } from "../jobs/job-display";
+import { extractJobResults } from "../ui/job-results";
+import { EditableEmailBubble } from "./editable-email-bubble";
+import { WebSearchResults } from "./web-search-results";
+import { Mail } from "lucide-react";
 
 // Safari compatibility polyfills
 const isSafari = () => {
@@ -69,6 +76,7 @@ interface ChatMessageProps {
   onDelete: (id: string) => void;
   onEdit: (id: string, newContent: string) => void;
   onRegenerate: (id: string) => void;
+  onSendMessage?: (message: string) => void;
   user?: any;
   reasoningSteps?: ReasoningStep[];
 }
@@ -94,13 +102,117 @@ const PDF_STYLES = [
   },
 ];
 
+// Parse text-based job listings into structured format
+const parseTextJobListings = (content: string): any => {
+  try {
+    console.log("Parsing text job listings from content:", content.substring(0, 200));
+    
+    // Extract the header if present
+    const headerMatch = content.match(/Found\s+(\d+)\s+jobs?\s+for\s+['"]?([^'"]+?)['"]?\s+in\s+([^:*]+)/i);
+    let searchQuery = '';
+    let location = '';
+    let totalJobs = 0;
+    
+    if (headerMatch) {
+      totalJobs = parseInt(headerMatch[1]);
+      searchQuery = headerMatch[2];
+      location = headerMatch[3].trim().replace(/[*:]+$/, '').trim();
+    }
+
+    // Parse individual job listings
+    const jobs: any[] = [];
+    
+    // Parse job listings with markdown formatting and emojis
+    // Split by job entries (look for numbered items)
+    const jobEntries = content.split(/(?=\*?\*?\d+\.\s+)/);
+    
+    for (const entry of jobEntries) {
+      // Skip empty entries or the header
+      if (!entry.trim() || !entry.match(/^\*?\*?\d+\./)) continue;
+      
+      // Extract job number
+      const numberMatch = entry.match(/^\*?\*?(\d+)\./);
+      if (!numberMatch) continue;
+      
+      const jobNumber = numberMatch[1];
+      
+      // Extract title and company (handling markdown bold)
+      const titleCompanyMatch = entry.match(/\d+\.\s+\*?\*?([^*]+?)\*?\*?\s+at\s+\*?\*?([^*\n]+)/i);
+      
+      // Extract location with emoji
+      const locationMatch = entry.match(/📍\s*\*?\*?Location:?\*?\*?\s*([^\n]+)/i) || 
+                           entry.match(/Location:\s*([^\n]+)/i);
+      
+      // Extract posted date with emoji
+      const postedMatch = entry.match(/📅\s*\*?\*?Posted:?\*?\*?\s*([^\n]+)/i) || 
+                         entry.match(/Posted:\s*([^\n]+)/i);
+      
+      // Extract apply link with emoji
+      const applyMatch = entry.match(/🔗\s*\*?\*?Apply:?\*?\*?\s*\[([^\]]+)\]\(([^)]+)\)/i) ||
+                        entry.match(/🔗\s*\*?\*?Apply:?\*?\*?\s*([^\n]+)/i) ||
+                        entry.match(/Apply:\s*([^\n]+)/i);
+      
+      if (titleCompanyMatch) {
+        const job = {
+          id: `job-${jobNumber}`,
+          title: titleCompanyMatch[1].replace(/\*+/g, '').trim(),
+          company: titleCompanyMatch[2].replace(/\*+/g, '').trim(),
+          location: locationMatch ? locationMatch[1].replace(/\*+/g, '').trim() : 'Not specified',
+          posted: postedMatch ? postedMatch[1].replace(/\*+/g, '').trim() : 'Not specified',
+          url: applyMatch ? (applyMatch[2] || applyMatch[1]).replace(/\*+/g, '').trim() : '',
+          description: '',
+          salary: null,
+          type: 'On-site',
+          level: null,
+          requirements: [],
+          benefits: [],
+          skills: [],
+        };
+        
+        // Determine job type based on location
+        if (job.location.toLowerCase().includes('remote')) {
+          job.type = 'Remote';
+        } else if (job.location.toLowerCase().includes('hybrid')) {
+          job.type = 'Hybrid';
+        }
+        
+        jobs.push(job);
+        console.log(`Parsed job: ${job.title} at ${job.company}`);
+      }
+    }
+
+    console.log(`Parsed ${jobs.length} jobs from text content`);
+
+    // If we found jobs, return structured data
+    if (jobs.length > 0) {
+      return {
+        jobs,
+        search_query: searchQuery,
+        location: location,
+        total_jobs: totalJobs || jobs.length,
+      };
+    }
+
+    return null;
+  } catch (error) {
+    console.error('Error parsing text job listings:', error);
+    return null;
+  }
+};
+
 // Intelligent content detection based on AI agent patterns and content structure
 const detectContentType = (
   content: string
 ): {
-  type: "cover_letter" | "resume" | null;
+  type: "cover_letter" | "resume" | "jobs" | "email" | "interview_prep" | "ats_review" | "web_search" | null;
   companyName?: string;
   jobTitle?: string;
+  jobData?: any;
+  emailData?: {
+    subject?: string;
+    to?: string;
+    body?: string;
+  };
 } => {
   const lowerContent = content.toLowerCase();
 
@@ -109,12 +221,35 @@ const detectContentType = (
     contentPreview: content.substring(0, 100),
   });
 
-  // Check for interview content FIRST - before any other detection
-  if (content.includes("[INTERVIEW_FLASHCARDS_AVAILABLE]")) {
+  // Check for Web Search Results
+  if (content.includes("Latest Information on:") || 
+      content.includes("Based on current web search results:") ||
+      (content.includes("🌐") && content.includes("How this applies"))) {
     console.log(
-      "🧠 FOUND INTERVIEW FLASHCARDS MARKER - skipping other content detection!"
+      "🌐 FOUND WEB SEARCH RESULTS - returning web_search type!"
     );
-    return { type: null }; // Don't classify as downloadable content
+    return { type: "web_search" as const };
+  }
+
+  // Check for ATS Review content
+  if (content.includes("ATS Resume Review") || 
+      content.includes("Overall Score:") && content.includes("Score Breakdown:") ||
+      content.includes("ATS Optimization Level:")) {
+    console.log(
+      "📊 FOUND ATS REVIEW CONTENT - returning ats_review type!"
+    );
+    return { type: "ats_review" as const };
+  }
+
+  // Check for interview content - before any other detection
+  if (content.includes("[INTERVIEW_FLASHCARDS_AVAILABLE]") || 
+      (content.includes("Interview Preparation Guide") && 
+       content.includes("**Role:**") && 
+       content.includes("**Company:**"))) {
+    console.log(
+      "🧠 FOUND INTERVIEW PREPARATION CONTENT - returning interview_prep type!"
+    );
+    return { type: "interview_prep" as const };
   }
 
   // Check for explicit downloadable markers SECOND - before any filtering
@@ -144,6 +279,72 @@ const detectContentType = (
       "🎯 FOUND [DOWNLOADABLE_RESUME/CV] marker - returning resume type!"
     );
     return { type: "resume" as const };
+  }
+
+  // Check for email content BEFORE job listings
+  if (
+    content.includes("📧 **Email Generated Successfully!**") ||
+    content.includes("📨 **Email Generated Successfully!**") ||
+    content.includes("🔄 **Follow-up Email Generated!**") ||
+    (content.includes("**Subject:**") && content.includes("**To:**") && content.includes("**Email Body:**"))
+  ) {
+    console.log("🎯 FOUND EMAIL content - returning email type!");
+    
+    // Parse email data
+    const lines = content.split('\n');
+    let subject = '';
+    let to = '';
+    let body = '';
+    let inBody = false;
+    
+    for (const line of lines) {
+      if (line.includes('**Subject:**')) {
+        subject = line.replace(/\*\*Subject:\*\*/g, '').trim();
+      } else if (line.includes('**To:**')) {
+        to = line.replace(/\*\*To:\*\*/g, '').trim();
+      } else if (line.includes('**Email Body:**')) {
+        inBody = true;
+      } else if (line.includes('---')) {
+        inBody = false;
+      } else if (inBody && !line.startsWith('✅') && !line.startsWith('💡') && !line.startsWith('📊')) {
+        body += line + '\n';
+      }
+    }
+    
+    return { 
+      type: "email" as const,
+      emailData: {
+        subject,
+        to,
+        body: body.trim()
+      }
+    };
+  }
+
+  // Check for job listings
+  const jobResults = extractJobResults(content);
+  if (jobResults) {
+    console.log("Detected as JOB LISTINGS based on JSON structure");
+    return { type: "jobs" as const, jobData: jobResults };
+  }
+
+  // Also check for job listing patterns in text
+  if (
+    (content.includes('"jobs"') && content.includes('"title"')) ||
+    (content.includes('job_listings') && content.includes('company')) ||
+    (lowerContent.includes('job search results') && lowerContent.includes('jobs found')) ||
+    (lowerContent.includes('job opportunities') && lowerContent.includes('location')) ||
+    // New pattern detection for the backend's format
+    (lowerContent.includes('found') && lowerContent.includes('jobs for') && (
+      content.includes('Location:') || content.includes('Posted:') || content.includes('Apply:')
+    )) ||
+    // Pattern for numbered job listings
+    (/\d+\.\s+[\w\s\/]+\s+at\s+[\w\s]+\s+Location:/i.test(content))
+  ) {
+    console.log("Detected as JOB LISTINGS based on text patterns");
+    // Parse the text format into structured job data
+    const parsedJobs = parseTextJobListings(content);
+    return { type: "jobs" as const, jobData: parsedJobs || content };
   }
 
   // Skip if it's clearly a question, request, or interview content
@@ -513,6 +714,7 @@ export function ChatMessage({
   onDelete,
   onEdit,
   onRegenerate,
+  onSendMessage,
   user,
   reasoningSteps,
 }: ChatMessageProps) {
@@ -579,8 +781,20 @@ export function ChatMessage({
       const jsonString = plainTextContent.substring(jsonStart, jsonEnd + 1);
       try {
         const parsedData = JSON.parse(jsonString);
+        // Get the message before JSON
+        let messageBeforeJson = plainTextContent.substring(0, jsonStart).trim();
+        
+        // Check if there's a trigger after the JSON and append it to the message
+        const textAfterJson = plainTextContent.substring(jsonEnd + 1).trim();
+        if (textAfterJson.includes("[DOWNLOADABLE_COVER_LETTER]") || 
+            textAfterJson.includes("[DOWNLOADABLE_RESUME]") || 
+            textAfterJson.includes("[DOWNLOADABLE_CV]")) {
+          // Append the trigger to the message so the badge can be rendered
+          messageBeforeJson = messageBeforeJson + " " + textAfterJson;
+        }
+        
         return {
-          message: plainTextContent.substring(0, jsonStart).trim(),
+          message: messageBeforeJson,
           structured_data: parsedData,
           content_type: hasClMarker ? "cover_letter" : "resume",
           company_name: parsedData.company_name,
@@ -601,8 +815,12 @@ export function ChatMessage({
     const structuredContent = getStructuredContent();
 
     if (structuredContent) {
+      // Return the message which now includes triggers if they exist
       return structuredContent.message;
     }
+    
+    // Keep the triggers in the display message so badges can be rendered
+    // Don't filter them out here - let MessageContent handle them
     return plainTextContent;
   };
 
@@ -665,9 +883,15 @@ export function ChatMessage({
 
   // Detect content type for PDF generation - check structured content first
   let contentDetection: {
-    type: "cover_letter" | "resume" | null;
+    type: "cover_letter" | "resume" | "jobs" | "email" | "interview_prep" | "ats_review" | "web_search" | null;
     companyName?: string;
     jobTitle?: string;
+    jobData?: any;
+    emailData?: {
+      subject?: string;
+      to?: string;
+      body?: string;
+    };
   };
   let contentId: string | undefined;
   let showPDFButton: boolean;
@@ -680,12 +904,13 @@ export function ChatMessage({
       jobTitle: structuredContent.job_title,
     };
     contentId = extractContentId(plainTextContent); // Extract ID from text if needed for saved docs
-    showPDFButton = !isUser;
+    showPDFButton = !isUser && structuredContent.content_type !== "email";
   } else {
     // Fallback to text pattern detection if no valid JSON is found
     contentDetection = detectContentType(plainTextContent);
     contentId = extractContentId(plainTextContent);
-    showPDFButton = !isUser && contentDetection.type !== null;
+    // Only show PDF button for resume and cover_letter, not for jobs or email
+    showPDFButton = !isUser && (contentDetection.type === "resume" || contentDetection.type === "cover_letter");
 
     console.log("📝 TEXT PATTERN DETECTION:", {
       contentType: contentDetection.type,
@@ -759,78 +984,95 @@ export function ChatMessage({
     let interviewContent = plainTextContent;
     let flashcardData: Array<{ question: string; answer: string }> = [];
 
-    // 1. New, more reliable method: Parse structured intro and HTML comment
-    // This regex is flexible and doesn't rely on the start of the string.
-    const introMatch = plainTextContent.match(
-      /interview preparation guide for the \*\*(.+?)\*\* position at \*\*(.+?)\*\*/i
-    );
-    const flashcardMatch = plainTextContent.match(
-      /<!--FLASHCARD_DATA:([\s\S]+?)-->/
-    );
+    // First check for Interview Prep format with Role and Company markers
+    const roleMatch = plainTextContent.match(/\*\*Role:\*\*\s*([^\n*]+)/);
+    const companyMatch = plainTextContent.match(/\*\*Company:\*\*\s*([^\n*]+)/);
+    
+    if (roleMatch && roleMatch[1]) {
+      jobTitle = roleMatch[1].trim();
+      console.log("✅ Extracted role from interview prep format:", jobTitle);
+    }
+    
+    if (companyMatch && companyMatch[1]) {
+      companyName = companyMatch[1].trim();
+      console.log("✅ Extracted company from interview prep format:", companyName);
+    }
 
-    if (introMatch && introMatch[1] && introMatch[2]) {
-      jobTitle = introMatch[1].trim();
-      companyName = introMatch[2].trim();
-      console.log("✅ Extracted job details from new structured intro:", {
-        jobTitle,
-        companyName,
-      });
-
-      if (flashcardMatch && flashcardMatch[1]) {
-        try {
-          const flashcardJson = flashcardMatch[1];
-          // Sanitize before parsing to handle potential newlines from the model
-          const sanitizedJson = flashcardJson.replace(/(\r\n|\n|\r)/gm, "");
-          const parsedData = JSON.parse(sanitizedJson);
-          if (Array.isArray(parsedData) && parsedData.length > 0) {
-            flashcardData = parsedData;
-            console.log(
-              "✅ Extracted pre-generated flashcard data:",
-              flashcardData.length,
-              "questions"
-            );
-          }
-        } catch (error) {
-          console.warn(
-            "⚠️ Failed to parse pre-generated flashcard data:",
-            error
-          );
-        }
-      }
-
-      // The rest of the content is the guide itself
-      const guideStart = plainTextContent.indexOf("###");
-      if (guideStart !== -1) {
-        interviewContent = plainTextContent.substring(guideStart);
-      }
-    } else {
-      // 2. Fallback to old, less reliable regex methods for older messages
-      console.log(
-        "⚠️ Could not find new structured intro, trying fallback methods."
+    // If not found in Role/Company format, try other methods
+    if (jobTitle === "Interview Position" || companyName === "the specified company") {
+      // 1. New, more reliable method: Parse structured intro and HTML comment
+      // This regex is flexible and doesn't rely on the start of the string.
+      const introMatch = plainTextContent.match(
+        /interview preparation guide for the \*\*(.+?)\*\* position at \*\*(.+?)\*\*/i
+      );
+      const flashcardMatch = plainTextContent.match(
+        /<!--FLASHCARD_DATA:([\s\S]+?)-->/
       );
 
-      const jobContextPatterns = [
-        // Pattern with markdown: for the **Job Title** role at **Company**
-        /(?:for|as)(?: the)?\s+\*\*(.+?)\*\*\s+(?:position|role)\s+at\s+\*\*(.+?)\*\*/i,
-        // Pattern without markdown
-        /(?:for|as)(?: the)?\s+(.+?)\s+(?:position|role)\s+at\s+(.+?)(?:\s|\.|\n|$)/i,
-        // Other patterns from the original implementation
-        /\*\*Job Context:\*\* (.+?) at (.+?)(?:\n|$)/i,
-        /Job Context:\s*(.+?) at (.+?)(?:\n|$)/i,
-        /role:\s*(.+?)\s*\|\s*company:\s*(.+?)(?:\n|$)/i,
-      ];
+      if (introMatch && introMatch[1] && introMatch[2]) {
+        jobTitle = introMatch[1].trim();
+        companyName = introMatch[2].trim();
+        console.log("✅ Extracted job details from new structured intro:", {
+          jobTitle,
+          companyName,
+        });
 
-      for (const pattern of jobContextPatterns) {
-        const match = plainTextContent.match(pattern);
-        if (match && match[1] && match[2]) {
-          jobTitle = match[1].replace(/\*\*/g, "").trim(); // Remove markdown stars
-          companyName = match[2].replace(/\*\*/g, "").trim();
-          console.log("✅ Matched job context pattern (fallback):", {
-            pattern: pattern.source,
-            jobTitle,
-            companyName,
-          });
-          break; // Stop after first match
+        if (flashcardMatch && flashcardMatch[1]) {
+          try {
+            const flashcardJson = flashcardMatch[1];
+            // Sanitize before parsing to handle potential newlines from the model
+            const sanitizedJson = flashcardJson.replace(/(\r\n|\n|\r)/gm, "");
+            const parsedData = JSON.parse(sanitizedJson);
+            if (Array.isArray(parsedData) && parsedData.length > 0) {
+              flashcardData = parsedData;
+              console.log(
+                "✅ Extracted pre-generated flashcard data:",
+                flashcardData.length,
+                "questions"
+              );
+            }
+          } catch (error) {
+            console.warn(
+              "⚠️ Failed to parse pre-generated flashcard data:",
+              error
+            );
+          }
+        }
+
+        // The rest of the content is the guide itself
+        const guideStart = plainTextContent.indexOf("###");
+        if (guideStart !== -1) {
+          interviewContent = plainTextContent.substring(guideStart);
+        }
+      } else {
+        // 2. Fallback to old, less reliable regex methods for older messages
+        console.log(
+          "⚠️ Could not find new structured intro, trying fallback methods."
+        );
+
+        const jobContextPatterns = [
+          // Pattern with markdown: for the **Job Title** role at **Company**
+          /(?:for|as)(?: the)?\s+\*\*(.+?)\*\*\s+(?:position|role)\s+at\s+\*\*(.+?)\*\*/i,
+          // Pattern without markdown
+          /(?:for|as)(?: the)?\s+(.+?)\s+(?:position|role)\s+at\s+(.+?)(?:\s|\.|\n|$)/i,
+          // Other patterns from the original implementation
+          /\*\*Job Context:\*\* (.+?) at (.+?)(?:\n|$)/i,
+          /Job Context:\s*(.+?) at (.+?)(?:\n|$)/i,
+          /role:\s*(.+?)\s*\|\s*company:\s*(.+?)(?:\n|$)/i,
+        ];
+
+        for (const pattern of jobContextPatterns) {
+          const match = plainTextContent.match(pattern);
+          if (match && match[1] && match[2]) {
+            jobTitle = match[1].replace(/\*\*/g, "").trim(); // Remove markdown stars
+            companyName = match[2].replace(/\*\*/g, "").trim();
+            console.log("✅ Matched job context pattern (fallback):", {
+              pattern: pattern.source,
+              jobTitle,
+              companyName,
+            });
+            break; // Stop after first match
+          }
         }
       }
     }
@@ -1636,6 +1878,54 @@ export function ChatMessage({
                   target.style.height = `${finalHeight}px`;
                 }}
               />
+            ) : contentDetection.type === "web_search" ? (
+              // Render Web Search Results
+              <div className="relative z-10 w-full">
+                <WebSearchResults 
+                  content={plainTextContent}
+                  className="max-w-full"
+                />
+              </div>
+            ) : contentDetection.type === "ats_review" ? (
+              // Render ATS review score card
+              <div className="relative z-10 w-full">
+                <ATSScoreCard 
+                  content={plainTextContent}
+                  className="max-w-full"
+                  onSendMessage={onSendMessage}
+                />
+              </div>
+            ) : contentDetection.type === "interview_prep" ? (
+              // Render interview preparation content
+              <div className="relative z-10 w-full">
+                <InterviewPrep 
+                  content={plainTextContent}
+                  className="max-w-full"
+                />
+              </div>
+            ) : contentDetection.type === "email" && contentDetection.emailData ? (
+              // Render email with editable bubble
+              <div className="relative z-10 w-full">
+                <EditableEmailBubble 
+                  content={plainTextContent}
+                  onEmailUpdate={(emailData) => {
+                    // Store the updated email data for use with the mail button
+                    if (typeof window !== 'undefined') {
+                      window.localStorage.setItem(`email-${id}`, JSON.stringify(emailData));
+                    }
+                  }}
+                />
+              </div>
+            ) : contentDetection.type === "jobs" && contentDetection.jobData ? (
+              // Render job listings using the specialized component
+              <div className="relative z-10 w-full">
+                <JobDisplay 
+                  data={contentDetection.jobData}
+                  onSendMessage={onSendMessage}
+                  onRegenerateLastMessage={() => onRegenerate(id)}
+                  className="max-w-full"
+                />
+              </div>
             ) : isAttachment && attachmentInfo ? (
               // Special attachment bubble rendering
               <div className="relative z-10 w-full">
@@ -2055,6 +2345,42 @@ export function ChatMessage({
                   </button>
                 )}
 
+                {/* Email Send Button - Only show for email messages */}
+                {!isUser && contentDetection.type === "email" && (
+                  <button
+                    onClick={() => {
+                      // Get the edited email data from localStorage
+                      const emailDataStr = localStorage.getItem(`email-${id}`);
+                      let emailData = contentDetection.emailData;
+                      
+                      if (emailDataStr) {
+                        try {
+                          emailData = JSON.parse(emailDataStr);
+                        } catch (e) {
+                          console.error("Failed to parse email data:", e);
+                        }
+                      }
+                      
+                      // Create mailto link with the edited content
+                      const subject = encodeURIComponent(emailData?.subject || '');
+                      const body = encodeURIComponent(emailData?.body || '');
+                      const to = emailData?.to || '';
+                      
+                      const mailtoLink = `mailto:${to}?subject=${subject}&body=${body}`;
+                      window.location.href = mailtoLink;
+                    }}
+                    className={cn(
+                      "p-1 sm:p-1.5 md:p-2 rounded-lg transition-all duration-200 hover:scale-110 active:scale-95 touch-manipulation min-h-[28px] min-w-[28px] sm:min-h-[36px] sm:min-w-[36px] flex items-center justify-center",
+                      "hover:bg-blue-100 dark:hover:bg-blue-900/30 text-blue-600 dark:text-blue-400",
+                      // Blinking animation for email button
+                      "animate-pulse"
+                    )}
+                    title="Send email via your email client"
+                  >
+                    <Mail className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  </button>
+                )}
+
                 {/* Flashcard Button - Only show for bot messages with interview content */}
                 {!isUser && hasInterviewContent && (
                   <button
@@ -2110,13 +2436,13 @@ export function ChatMessage({
         description="This will delete the message and all subsequent messages in the conversation. This action cannot be undone."
       />
 
-      {/* PDF Generation Dialog */}
-      {showPDFButton && (
+      {/* PDF Generation Dialog - Only for resume and cover letter */}
+      {showPDFButton && (contentDetection.type === "resume" || contentDetection.type === "cover_letter") && (
         <PDFGenerationDialog
           open={isPDFDialogOpen}
           onOpenChange={setIsPDFDialogOpen}
-          contentType={contentDetection.type!}
-          initialContent={displayMessage}
+          contentType={contentDetection.type as "cover_letter" | "resume"}
+          initialContent={displayMessage.replace(/\*\*\*([^*]+)\*\*\*/g, '$1').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1')}
           contentId={contentId}
           companyName={contentDetection.companyName}
           jobTitle={contentDetection.jobTitle}

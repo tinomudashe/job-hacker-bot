@@ -8,6 +8,7 @@ import { EmptyScreen } from "../empty-screen";
 import { ChatMessage } from "./chat-message";
 import { ChatTextarea } from "./chat-textarea";
 import { LoadingMessage } from "./loading-message";
+import { ConversationLimitReached } from "./conversation-limit-reached";
 
 interface ReasoningStep {
   type: "reasoning_start" | "reasoning_chunk" | "reasoning_complete";
@@ -33,11 +34,13 @@ interface ChatContainerProps {
   onDeleteMessage?: (id: string) => void;
   onEditMessage: (id: string, newContent: string) => void;
   onRegenerateMessage: (id: string) => void;
+  onStartNewChat?: () => void;
   user?: UserResource | null;
   onStopGeneration?: () => void;
   isLoading: boolean;
   isHistoryLoading: boolean;
   isConnected: boolean;
+  isLimitReached?: boolean;
   error?: string;
   className?: string;
 }
@@ -49,11 +52,13 @@ export const ChatContainer = ({
   onDeleteMessage,
   onEditMessage,
   onRegenerateMessage,
+  onStartNewChat,
   user,
   onStopGeneration,
   isLoading,
   isHistoryLoading,
   isConnected,
+  isLimitReached = false,
   error,
   className,
 }: ChatContainerProps) => {
@@ -118,6 +123,7 @@ export const ChatContainer = ({
                 onDelete={onDeleteMessage || (() => {})}
                 onEdit={onEditMessage}
                 onRegenerate={onRegenerateMessage}
+                onSendMessage={onSendMessage}
               />
             ))}
             {isLoading && (
@@ -136,7 +142,7 @@ export const ChatContainer = ({
       </div>
 
       <div
-        className="fixed bottom-0 left-0 right-0 bg-transparent p-2 sm:p-3 md:p-4"
+        className="fixed bottom-0 left-0 right-0 bg-transparent p-2 sm:p-3 md:p-4 z-20"
         style={{
           paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))",
           // Prevent input from being affected by scrolling
@@ -166,7 +172,7 @@ export const ChatContainer = ({
             </div>
           )}
 
-          {error && (
+          {error && !isLimitReached && (
             <div className="mb-2 sm:mb-3">
               <div className="flex items-center gap-1.5 rounded-xl bg-destructive/10 p-3 text-xs sm:text-sm text-destructive border border-destructive/20 shadow-lg backdrop-blur-sm">
                 <AlertCircle className="h-3 w-3 sm:h-4 sm:w-4 flex-shrink-0" />
@@ -174,13 +180,22 @@ export const ChatContainer = ({
               </div>
             </div>
           )}
-          <ChatTextarea
-            onSendMessage={onSendMessage}
-            onStopGeneration={onStopGeneration}
-            isConnected={isConnected}
-            isLoading={isLoading || false}
-            placeholder="Send a message..."
-          />
+          
+          {isLimitReached && onStartNewChat ? (
+            <ConversationLimitReached
+              messageCount={messages.length}
+              messageLimit={50}
+              onStartNewChat={onStartNewChat}
+            />
+          ) : (
+            <ChatTextarea
+              onSendMessage={onSendMessage}
+              onStopGeneration={onStopGeneration}
+              isConnected={isConnected}
+              isLoading={isLoading || false}
+              placeholder={isLimitReached ? "Message limit reached. Start a new chat to continue." : "Send a message..."}
+            />
+          )}
         </div>
       </div>
     </div>

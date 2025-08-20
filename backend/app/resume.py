@@ -37,7 +37,7 @@ def fix_resume_data_structure(data: Dict) -> Dict:
         info_data = data['personalInfo']
         data['personalInfo'] = {k: v for k, v in info_data.items() if k in allowed_keys}
 
-    # Fix lists of objects: add IDs, fix project titles
+    # Fix lists of objects: add IDs, fix project titles and technologies
     for section in ['experience', 'education', 'projects', 'languages']:
         if section in data and isinstance(data.get(section), list):
             for item in data[section]:
@@ -47,6 +47,17 @@ def fix_resume_data_structure(data: Dict) -> Dict:
                     # Rename 'name' to 'title' in projects for compatibility
                     if section == 'projects' and 'name' in item and 'title' not in item:
                         item['title'] = item.pop('name')
+                    # Convert technologies string to array if needed
+                    if section == 'projects' and 'technologies' in item:
+                        tech = item['technologies']
+                        if isinstance(tech, str):
+                            # Split by comma or semicolon
+                            item['technologies'] = [t.strip() for t in tech.replace(';', ',').split(',') if t.strip()]
+                        elif not isinstance(tech, list):
+                            item['technologies'] = []
+                    # Fix language field name mismatch: rename 'name' to 'language'
+                    if section == 'languages' and 'name' in item and 'language' not in item:
+                        item['language'] = item.pop('name')
 
     # Convert string-based certifications into structured objects
     if 'certifications' in data and isinstance(data.get('certifications'), list):
@@ -116,7 +127,7 @@ class Project(BaseModel):
     id: Optional[str] = None
     title: Optional[str] = None
     description: Optional[str] = None
-    technologies: Optional[str] = None
+    technologies: Optional[Union[List[str], str]] = None  # Can be string or list
     url: Optional[str] = None
     github: Optional[str] = None
     dates: Optional[str] = None
@@ -133,7 +144,16 @@ class Certification(BaseModel):
 class Language(BaseModel):
     id: Optional[str] = None
     language: Optional[str] = None
+    name: Optional[str] = None  # Added for frontend compatibility
     proficiency: Optional[str] = None
+    
+    def __init__(self, **data):
+        # Handle both 'name' and 'language' fields
+        if 'name' in data and 'language' not in data:
+            data['language'] = data.get('name')
+        elif 'language' in data and 'name' not in data:
+            data['name'] = data.get('language')
+        super().__init__(**data)
 
 class ResumeData(BaseModel):
     # EDIT: Ensure all fields have default values to prevent validation errors.
@@ -205,6 +225,9 @@ async def update_full_resume(
     """
     # The get_db dependency wraps this entire function in a transaction.
     
+    logger.info(f"Received resume update request for user {current_user.id}")
+    logger.debug(f"Resume data: {resume_data.dict()}")
+    
     # --- 1. Update the User model with personal info and skills ---
     user = await db.get(User, current_user.id)
     if not user:
@@ -234,9 +257,23 @@ async def update_full_resume(
         db_resume = Resume(user_id=user.id, data=fixed_data)
         db.add(db_resume)
     
-    await db.commit()
+    try:
+        await db.commit()
+        logger.info(f"Successfully committed resume update for user {current_user.id}")
+    except Exception as commit_error:
+        logger.error(f"Commit failed for user {current_user.id}: {commit_error}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database commit failed: {str(commit_error)}")
+    
     await db.refresh(user)
     await db.refresh(db_resume)
+
+    # Transform language field for frontend compatibility: 'language' -> 'name'
+    if 'languages' in fixed_data and isinstance(fixed_data['languages'], list):
+        for lang_item in fixed_data['languages']:
+            if isinstance(lang_item, dict) and 'language' in lang_item:
+                lang_item['name'] = lang_item.get('language', '')
+                # Keep both fields for compatibility
 
     # Construct the final response model from the updated data
     return ResumeData(**fixed_data)
@@ -281,6 +318,14 @@ async def get_resume_data(
         final_data["skills"] = [s.strip() for s in current_user.skills.split(',')]
     else:
         final_data["skills"] = []
+
+    # Transform language field for frontend compatibility: 'language' -> 'name'
+    if 'languages' in final_data and isinstance(final_data['languages'], list):
+        for lang_item in final_data['languages']:
+            if isinstance(lang_item, dict) and 'language' in lang_item:
+                lang_item['name'] = lang_item.get('language', '')
+                # Keep 'language' field for backend compatibility but also provide 'name'
+                # This ensures both frontend and backend can work with the data
 
     # Ensure the final object matches the ResumeData model structure
     return ResumeData(**final_data)

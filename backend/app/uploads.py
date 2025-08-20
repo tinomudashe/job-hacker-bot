@@ -2,6 +2,8 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 import shutil
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
+from pypdf import PdfReader
+import io
 
 from app.db import get_db
 from app.models_db import Document, User
@@ -20,25 +22,40 @@ async def upload_file(
     Upload a file for the authenticated user.
     """
     try:
-        # EDIT: Read the file content into memory. This is crucial for storing it
-        # in the database, which allows the agent to access it later for context.
-        content = await file.read()
+        # Read the file content into memory
+        content_bytes = await file.read()
         
-        # FIX: The file pointer needs to be reset after the initial read, otherwise
-        # the subsequent copy operation will fail because the pointer is at the end.
+        # Reset file pointer for saving
         await file.seek(0)
 
+        # Save the file to disk
         file_path = Path("uploads") / file.filename
         with file_path.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
+        
+        # Extract text content based on file type
+        text_content = ""
+        if file.content_type == "application/pdf" or file.filename.lower().endswith('.pdf'):
+            try:
+                # Extract text from PDF
+                pdf_reader = PdfReader(io.BytesIO(content_bytes))
+                for page in pdf_reader.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text_content += page_text + "\n"
+            except Exception as e:
+                print(f"Error extracting PDF text: {e}")
+                # Fallback to raw decode
+                text_content = content_bytes.decode("utf-8", errors="ignore")
+        else:
+            # For non-PDF files, try to decode as text
+            text_content = content_bytes.decode("utf-8", errors="ignore")
         
         db_document = Document(
             user_id=current_user.id,
             name=file.filename,
             type=file.content_type,
-            # EDIT: Store the actual file content in the 'content' field.
-            # This makes the document's text available for the agent's tools.
-            content=content.decode("utf-8", errors="ignore"),
+            content=text_content.strip(),  # Store extracted text
             vector_store_path=str(file_path)
         )
         db.add(db_document)

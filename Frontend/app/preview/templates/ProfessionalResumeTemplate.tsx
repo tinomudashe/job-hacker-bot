@@ -78,17 +78,18 @@ export const ProfessionalResumeTemplate: React.FC<{ data: PreviewData }> = ({
               <h2 className="text-base font-bold uppercase tracking-widest text-gray-600 dark:text-gray-400 mb-4">
                 Languages
               </h2>
-              <ul className="space-y-1">
+              <div className="space-y-2">
                 {languages.map((lang, index) => (
-                  <li
-                    key={index}
-                    className="text-sm text-gray-700 dark:text-gray-300"
-                  >
-                    <span className="font-semibold">{lang.name}</span> (
-                    {lang.proficiency})
-                  </li>
+                  <div key={index} className="flex justify-between items-center">
+                    <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                      {lang.name}
+                    </span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      {lang.proficiency}
+                    </span>
+                  </div>
                 ))}
-              </ul>
+              </div>
             </section>
           )}
         </div>
@@ -114,9 +115,18 @@ export const ProfessionalResumeTemplate: React.FC<{ data: PreviewData }> = ({
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
                     {job.dates?.start} - {job.dates?.end || "Present"}
                   </p>
-                  <p className="text-sm leading-relaxed text-gray-600 dark:text-gray-400 whitespace-pre-line">
-                    {job.description}
-                  </p>
+                  <ul className="text-sm text-gray-600 dark:text-gray-400 mt-2 space-y-1">
+                    {job.description
+                      .replace(/\n(?![•▪\-])/g, ' ') // Replace single newlines with spaces
+                      .split(/[•▪]|\n\s*[-•▪]/) // Split on bullets or newlines followed by bullets
+                      .filter(point => point.trim())
+                      .map((point, idx) => (
+                      <li key={idx} className="flex">
+                        <span className="mr-2">•</span>
+                        <span>{point.trim()}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               ))}
             </section>
@@ -135,9 +145,18 @@ export const ProfessionalResumeTemplate: React.FC<{ data: PreviewData }> = ({
                   <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100">
                     {project.name}
                   </h3>
-                  <p className="text-sm leading-relaxed text-gray-600 dark:text-gray-400 whitespace-pre-line">
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                     {project.description}
                   </p>
+                  {project.technologies && project.technologies.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {project.technologies.map((tech, idx) => (
+                        <span key={idx} className="text-xs bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded">
+                          {tech}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </section>
@@ -164,15 +183,19 @@ export const ProfessionalResumeTemplate: React.FC<{ data: PreviewData }> = ({
               <h2 className="text-base font-bold uppercase tracking-widest text-gray-600 dark:text-gray-400 mb-6">
                 Certifications
               </h2>
-              {certifications.map((cert, index) => (
-                <div key={index} className="mb-2">
-                  <p className="font-medium text-gray-700 dark:text-gray-300">
-                    {cert.name}
-                    {cert.issuing_organization &&
-                      `, ${cert.issuing_organization}`}
-                  </p>
-                </div>
-              ))}
+              <div className="space-y-3">
+                {certifications.map((cert, index) => (
+                  <div key={index} className="border-l-2 border-gray-300 dark:border-gray-600 pl-3">
+                    <p className="font-semibold text-sm text-gray-800 dark:text-gray-200">
+                      {cert.name}
+                    </p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">
+                      {cert.issuing_organization}
+                      {cert.date_issued && ` • ${cert.date_issued}`}
+                    </p>
+                  </div>
+                ))}
+              </div>
             </section>
           )}
         </div>

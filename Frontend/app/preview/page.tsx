@@ -21,6 +21,11 @@ import {
   FileText,
   Info,
   Palette,
+  Layout,
+  Briefcase,
+  Sparkles,
+  Check,
+  X,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import * as React from "react";
@@ -32,7 +37,9 @@ import { ModernCoverLetterTemplate } from "./templates/ModernCoverLetterTemplate
 import { ModernResumeTemplate } from "./templates/ModernResumeTemplate";
 import { ProfessionalCoverLetterTemplate } from "./templates/ProfessionalCoverLetterTemplate";
 import { ProfessionalResumeTemplate } from "./templates/ProfessionalResumeTemplate";
+import { ImprovedProfessionalTemplate } from "./templates/ImprovedProfessionalTemplate";
 import { PreviewData } from "./types";
+import { PreviewLoader } from "@/components/preview-loader";
 
 // NOTE: Helper function remains unchanged.
 const getElementCss = (element: HTMLElement): string => {
@@ -67,19 +74,22 @@ const PDF_STYLES = [
   {
     key: "modern",
     name: "Modern",
-    description: "Clean design with primary accents",
+    description: "Clean and minimalist with smart color accents",
+    color: "from-blue-500 to-cyan-500",
     useTheme: true,
   },
   {
     key: "professional",
     name: "Professional",
-    description: "Traditional business layout",
+    description: "Classic corporate layout for traditional industries",
+    color: "from-gray-600 to-gray-800",
     useTheme: true,
   },
   {
     key: "creative",
     name: "Creative",
-    description: "Modern layout with accent colors",
+    description: "Bold design with vibrant colors and unique layout",
+    color: "from-purple-500 to-pink-500",
     useTheme: true,
   },
 ];
@@ -214,6 +224,7 @@ const resumeTemplates: { [key: string]: React.FC<{ data: PreviewData }> } = {
   modern: ModernResumeTemplate,
   professional: ProfessionalResumeTemplate,
   creative: CreativeResumeTemplate,
+  enhanced: ImprovedProfessionalTemplate,
 };
 
 const coverLetterTemplates: {
@@ -293,8 +304,15 @@ export default function PreviewPage() {
     }
 
     try {
-      const response = await fetch(getApiUrl("/api/resume"), {
-        headers: { Authorization: `Bearer ${token}` },
+      // Add timestamp to prevent caching
+      const timestamp = Date.now();
+      const response = await fetch(getApiUrl(`/api/resume?t=${timestamp}`), {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+        },
+        cache: 'no-store',
       });
 
       if (!response.ok) {
@@ -302,6 +320,7 @@ export default function PreviewPage() {
       }
 
       const resumeData = await response.json();
+      console.log("Fetched resume data from API:", resumeData);
 
       const dataForPreview: PreviewData = {
         content_type: "resume",
@@ -480,8 +499,10 @@ export default function PreviewPage() {
   }
 
   if (loading || !isLoaded) {
+    const contentType = searchParams.get("type") as "resume" | "cover_letter" | null;
+    
     return (
-      <div className="flex items-center justify-center min-h-screen bg-background">
+      <div className="flex flex-col min-h-screen bg-background">
         <div className="fixed top-0 left-0 right-0 z-50 bg-transparent p-2 sm:p-4 md:p-6">
           <div className="max-w-4xl mx-auto">
             <header className="flex items-center justify-between w-full px-3 sm:px-4 md:px-6 py-2.5 sm:py-3 md:py-4 bg-background/60 rounded-xl sm:rounded-2xl md:rounded-3xl shadow-2xl border border-white/8 backdrop-blur-xl backdrop-saturate-150">
@@ -491,10 +512,10 @@ export default function PreviewPage() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <h1 className="text-sm sm:text-base md:text-xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent truncate">
-                    Document Preview
+                    {contentType === "cover_letter" ? "Cover Letter" : contentType === "resume" ? "Resume" : "Document"} Preview
                   </h1>
                   <p className="text-xs text-muted-foreground/80 -mt-0.5 hidden sm:block">
-                    Loading...
+                    Preparing your document...
                   </p>
                 </div>
               </div>
@@ -507,9 +528,8 @@ export default function PreviewPage() {
             </header>
           </div>
         </div>
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground text-lg">Loading preview...</p>
+        <div className="flex-1 flex items-center justify-center">
+          <PreviewLoader contentType={contentType} />
         </div>
       </div>
     );
@@ -649,36 +669,52 @@ export default function PreviewPage() {
                 <Palette className="h-4 w-4 lg:h-5 lg:w-5" />
               </Button>
               {showStyleSelector && (
-                <div className="absolute right-0 left-1/2  top-full mt-4 w-50 bg-background/95 backdrop-blur-xl border border-border/50 rounded-2xl shadow-2xl z-20 p-3">
-                  <div className="space-y-2">
-                    <h3 className="text-sm font-semibold text-foreground mb-3">
-                      Choose Style
-                    </h3>
+                <div className="absolute right-0 left-1/2 top-full mt-4 w-80 bg-background/98 backdrop-blur-2xl border border-border/40 rounded-2xl shadow-2xl z-20 p-4">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-base font-semibold text-foreground">
+                        Choose Template Style
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => setShowStyleSelector(false)}
+                        className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-lg hover:bg-accent/50"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
                     {PDF_STYLES.map((style) => (
                       <button
+                        type="button"
                         key={style.key}
                         onClick={() => {
                           setCurrentStyle(style.key);
                           setShowStyleSelector(false);
                         }}
-                        className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all ${
+                        className={`w-full flex items-center gap-4 p-4 rounded-xl border-2 transition-all transform hover:scale-[1.02] ${
                           currentStyle === style.key
-                            ? "border-primary bg-primary/5"
-                            : "border-border hover:border-primary/50 hover:bg-accent/50"
+                            ? "border-primary bg-primary/10 shadow-lg"
+                            : "border-border/50 hover:border-primary/40 hover:bg-accent/30"
                         }`}
                       >
-                        <div className="w-4 h-4 rounded-full flex-shrink-0 bg-gradient-to-br from-blue-500 to-purple-600" />
-                        <div className="text-left">
-                          <div className="text-sm font-medium text-foreground">
-                            {style.name}
+                        <div className={`w-12 h-12 rounded-lg flex-shrink-0 bg-gradient-to-br ${style.color} flex items-center justify-center shadow-md`}>
+                          {style.key === 'modern' && <Layout className="h-6 w-6 text-white" />}
+                          {style.key === 'professional' && <Briefcase className="h-6 w-6 text-white" />}
+                          {style.key === 'creative' && <Sparkles className="h-6 w-6 text-white" />}
+                        </div>
+                        <div className="text-left flex-1">
+                          <div className="flex items-center gap-2">
+                            <div className="text-sm font-semibold text-foreground">
+                              {style.name}
+                            </div>
+                            {currentStyle === style.key && (
+                              <Check className="h-4 w-4 text-primary" />
+                            )}
                           </div>
-                          <div className="text-xs text-muted-foreground">
+                          <div className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
                             {style.description}
                           </div>
                         </div>
-                        {currentStyle === style.key && (
-                          <div className="ml-auto w-2 h-2 bg-primary rounded-full" />
-                        )}
                       </button>
                     ))}
                   </div>
@@ -707,36 +743,53 @@ export default function PreviewPage() {
                   <Palette className="h-4 w-4 lg:h-5 lg:w-5" />
                 </Button>
                 {showStyleSelector && (
-                  <div className="absolute right-0 top-full mt-2 w-64 bg-background/95 backdrop-blur-xl border border-border/50 rounded-2xl shadow-2xl z-20 p-3">
+                  <div className="absolute right-0 top-full mt-2 w-72 bg-background/98 backdrop-blur-2xl border border-border/40 rounded-2xl shadow-2xl z-20 p-3">
                     <div className="space-y-2">
-                      <h3 className="text-sm font-semibold text-foreground mb-3">
-                        Choose Style
-                      </h3>
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-semibold text-foreground">
+                          Template Style
+                        </h3>
+                        <button
+                          type="button"
+                          aria-label="Close style selector"
+                          onClick={() => setShowStyleSelector(false)}
+                          className="text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded-lg hover:bg-accent/50"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                       {PDF_STYLES.map((style) => (
                         <button
+                          type="button"
                           key={style.key}
                           onClick={() => {
                             setCurrentStyle(style.key);
                             setShowStyleSelector(false);
                           }}
-                          className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all ${
+                          className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-all ${
                             currentStyle === style.key
-                              ? "border-primary bg-primary/5"
-                              : "border-border hover:border-primary/50 hover:bg-accent/50"
+                              ? "border-primary bg-primary/10"
+                              : "border-border/50 hover:border-primary/40 hover:bg-accent/30"
                           }`}
                         >
-                          <div className="w-4 h-4 rounded-full flex-shrink-0 bg-gradient-to-br from-blue-500 to-purple-600" />
-                          <div className="text-left">
-                            <div className="text-sm font-medium text-foreground">
-                              {style.name}
+                          <div className={`w-10 h-10 rounded-lg flex-shrink-0 bg-gradient-to-br ${style.color} flex items-center justify-center shadow-sm`}>
+                            {style.key === 'modern' && <Layout className="h-5 w-5 text-white" />}
+                            {style.key === 'professional' && <Briefcase className="h-5 w-5 text-white" />}
+                            {style.key === 'creative' && <Sparkles className="h-5 w-5 text-white" />}
+                          </div>
+                          <div className="text-left flex-1">
+                            <div className="flex items-center gap-2">
+                              <div className="text-sm font-medium text-foreground">
+                                {style.name}
+                              </div>
+                              {currentStyle === style.key && (
+                                <Check className="h-3.5 w-3.5 text-primary" />
+                              )}
                             </div>
-                            <div className="text-xs text-muted-foreground">
+                            <div className="text-xs text-muted-foreground mt-0.5">
                               {style.description}
                             </div>
                           </div>
-                          {currentStyle === style.key && (
-                            <div className="ml-auto w-2 h-2 bg-primary rounded-full" />
-                          )}
                         </button>
                       ))}
                     </div>
@@ -786,7 +839,7 @@ export default function PreviewPage() {
         </div>
       </div>
 
-      <main className="flex-1 overflow-y-auto pt-24 sm:pt-28 md:pt-32 print:pt-0">
+      <main className="flex-1 pt-24 sm:pt-28 md:pt-32 print:pt-0">
         <div className="max-w-4xl mx-auto p-4 sm:p-6 print:p-0">
           <div
             id="pdf-preview-content"

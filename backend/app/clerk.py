@@ -59,6 +59,23 @@ async def verify_token(token: str) -> ClerkUser:
     """
     Verifies a Clerk JWT token using the python-jose library.
     """
+    # Validate token format first
+    if not token or not isinstance(token, str):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token format",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Check if token has the correct number of segments (header.payload.signature)
+    if token.count('.') != 2:
+        logger.error(f"Invalid token format - wrong number of segments: {token[:20]}...")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token format",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
     try:
         jwks = await get_jwks()
         unverified_header = jwt.get_unverified_header(token)

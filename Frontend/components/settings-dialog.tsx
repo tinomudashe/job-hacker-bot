@@ -455,16 +455,16 @@ export function SettingsDialog({
           </div>
         </div>
 
-        {/* Navigation */}
-        <div className="flex-shrink-0 !border-b !border-gray-200 dark:!border-white/8 !bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 relative z-10">
-          <div className="px-3 sm:px-6">
-            <div className="flex -mb-px sm:gap-1">
+        {/* Navigation - Enhanced Tab Design */}
+        <div className="flex-shrink-0 !border-b !border-gray-200 dark:!border-white/8 !bg-gradient-to-b from-white to-gray-50 dark:from-background/80 dark:to-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 relative z-10">
+          <div className="px-4 sm:px-6 py-1">
+            <div className="flex gap-1 sm:gap-2" role="tablist">
               <button
                 onClick={() => setActiveTab("personal")}
-                className={`flex flex-1 justify-center items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2.5 sm:py-3 border-b-3 font-semibold text-xs sm:text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-lg sm:rounded-t-xl hover:scale-105 touch-manipulation ${
+                className={`relative flex flex-1 justify-center items-center gap-2 px-3 sm:px-5 py-3 sm:py-3.5 font-medium text-xs sm:text-sm whitespace-nowrap transition-all duration-200 min-w-0 rounded-lg touch-manipulation ${
                   activeTab === "personal"
-                    ? "border-blue-500 text-blue-600 bg-blue-50 shadow-lg dark:border-blue-400 dark:text-blue-400 dark:bg-blue-500/20"
-                    : "border-transparent text-gray-600 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50/50 hover:shadow-lg dark:text-gray-400 dark:hover:text-blue-400 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
+                    ? "text-blue-600 bg-white shadow-md ring-1 ring-blue-500/20 dark:text-blue-400 dark:bg-blue-500/10 dark:ring-blue-400/30"
+                    : "text-gray-500 hover:text-gray-700 hover:bg-gray-100/50 dark:text-gray-400 dark:hover:text-gray-300 dark:hover:bg-white/5"
                 }`}
                 role="tab"
                 aria-controls="personal-tab"
@@ -475,10 +475,10 @@ export function SettingsDialog({
 
               <button
                 onClick={() => setActiveTab("subscription")}
-                className={`flex flex-1 justify-center items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2.5 sm:py-3 border-b-3 font-semibold text-xs sm:text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-lg sm:rounded-t-xl hover:scale-105 touch-manipulation ${
+                className={`relative flex flex-1 justify-center items-center gap-2 px-3 sm:px-5 py-3 sm:py-3.5 font-medium text-xs sm:text-sm whitespace-nowrap transition-all duration-200 min-w-0 rounded-lg touch-manipulation ${
                   activeTab === "subscription"
-                    ? "border-blue-500 text-blue-600 bg-blue-50 shadow-lg dark:border-blue-400 dark:text-blue-400 dark:bg-blue-500/20"
-                    : "border-transparent text-gray-600 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50/50 hover:shadow-lg dark:text-gray-400 dark:hover:text-blue-400 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
+                    ? "text-blue-600 bg-white shadow-md ring-1 ring-blue-500/20 dark:text-blue-400 dark:bg-blue-500/10 dark:ring-blue-400/30"
+                    : "text-gray-500 hover:text-gray-700 hover:bg-gray-100/50 dark:text-gray-400 dark:hover:text-gray-300 dark:hover:bg-white/5"
                 }`}
                 role="tab"
                 aria-controls="subscription-tab"
@@ -489,10 +489,10 @@ export function SettingsDialog({
 
               <button
                 onClick={() => setActiveTab("privacy")}
-                className={`flex flex-1 justify-center items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2.5 sm:py-3 border-b-3 font-semibold text-xs sm:text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-lg sm:rounded-t-xl hover:scale-105 touch-manipulation ${
+                className={`relative flex flex-1 justify-center items-center gap-2 px-3 sm:px-5 py-3 sm:py-3.5 font-medium text-xs sm:text-sm whitespace-nowrap transition-all duration-200 min-w-0 rounded-lg touch-manipulation ${
                   activeTab === "privacy"
-                    ? "border-blue-500 text-blue-600 bg-blue-50 shadow-lg dark:border-blue-400 dark:text-blue-400 dark:bg-blue-500/20"
-                    : "border-transparent text-gray-600 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50/50 hover:shadow-lg dark:text-gray-400 dark:hover:text-blue-400 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
+                    ? "text-blue-600 bg-white shadow-md ring-1 ring-blue-500/20 dark:text-blue-400 dark:bg-blue-500/10 dark:ring-blue-400/30"
+                    : "text-gray-500 hover:text-gray-700 hover:bg-gray-100/50 dark:text-gray-400 dark:hover:text-gray-300 dark:hover:bg-white/5"
                 }`}
                 role="tab"
                 aria-controls="privacy-tab"
@@ -517,15 +517,31 @@ export function SettingsDialog({
                 {/* Personal Info Tab */}
                 {activeTab === "personal" && (
                   <div
-                    className="space-y-4 sm:space-y-6"
+                    className="space-y-6"
                     id="personal-tab"
                     role="tabpanel"
                   >
-                    <div className="!bg-white !border !border-gray-200 dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 dark:!border-white/8 rounded-lg sm:rounded-xl p-4 sm:p-6 shadow-lg">
-                      <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
-                        <User className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                    {/* Profile Overview Card */}
+                    <div className="!bg-gradient-to-br from-blue-500 to-purple-600 dark:from-blue-600 dark:to-purple-700 rounded-2xl p-6 sm:p-8 text-white shadow-xl">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h2 className="text-2xl sm:text-3xl font-bold mb-2">Welcome back!</h2>
+                          <p className="text-blue-100 text-sm sm:text-base">Manage your profile and career information</p>
+                        </div>
+                        <div className="hidden sm:block p-4 bg-white/20 backdrop-blur-sm rounded-full">
+                          <User className="h-8 w-8 text-white" />
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Personal Information Card */}
+                    <div className="!bg-white !border !border-gray-200 dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 dark:!border-white/10 rounded-xl sm:rounded-2xl p-5 sm:p-8 shadow-sm hover:shadow-lg transition-all duration-200">
+                      <h3 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-3">
+                        <div className="p-2 bg-blue-50 dark:bg-blue-500/10 rounded-lg">
+                          <User className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                        </div>
                         <span>Personal Information</span>
-                      </h2>
+                      </h3>
 
                       {formErrors.length > 0 && (
                         <Alert variant="destructive" className="mb-4">
@@ -832,17 +848,19 @@ export function SettingsDialog({
                                 <>
                                   <Button
                                     className="w-full"
-                                    onClick={() => createCheckoutSession()}
-                                    disabled={subscriptionLoading}
+                                    onClick={createPortalSession}
+                                    disabled={portalLoading}
                                   >
-                                    {subscriptionLoading ? (
+                                    {portalLoading ? (
                                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    ) : null}
-                                    Upgrade to Pro
+                                    ) : (
+                                      <CreditCard className="mr-2 h-4 w-4" />
+                                    )}
+                                    Manage Billing & Subscription
                                   </Button>
                                   <p className="text-xs text-muted-foreground mt-2 text-center">
-                                    Your trial is active. Upgrade now to keep
-                                    your premium features.
+                                    You will be redirected to Stripe to manage
+                                    your subscription.
                                   </p>
                                 </>
                               )}
@@ -959,126 +977,158 @@ export function SettingsDialog({
                 {/* Privacy & Data Tab */}
                 {activeTab === "privacy" && (
                   <div
-                    className="space-y-4 sm:space-y-6"
+                    className="space-y-6"
                     id="privacy-tab"
                     role="tabpanel"
                   >
-                    <div className="!bg-white !border !border-gray-200 dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 dark:!border-white/8 rounded-lg sm:rounded-xl p-4 sm:p-6 shadow-lg">
-                      <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
-                        <Lock className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
-                        <span>Privacy & Data Management</span>
-                      </h2>
+                    {/* Privacy Header Card */}
+                    <div className="!bg-gradient-to-br from-green-500 to-teal-600 dark:from-green-600 dark:to-teal-700 rounded-2xl p-6 sm:p-8 text-white shadow-xl">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h2 className="text-2xl sm:text-3xl font-bold mb-2">Privacy & Security</h2>
+                          <p className="text-green-100 text-sm sm:text-base">Control your data and privacy settings</p>
+                        </div>
+                        <div className="hidden sm:block p-4 bg-white/20 backdrop-blur-sm rounded-full">
+                          <Shield className="h-8 w-8 text-white" />
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Privacy Settings Card */}
+                    <div className="!bg-white !border !border-gray-200 dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 dark:!border-white/10 rounded-xl sm:rounded-2xl p-5 sm:p-8 shadow-sm hover:shadow-lg transition-all duration-200">
+                      <h3 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-3">
+                        <div className="p-2 bg-green-50 dark:bg-green-500/10 rounded-lg">
+                          <Lock className="h-5 w-5 text-green-600 dark:text-green-400" />
+                        </div>
+                        <span>Data Management</span>
+                      </h3>
 
-                      {/* Data Export */}
-                      <div className="space-y-2 sm:space-y-3 mb-4 sm:mb-6">
-                        <h4 className="font-semibold text-sm sm:text-base">
-                          Export Your Data
-                        </h4>
-                        <p className="text-xs sm:text-sm text-muted-foreground">
-                          Download a copy of all your data including chat
-                          history, documents, and profile information.
-                        </p>
-                        <Button
-                          variant="outline"
-                          className="w-full sm:w-auto h-10 text-sm touch-manipulation"
-                          onClick={handleExportData}
-                          disabled={isLoading}
-                        >
-                          {isLoading ? (
-                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          ) : (
-                            <Download className="h-4 w-4 mr-2" />
-                          )}
-                          Request Data Export
-                        </Button>
+                      {/* Data Export Section */}
+                      <div className="bg-blue-50 dark:bg-blue-500/10 rounded-xl p-5 mb-6 border border-blue-200/50 dark:border-blue-500/20">
+                        <div className="flex items-start gap-3">
+                          <div className="p-2 bg-blue-100 dark:bg-blue-500/20 rounded-lg flex-shrink-0">
+                            <Download className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="font-semibold text-base mb-1">
+                              Export Your Data
+                            </h4>
+                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                              Download a copy of all your data including chat
+                              history, documents, and profile information.
+                            </p>
+                            <Button
+                              variant="outline"
+                              className="w-full sm:w-auto h-10 text-sm touch-manipulation"
+                              onClick={handleExportData}
+                              disabled={isLoading}
+                            >
+                              {isLoading ? (
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              ) : (
+                                <Download className="h-4 w-4 mr-2" />
+                              )}
+                              Request Data Export
+                            </Button>
+                          </div>
+                        </div>
                       </div>
 
                       <Separator className="my-4 sm:my-6" />
 
-                      {/* Clear Chat History */}
-                      <div className="space-y-2 sm:space-y-3 mb-4 sm:mb-6">
-                        <h4 className="font-semibold flex items-center gap-2 text-sm sm:text-base">
-                          <AlertTriangle
-                            className="h-4 w-4 sm:h-5 sm:w-5 text-orange-500"
-                            aria-hidden="true"
-                          />
-                          Clear Chat History
-                        </h4>
-                        <p className="text-xs sm:text-sm text-muted-foreground">
-                          Permanently delete all your chat conversations and
-                          message history. This action cannot be undone.
-                        </p>
-                        <Button
-                          variant="outline"
-                          onClick={handleClearChatHistory}
-                          disabled={isLoading}
-                          className="w-full sm:w-auto h-10 text-sm touch-manipulation"
-                        >
-                          {isLoading ? (
-                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-4 w-4 mr-2 text-red-500" />
-                          )}
-                          Clear Chat History
-                        </Button>
-                      </div>
-
-                      <Separator className="my-4 sm:my-6" />
-
-                      {/* Delete Documents */}
-                      <div className="space-y-2 sm:space-y-3 mb-4 sm:mb-6">
-                        <h4 className="font-semibold flex items-center gap-2 text-sm sm:text-base">
-                          <AlertTriangle
-                            className="h-4 w-4 sm:h-5 sm:w-5 text-orange-500"
-                            aria-hidden="true"
-                          />
-                          Delete All Documents
-                        </h4>
-                        <p className="text-xs sm:text-sm text-muted-foreground">
-                          Remove all uploaded documents including resumes, cover
-                          letters, and portfolios.
-                        </p>
-                        <Button
-                          variant="outline"
-                          className="w-full sm:w-auto h-10 text-sm touch-manipulation"
-                          onClick={handleDeleteAllDocuments}
-                          disabled={isLoading}
-                        >
+                      {/* Clear Chat History Section */}
+                      <div className="bg-orange-50 dark:bg-orange-500/10 rounded-xl p-5 mb-6 border border-orange-200/50 dark:border-orange-500/20">
+                        <div className="flex items-start gap-3">
+                          <div className="p-2 bg-orange-100 dark:bg-orange-500/20 rounded-lg flex-shrink-0">
+                            <AlertTriangle className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="font-semibold text-base mb-1">
+                              Clear Chat History
+                            </h4>
+                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                              Permanently delete all your chat conversations and
+                              message history. This action cannot be undone.
+                            </p>
+                            <Button
+                              variant="outline"
+                              onClick={handleClearChatHistory}
+                              disabled={isLoading}
+                              className="w-full sm:w-auto h-10 text-sm touch-manipulation"
+                            >
                           {isLoading ? (
                             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                           ) : (
                             <Trash2 className="h-4 w-4 mr-2 text-red-500" />
                           )}
-                          Delete All Documents
-                        </Button>
+                              Clear Chat History
+                            </Button>
+                          </div>
+                        </div>
                       </div>
 
                       <Separator className="my-4 sm:my-6" />
 
-                      {/* Account Deletion */}
-                      <div className="space-y-2 sm:space-y-3 mb-4 sm:mb-6">
-                        <h4 className="font-semibold flex items-center gap-2 text-red-600 text-sm sm:text-base">
-                          <AlertTriangle
-                            className="h-4 w-4 sm:h-5 sm:w-5"
-                            aria-hidden="true"
-                          />
-                          Danger Zone
-                        </h4>
-                        <p className="text-xs sm:text-sm text-muted-foreground">
-                          Permanently delete your account and all associated
-                          data. This action is irreversible.
-                        </p>
-                        <Button
-                          variant="outline"
-                          className="w-full sm:w-auto h-10 text-sm touch-manipulation"
-                          disabled={isLoading}
-                        >
-                          <X
-                            className="h-4 w-4 mr-2 text-red-500"
-                            aria-hidden="true"
-                          />
-                          Delete Account
-                        </Button>
+                      {/* Delete Documents Section */}
+                      <div className="bg-yellow-50 dark:bg-yellow-500/10 rounded-xl p-5 mb-6 border border-yellow-200/50 dark:border-yellow-500/20">
+                        <div className="flex items-start gap-3">
+                          <div className="p-2 bg-yellow-100 dark:bg-yellow-500/20 rounded-lg flex-shrink-0">
+                            <Trash2 className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="font-semibold text-base mb-1">
+                              Delete All Documents
+                            </h4>
+                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                              Remove all uploaded documents including resumes, cover
+                              letters, and portfolios.
+                            </p>
+                            <Button
+                              variant="outline"
+                              className="w-full sm:w-auto h-10 text-sm touch-manipulation"
+                              onClick={handleDeleteAllDocuments}
+                              disabled={isLoading}
+                            >
+                              {isLoading ? (
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4 mr-2 text-yellow-600" />
+                              )}
+                              Delete All Documents
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <Separator className="my-4 sm:my-6" />
+
+                      {/* Account Deletion - Danger Zone */}
+                      <div className="bg-red-50 dark:bg-red-500/10 rounded-xl p-5 mb-6 border-2 border-red-200 dark:border-red-500/30">
+                        <div className="flex items-start gap-3">
+                          <div className="p-2 bg-red-100 dark:bg-red-500/20 rounded-lg flex-shrink-0">
+                            <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="font-semibold text-base mb-1 text-red-700 dark:text-red-400">
+                              Danger Zone
+                            </h4>
+                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                              Permanently delete your account and all associated
+                              data. This action is irreversible.
+                            </p>
+                            <Button
+                              variant="destructive"
+                              className="w-full sm:w-auto h-10 text-sm touch-manipulation"
+                              disabled={isLoading}
+                            >
+                              <X
+                                className="h-4 w-4 mr-2"
+                                aria-hidden="true"
+                              />
+                              Delete Account
+                            </Button>
+                          </div>
+                        </div>
                       </div>
 
                       <Separator className="my-4 sm:my-6" />

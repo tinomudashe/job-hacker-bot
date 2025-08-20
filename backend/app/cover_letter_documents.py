@@ -35,6 +35,8 @@ async def get_latest_cover_letter(
     """
     Fetches the most recently created cover letter for the current user.
     """
+    print(f"DEBUG: Looking for cover letters for user: {user.id}")
+    
     result = await db.execute(
         select(GeneratedCoverLetter)
         .where(GeneratedCoverLetter.user_id == user.id)
@@ -42,13 +44,15 @@ async def get_latest_cover_letter(
         .limit(1)
     )
     document = result.scalar_one_or_none()
+    
+    print(f"DEBUG: Found document: {document}")
 
     if not document:
+        print("DEBUG: No cover letters found")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No cover letters found for this user.",
         )
-
     # Adapt the result to the DocumentOut schema, which the frontend expects
     return DocumentOut(
         id=document.id,

@@ -26,7 +26,10 @@ DB_NAME = os.getenv("DB_NAME")
 if all([DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME]):
     from urllib.parse import quote_plus
     encoded_password = quote_plus(DB_PASSWORD)
-    CONNECTION_STRING = f"postgresql://{DB_USER}:{encoded_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode=require"
+    # Use sslmode=prefer for local development (falls back to non-SSL if SSL not available)
+    # For production, you can set sslmode=require
+    sslmode = "prefer" if DB_HOST in ["localhost", "127.0.0.1", "::1"] else "require"
+    CONNECTION_STRING = f"postgresql://{DB_USER}:{encoded_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode={sslmode}"
 else:
     CONNECTION_STRING = None
     logger.warning("Database connection details for PGVector are not fully configured.")

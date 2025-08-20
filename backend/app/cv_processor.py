@@ -1,7 +1,7 @@
 import logging
 import re
 from typing import Dict, Optional, List, Any
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_anthropic import ChatAnthropic
 from pydantic import BaseModel, EmailStr
 import json
 from pathlib import Path
@@ -44,20 +44,29 @@ class ExtractedSkills(BaseModel):
     languages: List[str] = []
     certifications: List[str] = []
 
+class ExtractedProject(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    technologies: Optional[str] = None
+    url: Optional[str] = None
+    github: Optional[str] = None
+    duration: Optional[str] = None
+
 class CVExtractionResult(BaseModel):
     personal_info: ExtractedPersonalInfo
     experience: List[ExtractedExperience] = []
     education: List[ExtractedEducation] = []
+    projects: List[ExtractedProject] = []
     skills: ExtractedSkills
     raw_text: str
     confidence_score: float = 0.0
 
 class CVProcessor:
     def __init__(self):
-        self.llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
+        self.llm = ChatAnthropic(
+            model="claude-3-7-sonnet-20250219",
             temperature=0.1,
-            convert_system_message_to_human=True
+            max_tokens=4096
         )
     
     def extract_text_from_file(self, file_path: Path) -> str:
@@ -171,6 +180,16 @@ Expected JSON structure:
             "gpa": "GPA if mentioned"
         }}
     ],
+    "projects": [
+        {{
+            "title": "Project name",
+            "description": "Project description and achievements",
+            "technologies": "Technologies used (e.g., 'React, Node.js, MongoDB')",
+            "url": "Project URL if available",
+            "github": "GitHub repository URL if mentioned",
+            "duration": "Project duration or date"
+        }}
+    ],
     "skills": {{
         "technical_skills": ["List of technical skills"],
         "soft_skills": ["List of soft skills"],
@@ -224,6 +243,21 @@ Extract all available information. If a field is not found, use null for strings
                             gpa=edu_item.get("gpa")
                         ))
             
+            # Parse projects
+            projects = []
+            projects_list = data.get('projects', [])
+            if isinstance(projects_list, list):
+                for proj_item in projects_list:
+                    if isinstance(proj_item, dict):
+                        projects.append(ExtractedProject(
+                            title=proj_item.get("title") or proj_item.get("name"),
+                            description=proj_item.get("description"),
+                            technologies=proj_item.get("technologies") or proj_item.get("tech_stack"),
+                            url=proj_item.get("url") or proj_item.get("link"),
+                            github=proj_item.get("github"),
+                            duration=proj_item.get("duration") or proj_item.get("date")
+                        ))
+            
             skills = ExtractedSkills(**data.get('skills', {}))
             
             confidence_score = data.get('confidence_score', 0.5)
@@ -232,6 +266,7 @@ Extract all available information. If a field is not found, use null for strings
                 personal_info=personal_info,
                 experience=experience,
                 education=education,
+                projects=projects,
                 skills=skills,
                 raw_text=raw_text,
                 confidence_score=confidence_score
@@ -295,6 +330,7 @@ Extract all available information. If a field is not found, use null for strings
             personal_info=personal_info,
             experience=[],
             education=[],
+            projects=[],
             skills=ExtractedSkills(),
             raw_text=raw_text,
             confidence_score=0.3  # Lower confidence for fallback

@@ -29,7 +29,15 @@ else:
 
 print(f"DATABASE_URL constructed for SQLAlchemy engine.")
 
-engine = create_async_engine(DATABASE_URL, echo=True)
+engine = create_async_engine(
+    DATABASE_URL, 
+    echo=True,
+    pool_size=10,  # Increased from default 5
+    max_overflow=20,  # Increased from default 10
+    pool_timeout=30,  # Connection timeout in seconds
+    pool_recycle=3600,  # Recycle connections after 1 hour
+    pool_pre_ping=True  # Test connections before using them
+)
 
 # Instrument the SQLAlchemy engine's synchronous part
 SQLAlchemyInstrumentor().instrument(
@@ -59,3 +67,15 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+
+@asynccontextmanager
+async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
+    """Provide a database session for standalone scripts."""
+    async with async_session_maker() as session:
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
