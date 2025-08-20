@@ -904,7 +904,8 @@ export function ChatMessage({
       jobTitle: structuredContent.job_title,
     };
     contentId = extractContentId(plainTextContent); // Extract ID from text if needed for saved docs
-    showPDFButton = !isUser && structuredContent.content_type !== "email";
+    // Structured content is always resume or cover_letter, both support PDF
+    showPDFButton = !isUser;
   } else {
     // Fallback to text pattern detection if no valid JSON is found
     contentDetection = detectContentType(plainTextContent);
