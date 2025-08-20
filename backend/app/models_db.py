@@ -215,7 +215,7 @@ class LangchainPgEmbedding(Base):
     __tablename__ = "langchain_pg_embedding"
     uuid = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     collection_id = Column(UUID(as_uuid=True), ForeignKey("langchain_pg_collection.uuid", ondelete="CASCADE"))
-    embedding = Column(Vector(1536))  # Adjust the dimension (e.g., 1536 for OpenAI, 768 for Google's text-embedding-004)
+    embedding = Column(Vector(768))  # Using 768 dimensions for Google's text-embedding-004
     document = Column(String, nullable=True)
     cmetadata = Column(JSON, nullable=True)
     custom_id = Column(String, nullable=True)
