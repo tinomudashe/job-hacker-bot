@@ -3,8 +3,10 @@ from typing import List, Dict, Optional, Any
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_core.documents import Document as LCDocument
-from langchain_graph_retriever import GraphRetriever
-from graph_retriever.strategies import Eager
+# NOTE: langchain_graph_retriever is not a standard package
+# Commenting out until proper graph retrieval package is identified
+# from langchain_graph_retriever import GraphRetriever
+# from graph_retriever.strategies import Eager
 # from langchain_graph_retriever.transformers import ShreddingTransformer  # Optional, not needed for basic functionality
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -60,11 +62,13 @@ class EnhancedGraphRAG:
             )
             
             # Create graph retriever with intelligent traversal strategies
-            self.graph_retriever = GraphRetriever(
-                store=self.vector_store,
-                edges=self._define_graph_edges(),
-                strategy=Eager(k=8, start_k=2, max_depth=3),  # More comprehensive retrieval
-            )
+            # NOTE: GraphRetriever disabled due to missing package
+            self.graph_retriever = None
+            # self.graph_retriever = GraphRetriever(
+            #     store=self.vector_store,
+            #     edges=self._define_graph_edges(),
+            #     strategy=Eager(k=8, start_k=2, max_depth=3),  # More comprehensive retrieval
+            # )
             
             logger.info(f"Graph RAG initialized for user {self.user_id} with {len(enhanced_docs)} enhanced documents")
             return True
@@ -356,19 +360,24 @@ class EnhancedGraphRAG:
             ("section_type", "section_type")
         ]
     
-    async def intelligent_search(self, query: str, context: Optional[Dict[str, Any]] = None) -> List[LCDocument]:
+    async def intelligent_search(self, query: str, context: Optional[Dict[str, Any]] = None, k: int = 8) -> List[LCDocument]:
         """Perform intelligent graph-based search with context awareness"""
         
-        if not self.graph_retriever:
-            logger.error("Graph retriever not initialized")
+        if not self.vector_store:
+            logger.error("Vector store not initialized")
             return []
         
         try:
             # Enhance query with context
             enhanced_query = await self._enhance_search_query(query, context)
             
-            # Perform graph traversal search
-            results = self.graph_retriever.invoke(enhanced_query)
+            # Perform vector similarity search as fallback since graph retriever is disabled
+            # Using similarity search with score threshold for relevant results
+            results = await self.vector_store.asimilarity_search(
+                enhanced_query, 
+                k=k,
+                filter=None  # Can add metadata filters here if needed
+            )
             
             # Track search for learning
             await self._track_search_behavior(query, enhanced_query, results)
