@@ -24,17 +24,70 @@ RUN npm ci
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright browser dependencies
-RUN playwright install --with-deps chromium
+# Install Playwright browser dependencies with updated package names
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    fonts-liberation \
+    fonts-unifont \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libatspi2.0-0 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgbm1 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libpango-1.0-0 \
+    libx11-6 \
+    libxcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxrandr2 \
+    xvfb && \
+    rm -rf /var/lib/apt/lists/* && \
+    playwright install chromium
 
 # ---
 
 # Stage 2: Final runtime stage
 FROM python:3.10-slim
 
-# Install Node.js runtime
+# Install Node.js runtime and Chromium dependencies
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends nodejs && \
+    apt-get install -y --no-install-recommends \
+    nodejs \
+    # Chromium runtime dependencies
+    fonts-liberation \
+    fonts-unifont \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libatspi2.0-0 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgbm1 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libpango-1.0-0 \
+    libx11-6 \
+    libxcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxrandr2 \
+    xvfb && \
     rm -rf /var/lib/apt/lists/*
 
 # Set environment variables
@@ -56,7 +109,10 @@ COPY --from=builder /app/node_modules ./node_modules
 # Copy the entire application source code from the build context
 COPY . .
 
-# Change ownership of the application directory
+# Copy Playwright browsers from the builder stage to app user's home
+COPY --from=builder /root/.cache/ms-playwright /home/app/.cache/ms-playwright
+
+# Change ownership of the application directory and Playwright cache
 RUN chown -R app:app /home/app
 
 # Switch to the non-root user
