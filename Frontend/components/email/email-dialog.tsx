@@ -76,7 +76,7 @@ export function EmailDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-4">
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "compose" | "follow-up" | "tracker")} className="mt-4">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="compose" className="gap-1">
               <Send className="h-3 w-3" />
