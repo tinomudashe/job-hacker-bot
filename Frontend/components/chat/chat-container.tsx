@@ -200,8 +200,7 @@ export const ChatContainer = ({
                   "shadow-2xl",
                   "text-muted-foreground hover:text-foreground",
                   "hover:scale-110 active:scale-95",
-                  "opacity-0 animate-in fade-in duration-300",
-                  showScrollButton && "opacity-100"
+                  "animate-in fade-in duration-300"
                 )}
                 title="Scroll to latest message - Ctrl+End"
                 aria-label="Scroll to bottom"
