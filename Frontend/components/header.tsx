@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { useSubscription } from "@/lib/hooks/use-subscription";
+import { cn } from "@/lib/utils";
 import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
 import { Menu, MessageSquare, Plus, Settings, X } from "lucide-react";
 import { usePathname } from "next/navigation";
@@ -20,6 +21,7 @@ interface HeaderProps {
   currentPageId?: string;
   onSelectPage: (pageId: string) => void;
   isLoginPage?: boolean;
+  isVisible?: boolean;
 }
 
 export function Header({
@@ -28,6 +30,7 @@ export function Header({
   currentPageId,
   onSelectPage,
   isLoginPage = false,
+  isVisible = true,
 }: HeaderProps) {
   const [showPagesDialog, setShowPagesDialog] = React.useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = React.useState(false);
@@ -56,7 +59,11 @@ export function Header({
 
   return (
     <>
-      <div className="fixed top-0 left-0 right-0 z-50 bg-transparent p-2 sm:p-4 md:p-6">
+      <div className={cn(
+        "fixed top-0 left-0 right-0 z-50 bg-transparent p-2 sm:p-4 md:p-6",
+        "transition-transform duration-300 ease-in-out",
+        isVisible ? "translate-y-0" : "-translate-y-full"
+      )}>
         <div className="max-w-4xl mx-auto">
           <header className="flex items-center justify-between w-full px-3 sm:px-4 md:px-6 py-2.5 sm:py-3 md:py-4 bg-background/60 rounded-xl sm:rounded-2xl md:rounded-3xl shadow-2xl border border-white/8 backdrop-blur-xl backdrop-saturate-150">
             {/* Logo and Title */}

@@ -2,8 +2,10 @@
 
 import { ChatContainer } from "@/components/chat/chat-container";
 import { Header } from "@/components/header";
+import { HeaderToggleButton } from "@/components/ui/header-toggle-button";
 import { LoginPrompt } from "@/components/login-prompt";
 import { SubscriptionPrompt } from "@/components/subscription-prompt";
+import { useHeaderVisibility } from "@/lib/hooks/use-header-visibility";
 import { useSubscription } from "@/lib/hooks/use-subscription";
 import { useWebSocket } from "@/lib/hooks/use-websocket";
 import { SignedIn, SignedOut, useAuth, useUser } from "@clerk/nextjs";
@@ -15,6 +17,7 @@ export default function Home() {
   const [currentPageId, setCurrentPageId] = React.useState<string | undefined>(undefined);
   const [isLoadingRecentPage, setIsLoadingRecentPage] = React.useState(true);
   const [hasInitialized, setHasInitialized] = React.useState(false);
+  const { isHeaderVisible, toggleHeader } = useHeaderVisibility(true);
 
   const {
     messages,
@@ -182,13 +185,24 @@ export default function Home() {
   return (
     <div className="flex flex-col h-screen bg-background">
       <div className="flex flex-col flex-1">
+        {/* Pass visibility state to Header */}
         <Header
           onNewChat={handleNewChat}
           onClearChat={clearAllChats}
           currentPageId={currentPageId || undefined}
           onSelectPage={handleSelectPage}
           isLoginPage={!isSignedIn}
+          isVisible={isHeaderVisible}
         />
+
+        {/* Header toggle button - only show when signed in */}
+        <SignedIn>
+          <HeaderToggleButton
+            isHeaderVisible={isHeaderVisible}
+            onToggle={toggleHeader}
+          />
+        </SignedIn>
+
         <main className="flex-1 overflow-hidden pt-14 sm:pt-16 md:pt-20">
           <SignedIn>
             {(isLoadingRecentPage || subscriptionLoading) ? (
