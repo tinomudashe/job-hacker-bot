@@ -81,18 +81,6 @@ export const ChatContainer = ({
     
     // Show button if scrolled up more than 200px from bottom and there are messages
     const shouldShow = distanceFromBottom > 200 && messages.length > 0;
-    
-    // Debug logging
-    console.log('Scroll check:', {
-      distanceFromBottom,
-      shouldShow,
-      messagesLength: messages.length,
-      scrollHeight,
-      scrollTop,
-      clientHeight,
-      currentButtonState: showScrollButton
-    });
-    
     setShowScrollButton(shouldShow);
   };
 
@@ -171,7 +159,7 @@ export const ChatContainer = ({
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
         ) : messages.length > 0 ? (
-          <div className="max-w-2xl mx-auto px-1 sm:px-2 md:px-4 lg:px-6 w-full">
+          <div className="max-w-3xl mx-auto px-1 sm:px-2 md:px-4 lg:px-6 w-full">
             {messages.map((message) => (
               <ChatMessage
                 key={message.id}
@@ -208,9 +196,9 @@ export const ChatContainer = ({
           touchAction: "none",
         }}
       >
-        <div className="max-w-2xl mx-auto">
-          {/* Scroll to Bottom Button - Above text input - TEMPORARILY ALWAYS VISIBLE FOR TESTING */}
-          {(true || showScrollButton) && (
+        <div className="max-w-3xl mx-auto">
+          {/* Scroll to Bottom Button - Always visible */}
+          {messages.length > 0 && (
             <div className="mb-2 flex justify-center">
               <button
                 type="button"

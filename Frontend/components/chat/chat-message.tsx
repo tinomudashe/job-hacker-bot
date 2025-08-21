@@ -1790,7 +1790,7 @@ export function ChatMessage({
         <div
           className={cn(
             "flex flex-col",
-            "w-auto min-w-[120px] max-w-[85%] sm:max-w-[80%] md:max-w-[75%] lg:max-w-[80%] xl:max-w-[75%] 2xl:max-w-[70%]",
+            "w-auto min-w-[180px] max-w-[90%] sm:max-w-[85%] md:max-w-[85%] lg:max-w-[85%] xl:max-w-[80%] 2xl:max-w-[75%]",
             isUser ? "items-end" : "items-start"
           )}
         >

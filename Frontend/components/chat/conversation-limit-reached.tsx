@@ -20,7 +20,7 @@ export function ConversationLimitReached({
   onStartNewChat,
 }: ConversationLimitReachedProps) {
   return (
-    <Alert className="mx-auto max-w-2xl border-orange-200 bg-orange-50 dark:border-orange-900 dark:bg-orange-950/20">
+    <Alert className="mx-auto max-w-3xl border-orange-200 bg-orange-50 dark:border-orange-900 dark:bg-orange-950/20">
       <AlertCircle className="h-4 w-4 text-orange-600 dark:text-orange-400" />
       <AlertTitle className="text-orange-900 dark:text-orange-100">
         Conversation Limit Reached
