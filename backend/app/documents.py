@@ -77,19 +77,42 @@ async def _update_user_profile_from_cv(user: User, cv_data: CVExtractionResult, 
     
     resume_data = db_resume.data if db_resume.data else {}
 
-    # Update Work Experience if it's empty
-    if cv_data.experience and not resume_data.get('experience'):
+    # Always update Work Experience from CV (or merge if needed)
+    if cv_data.experience:
         resume_data['experience'] = [exp.dict() for exp in cv_data.experience]
         updated_fields.append('work_experience')
 
-    # Update Education if it's empty
-    if cv_data.education and not resume_data.get('education'):
+    # Always update Education from CV (or merge if needed)
+    if cv_data.education:
         resume_data['education'] = [edu.dict() for edu in cv_data.education]
         updated_fields.append('education')
+    
+    # Update skills from CV
+    if cv_data.skills:
+        resume_data['skills'] = cv_data.skills
+        updated_fields.append('skills')
+    
+    # Update personal info in resume data
+    if not resume_data.get('personalInfo'):
+        resume_data['personalInfo'] = {}
+    
+    if cv_data.full_name:
+        resume_data['personalInfo']['name'] = cv_data.full_name
+    if cv_data.email:
+        resume_data['personalInfo']['email'] = cv_data.email
+    if cv_data.phone_number:
+        resume_data['personalInfo']['phone'] = cv_data.phone_number
+    if cv_data.location:
+        resume_data['personalInfo']['location'] = cv_data.location
+    if cv_data.linkedin_url:
+        resume_data['personalInfo']['linkedin'] = cv_data.linkedin_url
+    if cv_data.summary:
+        resume_data['personalInfo']['summary'] = cv_data.summary
 
     # Update resume data field
-    if 'work_experience' in updated_fields or 'education' in updated_fields or 'resume_record_created' in updated_fields:
+    if 'work_experience' in updated_fields or 'education' in updated_fields or 'skills' in updated_fields or 'resume_record_created' in updated_fields or cv_data.full_name or cv_data.summary:
         db_resume.data = resume_data
+        attributes.flag_modified(db_resume, "data")
 
     if updated_fields:
         db.add(user)
