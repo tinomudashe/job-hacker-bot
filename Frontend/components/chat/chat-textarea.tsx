@@ -235,46 +235,24 @@ export function ChatTextarea({
       let combinedMessage = "";
 
       if (isCVFile && result.extracted_info) {
-        // Handle CV upload with extraction results - No emoji, clean format
-        combinedMessage = `CV/Resume uploaded successfully!\n\n`;
-        combinedMessage += `File: ${result.document.name}\n`;
+        // Handle CV upload - create a clean structured message
+        const fileName = result.document?.name || result.filename || selectedFile.name;
+        
+        // Send as simple message with embedded data
+        combinedMessage = `[CV_UPLOAD:${fileName}]\n${textMessage?.trim() || "Please review my CV"}`;
 
-        if (
-          result.profile_updated &&
-          result.auto_extracted_fields?.length > 0
-        ) {
-          combinedMessage += `Profile Updated: Automatically updated ${result.auto_extracted_fields.join(
-            ", "
-          )}\n`;
-        }
-
-        if (result.extracted_info.confidence_score) {
-          combinedMessage += `Extraction Confidence: ${(
-            result.extracted_info.confidence_score * 100
-          ).toFixed(0)}%\n`;
-        }
-
-        combinedMessage += `\nYour CV has been processed and is now available for job applications and analysis. I can help you with job applications, interview preparation, or answer questions about your background.`;
-
-        // Show success toast
+        // Show comprehensive success toast with details
         toast.success("CV uploaded successfully!", {
-          description: result.profile_updated
-            ? `Profile auto-updated with ${
-                result.auto_extracted_fields?.length || 0
-              } fields`
-            : "CV processed and ready for use",
+          description: result.profile_updated && result.auto_extracted_fields?.length > 0
+            ? `Profile auto-updated: ${result.auto_extracted_fields.join(", ")}`
+            : "CV processed and ready for analysis",
         });
       } else {
-        // Handle regular file upload - No emoji, clean format
-        combinedMessage = `File Attached: ${
-          result.filename || selectedFile.name
-        }`;
+        // Handle regular file upload
+        const fileName = result.filename || selectedFile.name;
+        combinedMessage = `[FILE_UPLOAD:${fileName}]\n${textMessage?.trim() || `Attached: ${fileName}`}`;
+        
         toast.success("File uploaded successfully!");
-      }
-
-      // Add the text message if provided
-      if (textMessage && textMessage.trim()) {
-        combinedMessage += `\n\nMessage: ${textMessage.trim()}`;
       }
 
       // Send the combined message

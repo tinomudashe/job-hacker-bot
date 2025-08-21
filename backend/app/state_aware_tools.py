@@ -102,8 +102,9 @@ class StateAwareToolNode:
                     if hasattr(tool, 'ainvoke'):
                         result = await tool.ainvoke(tool_args)
                     else:
-                        # Fallback to sync invoke
-                        result = tool.invoke(tool_args)
+                        # This shouldn't happen with StructuredTool
+                        log.error(f"Tool {tool_name} doesn't support async invocation")
+                        raise ValueError(f"Tool {tool_name} must support async invocation")
                 
                 # CRITICAL: If result is still a coroutine, await it
                 if asyncio.iscoroutine(result):

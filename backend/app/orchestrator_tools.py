@@ -1127,18 +1127,18 @@ class ResumeToolsLangGraph:
         This ensures all tools use the same session for transaction consistency
         """
         if not state:
-            # Fallback to creating new session if no state provided
-            log.warning("No LangGraph state provided, creating new session")
-            return async_session_maker()
+            # Fallback to using the existing db session from class
+            log.warning("No LangGraph state provided, using existing db session")
+            return self.db
         
         session_id = state.get("db_session_id")
         if not session_id:
-            log.warning("No session ID in state, creating new session")
-            return async_session_maker()
+            log.warning("No session ID in state, using existing db session")
+            return self.db
         
-        # TODO: Implement session retrieval from state
-        # For now, return a new session - this will be enhanced in orchestrator.py
-        return async_session_maker()
+        # For now, return the existing db session from the class
+        # This will be enhanced later for true shared session management
+        return self.db
 
     def update_state_with_tool_execution(
         self, 
@@ -1185,25 +1185,25 @@ class ResumeToolsLangGraph:
         """
         return [
             StructuredTool.from_function(
-                func=self.refine_cv_for_role_with_state,
+                coroutine=self.refine_cv_for_role_with_state,  # Use coroutine for async function
                 name="refine_cv_for_role",
                 description="⭐ PRIMARY CV REFINEMENT TOOL ⭐ - Refines a user's CV for a specific role, company, and job description with shared session management.",
                 # Async method with state injection handled automatically
             ),
             StructuredTool.from_function(
-                func=self.generate_tailored_resume_with_state,
+                coroutine=self.generate_tailored_resume_with_state,
                 name="generate_tailored_resume", 
                 description="Generates a complete, tailored resume based on a job description and user's profile with shared session management.",
                 # Async method with state injection handled automatically
             ),
             StructuredTool.from_function(
-                func=self.create_resume_from_scratch_with_state,
+                coroutine=self.create_resume_from_scratch_with_state,
                 name="create_resume_from_scratch",
                 description="Create a complete professional resume from scratch based on your career goals with shared session management.",
                 # Async method with state injection handled automatically
             ),
             StructuredTool.from_function(
-                func=self.refine_cv_from_url_with_state,
+                coroutine=self.refine_cv_from_url_with_state,
                 name="refine_cv_from_url",
                 description="Refines a user's CV based on a job posting URL. Extracts job details from the URL and tailors the CV accordingly.",
             ),
@@ -1220,17 +1220,17 @@ async def get_shared_session_from_state(state: WebSocketState):
     This will be used by all tool classes
     """
     if not state:
-        log.warning("No LangGraph state provided, creating new session")
-        return async_session_maker()
+        log.warning("No LangGraph state provided, cannot retrieve session")
+        return None
     
     session_id = state.get("db_session_id")
     if not session_id:
-        log.warning("No session ID in state, creating new session")  
-        return async_session_maker()
+        log.warning("No session ID in state, cannot retrieve session")  
+        return None
     
-    # TODO: This will be enhanced to work with orchestrator.py session management
-    # For now, return a new session
-    return async_session_maker()
+    # Return None to signal that shared session should be obtained from the tool class
+    # The tool classes will use their own db session when this returns None
+    return None
 
 def validate_langgraph_state_for_tools(state: WebSocketState) -> bool:
     """Validate that LangGraph state contains required fields for tool execution"""
@@ -1540,7 +1540,9 @@ Generate the full cover letter body. It should be professional, concise, and tai
 
     async def get_shared_session_from_state(self, state: WebSocketState):
         """Extract shared database session from LangGraph state"""
-        return await get_shared_session_from_state(state)
+        session = await get_shared_session_from_state(state)
+        # If no shared session available, use the class's existing session
+        return session if session is not None else self.db
 
     def update_state_with_tool_execution(
         self, 
@@ -1579,13 +1581,13 @@ Generate the full cover letter body. It should be professional, concise, and tai
         """
         return [
             StructuredTool.from_function(
-                func=self.generate_cover_letter_from_url_with_state,
+                coroutine=self.generate_cover_letter_from_url_with_state,
                 name="generate_cover_letter_from_url",
                 description="Generates a tailored cover letter by extracting job details from a provided URL with shared session management.",
                 # Async method with state injection handled automatically
             ),
             StructuredTool.from_function(
-                func=self.generate_cover_letter_with_state,
+                coroutine=self.generate_cover_letter_with_state,
                 name="generate_cover_letter", 
                 description="Generates a structured cover letter based on provided job details with shared session management.",
                 # Async method with state injection handled automatically
@@ -1757,7 +1759,7 @@ class JobSearchToolsLangGraph:
         """
         return [
             StructuredTool.from_function(
-                func=self.search_jobs_linkedin_api_with_state,
+                coroutine=self.search_jobs_linkedin_api_with_state,
                 name="search_jobs_linkedin_api",
                 description="⭐ JOB SEARCH API - Direct access to job listings! Search for jobs on LinkedIn by keyword, location, job type, and experience level with shared session management.",
                 # Async method with state injection handled automatically
@@ -2029,20 +2031,33 @@ class DocumentToolsLangGraph:
             log.info(f"No attachment context in query. Performing general search for: '{query}'")
             
             # Rest of your existing search logic...
-            user_profile_content = (
-                f"Name: {self.user.name}\n"
-                f"Email: {self.user.email}\n"
-                f"Phone: {self.user.phone}\n"
-                f"Location: {self.user.address}\n"
-                f"LinkedIn: {self.user.linkedin}\n"
-                f"Profile Headline: {self.user.profile_headline}\n"
-                f"Skills: {self.user.skills}"
-            )
+            # Build user profile content with null checks
+            user_profile_parts = []
+            if self.user.name:
+                user_profile_parts.append(f"Name: {self.user.name}")
+            if self.user.email:
+                user_profile_parts.append(f"Email: {self.user.email}")
+            if self.user.phone:
+                user_profile_parts.append(f"Phone: {self.user.phone}")
+            if self.user.address:
+                user_profile_parts.append(f"Location: {self.user.address}")
+            if self.user.linkedin:
+                user_profile_parts.append(f"LinkedIn: {self.user.linkedin}")
+            if self.user.profile_headline:
+                user_profile_parts.append(f"Profile Headline: {self.user.profile_headline}")
+            if self.user.skills:
+                user_profile_parts.append(f"Skills: {self.user.skills}")
+            
+            user_profile_content = "\n".join(user_profile_parts) if user_profile_parts else ""
 
-            doc_result = await shared_session.execute(
-                select(Document).where(Document.user_id == self.user_id)
-            )
-            documents = doc_result.scalars().all()
+            try:
+                doc_result = await shared_session.execute(
+                    select(Document).where(Document.user_id == self.user_id)
+                )
+                documents = doc_result.scalars().all()
+            except Exception as db_error:
+                log.error(f"Database error fetching documents: {db_error}")
+                documents = []
 
             if not documents and not user_profile_content:
                 # Update state with no documents found
@@ -2170,8 +2185,42 @@ class DocumentToolsLangGraph:
             log.info(f"Document search completed successfully for query: '{query}' - found {len(search_results)} results")
             return "\n\n".join(response_parts)
 
+        except AttributeError as e:
+            log.error(f"Attribute error in document search - likely missing user data: {e}", exc_info=True)
+            if state:
+                state["error_state"] = {
+                    "type": "data_access_error",
+                    "tool": "enhanced_document_search",
+                    "message": "Missing user profile data",
+                    "details": str(e)
+                }
+            return f"❌ I need to access your profile information first. Please ensure your profile is set up before searching documents."
+            
+        except TimeoutError as e:
+            log.error(f"Timeout in document search: {e}", exc_info=True)
+            if state:
+                state["error_state"] = {
+                    "type": "timeout_error",
+                    "tool": "enhanced_document_search",
+                    "message": "Search operation timed out",
+                    "details": str(e)
+                }
+            return f"❌ The search is taking too long. Please try with a more specific query or check if you have many large documents."
+            
         except Exception as e:
-            log.error(f"Error in enhanced document search: {e}", exc_info=True)
+            log.error(f"Unexpected error in enhanced document search: {e}", exc_info=True)
+            
+            # Provide more specific error messages based on the error type
+            error_message = str(e).lower()
+            
+            if "database" in error_message or "connection" in error_message:
+                user_message = "❌ I'm having trouble accessing the document storage. Please try again in a moment."
+            elif "llm" in error_message or "anthropic" in error_message or "api" in error_message:
+                user_message = "❌ I'm having trouble processing your request. Please try again or simplify your query."
+            elif "none" in error_message or "attribute" in error_message:
+                user_message = "❌ Some of your profile information might be missing. Please ensure your profile is complete."
+            else:
+                user_message = f"❌ Sorry, I couldn't search your documents for '{query}' right now. Please try again or let me know if you need help with document analysis."
             
             # Update state with error info
             if state:
@@ -2179,10 +2228,11 @@ class DocumentToolsLangGraph:
                     "type": "tool_execution_error",
                     "tool": "enhanced_document_search",
                     "message": "Failed to search documents",
-                    "details": str(e)
+                    "details": str(e),
+                    "error_type": type(e).__name__
                 }
             
-            return f"❌ Sorry, I couldn't search your documents for '{query}' right now. Please try again or let me know if you need help with document analysis."
+            return user_message
 
     async def list_documents_with_state(
         self,
@@ -2336,7 +2386,9 @@ class DocumentToolsLangGraph:
 
     async def get_shared_session_from_state(self, state: WebSocketState):
         """Extract shared database session from LangGraph state"""
-        return await get_shared_session_from_state(state)
+        session = await get_shared_session_from_state(state)
+        # If no shared session available, use the class's existing session
+        return session if session is not None else self.db
 
     def update_state_with_tool_execution(
         self, 
@@ -2375,19 +2427,19 @@ class DocumentToolsLangGraph:
         """
         return [
             StructuredTool.from_function(
-                func=self.enhanced_document_search_with_state,
+                coroutine=self.enhanced_document_search_with_state,
                 name="enhanced_document_search",
                 description="Enhanced search across all user documents, including resumes, cover letters, and user profile. Can detect file attachments and provide targeted analysis with shared session management.",
                 # Async method with state injection handled automatically
             ),
             StructuredTool.from_function(
-                func=self.list_documents_with_state,
+                coroutine=self.list_documents_with_state,
                 name="list_documents",
                 description="Lists the documents available to the user with shared session management.",
                 # Async method with state injection handled automatically
             ),
             StructuredTool.from_function(
-                func=self.get_document_insights_with_state,
+                coroutine=self.get_document_insights_with_state,
                 name="get_document_insights",
                 description="Get personalized insights about user's uploaded documents including analysis and recommendations with shared session management.",
                 # Async method with state injection handled automatically
@@ -2571,7 +2623,9 @@ class ProfileToolsLangGraph:
 
     async def get_shared_session_from_state(self, state: WebSocketState):
         """Extract shared database session from LangGraph state"""
-        return await get_shared_session_from_state(state)
+        session = await get_shared_session_from_state(state)
+        # If no shared session available, use the class's existing session
+        return session if session is not None else self.db
 
     def update_state_with_tool_execution(
         self, 
@@ -2690,13 +2744,13 @@ class ProfileToolsLangGraph:
         """
         return [
             StructuredTool.from_function(
-                func=self.update_user_profile_comprehensive_with_state,
+                coroutine=self.update_user_profile_comprehensive_with_state,
                 name="update_user_profile_comprehensive",
                 description="🔧 COMPREHENSIVE PROFILE UPDATE TOOL - Update user profile with personal information, contact details, and professional information with shared session management.",
                 # Async method with state injection handled automatically
             ),
             StructuredTool.from_function(
-                func=self.edit_profile_summary_with_state,
+                coroutine=self.edit_profile_summary_with_state,
                 name="edit_profile_summary",
                 description="✏️ EDIT PROFILE SUMMARY - Update your professional summary/bio. Use this when the user wants to change their summary or 'About Me' section.",
                 # Async method with state injection handled automatically
@@ -2767,6 +2821,38 @@ class CareerToolsLangGraph:
         self.user = user
         self.db = db_session
         self.user_id = user.id
+    
+    async def get_shared_session_from_state(self, state: WebSocketState):
+        """Extract shared database session from LangGraph state"""
+        session = await get_shared_session_from_state(state)
+        # If no shared session available, use the class's existing session
+        return session if session is not None else self.db
+    
+    def update_state_with_tool_execution(
+        self, 
+        state: WebSocketState, 
+        tool_name: str, 
+        success: bool, 
+        metadata: Dict[str, Any] = None
+    ) -> None:
+        """Update LangGraph state with tool execution information"""
+        if not state:
+            return
+        
+        # Update executed tools list
+        executed_tools = state.get("executed_tools", [])
+        if tool_name not in executed_tools:
+            executed_tools.append(tool_name)
+        state["executed_tools"] = executed_tools
+        
+        # Update tool results
+        tool_results = state.get("tool_results", {})
+        tool_results[tool_name] = {
+            "success": success,
+            "timestamp": datetime.now().isoformat(),
+            "metadata": metadata or {}
+        }
+        state["tool_results"] = tool_results
 
     async def get_interview_preparation_guide_with_state(
         self, 
@@ -2865,7 +2951,10 @@ Create a detailed interview preparation guide with role-specific questions, comp
             return "❌ I'm sorry, but I encountered an error while generating the interview preparation guide."
 
     async def get_shared_session_from_state(self, state: WebSocketState):
-        return await get_shared_session_from_state(state)
+        """Extract shared database session from LangGraph state"""
+        session = await get_shared_session_from_state(state)
+        # If no shared session available, use the class's existing session
+        return session if session is not None else self.db
 
     def update_state_with_tool_execution(self, state: WebSocketState, tool_name: str, success: bool, metadata: Dict[str, Any] = None) -> None:
         if not state:
@@ -2890,9 +2979,9 @@ Create a detailed interview preparation guide with role-specific questions, comp
             # If no resume text provided, get user's current resume
             if not resume_text:
                 result = await shared_session.execute(
-                    select(Resume).where(Resume.user_id == self.user.id)
+                    select(Resume).where(Resume.user_id == self.user_id)
                 )
-                db_resume = result.scalars().first()
+                db_resume = result.scalar_one_or_none()
                 
                 if not db_resume or not db_resume.data:
                     return "❌ No resume found. Please upload or create a resume first."
@@ -2969,7 +3058,7 @@ Create a detailed interview preparation guide with role-specific questions, comp
             # Import and use the ATS review tool
             from app.ats_review_tool import review_resume_ats
             
-            # Run the ATS review - use ainvoke for async tools
+            # Run the ATS review - it's a @tool decorated function, so use ainvoke
             result = await review_resume_ats.ainvoke({"resume_text": resume_text})
             
             # Update state with successful execution
@@ -2984,7 +3073,7 @@ Create a detailed interview preparation guide with role-specific questions, comp
             return result
             
         except Exception as e:
-            log.error(f"Error in ATS resume review: {e}")
+            log.error(f"Error in ATS resume review: {e}", exc_info=True)
             if state:
                 state["error_state"] = {
                     "type": "tool_execution_error",
@@ -2992,7 +3081,7 @@ Create a detailed interview preparation guide with role-specific questions, comp
                     "message": "Failed to review resume for ATS",
                     "details": str(e)
                 }
-            return "❌ Failed to review resume for ATS compatibility. Please try again."
+            return f"❌ Failed to review resume for ATS compatibility. Error: {str(e)}"
     
     async def compare_resume_to_job_with_state(
         self,
@@ -3007,9 +3096,9 @@ Create a detailed interview preparation guide with role-specific questions, comp
             # If no resume text provided, get user's current resume
             if not resume_text:
                 result = await shared_session.execute(
-                    select(Resume).where(Resume.user_id == self.user.id)
+                    select(Resume).where(Resume.user_id == self.user_id)
                 )
-                db_resume = result.scalars().first()
+                db_resume = result.scalar_one_or_none()
                 
                 if not db_resume or not db_resume.data:
                     return "❌ No resume found. Please upload or create a resume first."
@@ -3084,17 +3173,17 @@ Create a detailed interview preparation guide with role-specific questions, comp
     def get_tools(self) -> List[StructuredTool]:
         return [
             StructuredTool.from_function(
-                func=self.get_interview_preparation_guide_with_state,
+                coroutine=self.get_interview_preparation_guide_with_state,  # Use coroutine for async function
                 name="get_interview_preparation_guide",
                 description="Get comprehensive interview preparation guidance based on your CV and target role with shared session management.",
             ),
             StructuredTool.from_function(
-                func=self.review_resume_ats_with_state,
+                coroutine=self.review_resume_ats_with_state,  # Use coroutine for async function
                 name="review_resume_ats",
                 description="Review your resume for ATS (Applicant Tracking System) compatibility. Get a score from 0-100 and specific improvement suggestions to increase your chances of passing ATS filters.",
             ),
             StructuredTool.from_function(
-                func=self.compare_resume_to_job_with_state,
+                coroutine=self.compare_resume_to_job_with_state,  # Use coroutine for async function
                 name="compare_resume_to_job",
                 description="Compare your resume against a specific job description to identify missing keywords, skills gaps, and get recommendations for better alignment with the job requirements.",
             )
@@ -3106,6 +3195,32 @@ Create a detailed interview preparation guide with role-specific questions, comp
 
 class WebToolsLangGraph:
     """Enhanced Web Tools with LangGraph state injection"""
+    
+    def update_state_with_tool_execution(
+        self, 
+        state: WebSocketState, 
+        tool_name: str, 
+        success: bool, 
+        metadata: Dict[str, Any] = None
+    ) -> None:
+        """Update LangGraph state with tool execution information"""
+        if not state:
+            return
+        
+        # Update executed tools list
+        executed_tools = state.get("executed_tools", [])
+        if tool_name not in executed_tools:
+            executed_tools.append(tool_name)
+        state["executed_tools"] = executed_tools
+        
+        # Update tool results
+        tool_results = state.get("tool_results", {})
+        tool_results[tool_name] = {
+            "success": success,
+            "timestamp": datetime.now().isoformat(),
+            "metadata": metadata or {}
+        }
+        state["tool_results"] = tool_results
     
     async def search_web_for_advice_with_state(
         self, 
@@ -3188,7 +3303,7 @@ class WebToolsLangGraph:
     def get_tools(self) -> List[StructuredTool]:
         return [
             StructuredTool.from_function(
-                func=self.search_web_for_advice_with_state,
+                coroutine=self.search_web_for_advice_with_state,
                 name="search_web_for_advice",
                 description="Search the web for up-to-date information, advice, and guidance with LangGraph state management.",
             )

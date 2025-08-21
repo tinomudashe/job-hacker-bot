@@ -78,7 +78,52 @@ const getFileIcon = (filename: string) => {
 
 // **REVISED** Content type detector to handle the specific message format
 const detectContentType = (text: string) => {
-  // Pattern to handle 'File Attached: [file]\n\nMessage: [msg]'
+  // New pattern for CV uploads: [CV_UPLOAD:filename]\nmessage
+  const cvUploadPattern = /^\[CV_UPLOAD:(.+?)\]\n([\s\S]+)$/;
+  const cvMatch = text.match(cvUploadPattern);
+  
+  if (cvMatch) {
+    return {
+      type: "cv",
+      filename: cvMatch[1].trim(),
+      userMessage: cvMatch[2].trim(),
+      fullMatch: text,
+    };
+  }
+
+  // New pattern for file uploads: [FILE_UPLOAD:filename]\nmessage
+  const fileUploadPattern = /^\[FILE_UPLOAD:(.+?)\]\n([\s\S]+)$/;
+  const fileMatch = text.match(fileUploadPattern);
+  
+  if (fileMatch) {
+    return {
+      type: "file",
+      filename: fileMatch[1].trim(),
+      userMessage: fileMatch[2].trim(),
+      fullMatch: text,
+    };
+  }
+
+  // DO NOT DISPLAY CV upload success messages - they are handled by toasts
+  // Just ignore them completely
+  if (text.startsWith("CV/Resume uploaded successfully!")) {
+    return null; // Don't display this as an attachment - toast handles it
+  }
+
+  // Updated pattern to handle 'Attached file: [filename]\n\n[message]'
+  const attachedFilePattern = /^Attached file:\s*(.+?)(?:\n\n([\s\S]+))?$/;
+  const attachedMatch = text.match(attachedFilePattern);
+  
+  if (attachedMatch) {
+    return {
+      type: "file",
+      filename: attachedMatch[1].trim(),
+      userMessage: attachedMatch[2] ? attachedMatch[2].trim() : "",
+      fullMatch: text,
+    };
+  }
+
+  // Legacy pattern to handle 'File Attached: [file]\n\nMessage: [msg]'
   const specificPattern =
     /^(?:File Attached|📎 Attached file):\s*([\s\S]*?)(?:\n\nMessage:\s*([\s\S]*))?$/i;
   const specificMatch = text.match(specificPattern);
@@ -95,8 +140,6 @@ const detectContentType = (text: string) => {
   // Fallback for other existing formats
   const fallbackPatterns = {
     fileAttached: /\*\*File Attached:\*\* (.+?)(?:\n|$)/,
-    cvUploaded:
-      /\*\*CV\/Resume uploaded successfully!\*\*[\s\S]*?\*\*File:\*\* (.+?)(?:\n|$)/,
     emojiFileAttached: /📎 \*\*File Attached:\*\* (.+?)(?:\n|$)/,
   };
 
@@ -116,63 +159,105 @@ const detectContentType = (text: string) => {
   return null;
 };
 
-// **REVISED** Attachment renderer component to be simpler
+// **REVISED** Attachment renderer component - with glass effect from chat-message.tsx
 const AttachmentRenderer = ({
   filename,
   userMessage,
-  text, // Keep for legacy CV upload details
   isUser,
+  type,
 }: {
   filename: string;
   userMessage?: string;
-  text: string;
   isUser?: boolean;
+  type?: string;
 }) => {
+  
   return (
     <div className="space-y-3">
-      {/* Render the user's message first if it exists */}
-      {userMessage && (
-        <div className="text-sm text-foreground">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              a: (props: any) => <LinkComponent {...props} isUser={isUser} />,
-            }}
-          >
-            {userMessage}
-          </ReactMarkdown>
-        </div>
-      )}
-
-      {/* File attachment display */}
+      {/* Attachment Card with glass effect */}
       <div
         className={cn(
-          "flex items-center gap-3 p-3 rounded-lg border",
-          "bg-muted/30 border-border/50 hover:bg-muted/40 transition-colors"
+          "flex items-center gap-3 p-2.5 rounded-xl transition-all duration-200",
+          isUser
+            ? "bg-white/10 hover:bg-white/15"
+            : "bg-gray-100/50 hover:bg-gray-100/70 dark:bg-gray-700/50 dark:hover:bg-gray-700/70"
         )}
       >
-        <div className="flex items-center justify-center h-8 w-8 shrink-0 rounded-md bg-primary text-primary-foreground">
+        {/* Smart File Icon */}
+        <div
+          className={cn(
+            "flex items-center justify-center w-9 h-9 rounded-xl transition-all duration-200 group-hover:scale-105",
+            isUser
+              ? "bg-white/20"
+              : "bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg shadow-blue-500/25"
+          )}
+        >
           {getFileIcon(filename)}
         </div>
+
+        {/* File Details */}
         <div className="flex-1 min-w-0">
-          <p className="font-medium text-foreground text-sm truncate">
+          <p
+            className={cn(
+              "font-medium text-sm truncate",
+              isUser
+                ? "text-white"
+                : "text-gray-900 dark:text-gray-100"
+            )}
+          >
             {filename}
           </p>
-          <p className="text-xs text-muted-foreground">
-            {filename.split(".").pop()?.toUpperCase() || "FILE"} file
+          <p
+            className={cn(
+              "text-xs mt-0.5",
+              isUser
+                ? "text-white/70"
+                : "text-gray-500 dark:text-gray-400"
+            )}
+          >
+            Attached file
           </p>
         </div>
+
+        {/* Quick Action Download Button */}
+        <button
+          type="button"
+          className={cn(
+            "p-1.5 rounded-lg transition-all duration-200 hover:scale-110 active:scale-95",
+            isUser
+              ? "hover:bg-white/20 text-white/80 hover:text-white"
+              : "hover:bg-gray-100 text-gray-400 hover:text-gray-600 dark:hover:bg-gray-700 dark:text-gray-500 dark:hover:text-gray-300"
+          )}
+        >
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+            />
+          </svg>
+        </button>
       </div>
 
-      {/* CV upload success details */}
-      {text.includes("CV/Resume uploaded successfully") && (
-        <div className="text-sm text-muted-foreground mt-2 space-y-1">
-          {text.includes("Profile Updated") && (
-            <p className="text-green-600 dark:text-green-400 font-medium">
-              ✅ Profile automatically updated
-            </p>
+      {/* Render the user's message if it exists */}
+      {userMessage && (
+        <div
+          className={cn(
+            "px-4 py-3 rounded-2xl",
+            isUser
+              ? "bg-white/10 text-white border border-white/20"
+              : "bg-white/60 text-gray-800 border border-gray-200/40 dark:bg-gray-800/40 dark:text-gray-200 dark:border-gray-700/40"
           )}
-          <p className="text-xs">CV processed and ready for job applications</p>
+        >
+          <p className="text-sm leading-relaxed">
+            {userMessage}
+          </p>
         </div>
       )}
     </div>
@@ -308,16 +393,15 @@ export function MessageContent({ content, isUser }: MessageContentProps) {
     console.log("🎯 MessageContent - Found DOWNLOADABLE trigger in text:", text.substring(0, 200));
   }
 
-  // Detect if this is an attachment message
+  // Handle attachments with the glass effect component
   const attachmentInfo = detectContentType(text);
-
   if (attachmentInfo) {
     return (
       <AttachmentRenderer
         filename={attachmentInfo.filename}
         userMessage={attachmentInfo.userMessage}
-        text={text}
         isUser={isUser}
+        type={attachmentInfo.type}
       />
     );
   }
