@@ -3,7 +3,7 @@
 import { cn } from "@/lib/utils";
 import { UserResource } from "@clerk/types";
 import { AlertCircle, ChevronDown, Loader2 } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EmptyScreen } from "../empty-screen";
 import { ChatMessage } from "./chat-message";
 import { ChatTextarea } from "./chat-textarea";
@@ -63,10 +63,45 @@ export const ChatContainer = ({
   className,
 }: ChatContainerProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
+
+  // Check if user is near bottom of chat
+  const checkIfNearBottom = () => {
+    if (!scrollContainerRef.current) return true;
+    
+    const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    
+    // Show button if more than 100px from bottom
+    return distanceFromBottom < 100;
+  };
+
+  // Handle scroll to show/hide button
+  useEffect(() => {
+    const handleScroll = () => {
+      if (!scrollContainerRef.current) return;
+      
+      const isNearBottom = checkIfNearBottom();
+      setShowScrollButton(!isNearBottom && messages.length > 0);
+    };
+
+    const scrollContainer = scrollContainerRef.current;
+    if (scrollContainer) {
+      scrollContainer.addEventListener("scroll", handleScroll);
+      handleScroll(); // Check initial state
+    }
+
+    return () => {
+      if (scrollContainer) {
+        scrollContainer.removeEventListener("scroll", handleScroll);
+      }
+    };
+  }, [messages.length]);
 
   // Keyboard shortcut for scroll to bottom (Ctrl/Cmd + End)
   useEffect(() => {
@@ -95,6 +130,7 @@ export const ChatContainer = ({
       )}
     >
       <div
+        ref={scrollContainerRef}
         className="flex-1 overflow-y-auto overflow-x-hidden pb-40 sm:pb-48 md:pb-52"
         style={{
           // Enhanced mobile scrolling
@@ -150,24 +186,27 @@ export const ChatContainer = ({
         }}
       >
         <div className="max-w-2xl mx-auto">
-          {/* Scroll to Bottom Button - Above text input */}
-          {messages.length > 0 && (
+          {/* Scroll to Bottom Button - Above text input - Only show when scrolled up */}
+          {showScrollButton && (
             <div className="mb-2 flex justify-center">
               <button
+                type="button"
                 onClick={scrollToBottom}
                 className={cn(
-                  "flex items-center justify-center rounded-xl transition-all duration-200",
-                  "w-8 h-8 sm:w-10 sm:h-10", // Smaller on mobile, larger on desktop
+                  "flex items-center justify-center rounded-lg transition-all duration-300",
+                  "w-7 h-7", // Smaller size
                   "bg-background/60 backdrop-blur-xl backdrop-saturate-150",
                   "border border-white/8 hover:border-white/12",
                   "shadow-2xl",
                   "text-muted-foreground hover:text-foreground",
-                  "hover:scale-105 active:scale-95"
+                  "hover:scale-110 active:scale-95",
+                  "opacity-0 animate-in fade-in duration-300",
+                  showScrollButton && "opacity-100"
                 )}
                 title="Scroll to latest message - Ctrl+End"
                 aria-label="Scroll to bottom"
               >
-                <ChevronDown className="w-3 h-3" />
+                <ChevronDown className="w-4 h-4" />
               </button>
             </div>
           )}
