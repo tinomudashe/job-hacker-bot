@@ -14,7 +14,7 @@ export function HeaderToggleButton({ isHeaderVisible, onToggle }: HeaderToggleBu
       type="button"
       onClick={onToggle}
       className={cn(
-        "fixed top-8 right-8 z-40", // Below dialogs (z-50) but above content
+        "fixed top-8 right-8 z-[60]", // Above header (z-50) but below dialogs (z-50+ for modals)
         "flex items-center gap-1.5 px-3 py-2",
         "bg-background/80 backdrop-blur-xl backdrop-saturate-150",
         "border border-white/10 hover:border-white/20",
