@@ -620,16 +620,16 @@ export function ChatTextarea({
       </form>
 
       {/* Enhanced Helper text with glassmorphism theme */}
-      <div className="flex justify-center items-center gap-3">
+      <div className="flex justify-center items-center gap-2">
         {showHelperText && (
           <div
             className={cn(
-              "flex flex-col sm:inline-flex sm:flex-row items-center gap-2 sm:gap-3",
-              "px-4 py-3 rounded-2xl",
+              "flex flex-col sm:inline-flex sm:flex-row items-center gap-1 sm:gap-2",
+              "px-3 py-1.5 rounded-xl",
               "bg-background/60 backdrop-blur-xl backdrop-saturate-150",
               "border border-white/8",
               "shadow-2xl",
-              "text-sm text-gray-700 dark:text-gray-300",
+              "text-[10px] text-gray-700 dark:text-gray-300",
               "transition-all duration-200 max-w-xs sm:max-w-none"
             )}
           >
@@ -648,26 +648,26 @@ export function ChatTextarea({
             </div>
 
             {/* Desktop Layout */}
-            <div className="hidden sm:flex items-center gap-3">
-              <div className="flex items-center gap-1.5">
-                <kbd className="px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded-lg text-xs font-mono text-gray-800 dark:text-gray-200 border border-gray-200/50 dark:border-gray-600/50">
+            <div className="hidden sm:flex items-center gap-2">
+              <div className="flex items-center gap-1">
+                <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-[10px] font-mono text-gray-800 dark:text-gray-200 border border-gray-200/50 dark:border-gray-600/50">
                   Enter
                 </kbd>
-                <span className="text-gray-600 dark:text-gray-400">
+                <span className="text-[10px] text-gray-600 dark:text-gray-400">
                   to send
                 </span>
               </div>
-              <span className="text-gray-400 dark:text-gray-500">•</span>
-              <div className="flex items-center gap-1.5">
-                <kbd className="px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded-lg text-xs font-mono text-gray-800 dark:text-gray-200 border border-gray-200/50 dark:border-gray-600/50">
+              <span className="text-[10px] text-gray-400 dark:text-gray-500">•</span>
+              <div className="flex items-center gap-1">
+                <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-[10px] font-mono text-gray-800 dark:text-gray-200 border border-gray-200/50 dark:border-gray-600/50">
                   Shift+Enter
                 </kbd>
-                <span className="text-gray-600 dark:text-gray-400">
+                <span className="text-[10px] text-gray-600 dark:text-gray-400">
                   for new line
                 </span>
               </div>
-              <span className="text-gray-400 dark:text-gray-500">•</span>
-              <span className="text-gray-600 dark:text-gray-400">
+              <span className="text-[10px] text-gray-400 dark:text-gray-500">•</span>
+              <span className="text-[10px] text-gray-600 dark:text-gray-400">
                 Upload CV, ask questions, get help
               </span>
             </div>
@@ -679,7 +679,7 @@ export function ChatTextarea({
           type="button"
           onClick={() => setShowHelperText(!showHelperText)}
           className={cn(
-            "flex items-center justify-center p-3 rounded-2xl",
+            "flex items-center justify-center p-1.5 rounded-xl",
             "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200",
             "bg-background/60 backdrop-blur-xl backdrop-saturate-150",
             "hover:bg-background/80",
@@ -691,9 +691,9 @@ export function ChatTextarea({
           title={showHelperText ? "Hide helper text" : "Show helper text"}
         >
           {showHelperText ? (
-            <EyeOff className="h-4 w-4" />
+            <EyeOff className="h-3 w-3" />
           ) : (
-            <Eye className="h-4 w-4" />
+            <Eye className="h-3 w-3" />
           )}
         </button>
       </div>
