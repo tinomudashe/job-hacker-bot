@@ -228,6 +228,58 @@ class ResumeToolsLangGraph:
                 # Get user's current resume data using shared session
                 db_resume, base_resume_data = await self.get_or_create_resume(shared_session)
                 
+                # Check if resume has meaningful data
+                missing_sections = []
+                has_meaningful_data = False
+                
+                if base_resume_data:
+                    # Check personal info
+                    if base_resume_data.personalInfo:
+                        if not base_resume_data.personalInfo.summary or len(base_resume_data.personalInfo.summary) < 20:
+                            missing_sections.append("professional summary")
+                        if base_resume_data.personalInfo.name and base_resume_data.personalInfo.name != "User":
+                            has_meaningful_data = True
+                    else:
+                        missing_sections.append("personal information")
+                    
+                    # Check experience
+                    if not base_resume_data.experience or len(base_resume_data.experience) == 0:
+                        missing_sections.append("work experience")
+                    else:
+                        has_meaningful_data = True
+                    
+                    # Check education
+                    if not base_resume_data.education or len(base_resume_data.education) == 0:
+                        missing_sections.append("education")
+                    
+                    # Check skills
+                    if not base_resume_data.skills or len(base_resume_data.skills) == 0:
+                        missing_sections.append("skills")
+                
+                # If no meaningful data, prompt user to provide information
+                if not has_meaningful_data:
+                    response = (
+                        "I notice you haven't uploaded a CV/resume yet or your profile is incomplete. "
+                        "To create a tailored resume, I need your actual work experience and background.\n\n"
+                        "You have a few options:\n\n"
+                        "1. **Upload your existing CV/resume** - Just attach your PDF or Word document\n"
+                        "2. **Provide your information** - Tell me about:\n"
+                        "   • Your work experience (job titles, companies, responsibilities)\n"
+                        "   • Your education (degree, university, graduation year)\n"
+                        "   • Your skills (technical and soft skills)\n"
+                        "   • Any projects or achievements\n\n"
+                        "3. **Use the resume builder** - Say 'Create a resume from scratch' and I'll guide you\n\n"
+                        "Which option would you prefer?"
+                    )
+                    
+                    log.info(f"No CV data found for user {self.user_id}, prompting for information")
+                    return response
+                
+                # If some sections are missing, notify user but continue
+                if missing_sections and len(missing_sections) < 3:
+                    log.warning(f"Resume has missing sections: {', '.join(missing_sections)}")
+                    # Continue with refinement but note missing sections
+                
                 # Create generation chain (existing logic preserved)
                 parser = PydanticOutputParser(pydantic_object=ResumeData)
                 
@@ -416,6 +468,31 @@ class ResumeToolsLangGraph:
             
             # Get User's Base Resume Data using shared session
             db_resume, base_resume_data = await self.get_or_create_resume(shared_session)
+            
+            # Check if resume has meaningful data for tailoring
+            has_experience = base_resume_data.experience and len(base_resume_data.experience) > 0
+            has_personal_info = (base_resume_data.personalInfo and 
+                                base_resume_data.personalInfo.name and 
+                                base_resume_data.personalInfo.name != "User")
+            
+            if not has_experience or not has_personal_info:
+                response = (
+                    f"I need your actual work experience to create a tailored resume for the **{job_title}** position at **{company_name}**.\n\n"
+                    "I can help you in several ways:\n\n"
+                    "1. **Upload your CV/Resume** - Attach your existing PDF or Word document\n"
+                    "2. **Quick Profile Setup** - Tell me about your:\n"
+                    "   • Current/previous job titles and companies\n"
+                    "   • Key responsibilities and achievements\n"
+                    "   • Technical skills relevant to this role\n"
+                    "   • Education background\n\n"
+                    "3. **Generate from scratch** - Say 'Create a {job_title} resume from scratch' "
+                    "and I'll create a template you can customize\n\n"
+                    "Once I have your information, I can create a perfectly tailored resume that highlights "
+                    "your relevant experience for this specific role."
+                )
+                
+                log.info(f"Insufficient resume data for user {self.user_id} to tailor for {job_title}")
+                return response
 
             # Create the generation chain with a Pydantic output parser (existing logic)
             parser = PydanticOutputParser(pydantic_object=ResumeData)
@@ -655,6 +732,21 @@ class ResumeToolsLangGraph:
                 
                 # Step 2: Use the refine_cv_for_role logic with extracted details
                 db_resume, base_resume_data = await self.get_or_create_resume(shared_session)
+                
+                # Check if user has CV data
+                has_experience = base_resume_data.experience and len(base_resume_data.experience) > 0
+                has_personal_info = (base_resume_data.personalInfo and 
+                                    base_resume_data.personalInfo.name and 
+                                    base_resume_data.personalInfo.name != "User")
+                
+                if not has_experience or not has_personal_info:
+                    return (
+                        f"I found the job posting for **{job_title}** at **{company_name}**, but I need your CV/resume first to tailor it.\n\n"
+                        "Please:\n"
+                        "1. **Upload your existing CV** - Attach your PDF or Word document\n"
+                        "2. **Or provide your details** - Share your work experience, education, and skills\n\n"
+                        f"Once I have your information, I'll create a perfectly tailored resume for this {job_title} position."
+                    )
                 
                 # Create generation chain
                 parser = PydanticOutputParser(pydantic_object=ResumeData)
