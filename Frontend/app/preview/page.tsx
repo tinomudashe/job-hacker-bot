@@ -75,21 +75,21 @@ const PDF_STYLES = [
     key: "modern",
     name: "Modern",
     description: "Clean and minimalist with smart color accents",
-    color: "from-blue-500 to-cyan-500",
+    color: "bg-blue-500",
     useTheme: true,
   },
   {
     key: "professional",
     name: "Professional",
     description: "Classic corporate layout for traditional industries",
-    color: "from-gray-600 to-gray-800",
+    color: "bg-gray-600",
     useTheme: true,
   },
   {
     key: "creative",
     name: "Creative",
     description: "Bold design with vibrant colors and unique layout",
-    color: "from-purple-500 to-pink-500",
+    color: "bg-purple-500",
     useTheme: true,
   },
 ];
@@ -511,7 +511,7 @@ export default function PreviewPage() {
                   <FileText className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h1 className="text-sm sm:text-base md:text-xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent truncate">
+                  <h1 className="text-sm sm:text-base md:text-xl font-bold text-foreground truncate">
                     {contentType === "cover_letter" ? "Cover Letter" : contentType === "resume" ? "Resume" : "Document"} Preview
                   </h1>
                   <p className="text-xs text-muted-foreground/80 -mt-0.5 hidden sm:block">
@@ -542,11 +542,11 @@ export default function PreviewPage() {
           <div className="max-w-4xl mx-auto">
             <header className="flex items-center justify-between w-full px-3 sm:px-4 md:px-6 py-2.5 sm:py-3 md:py-4 bg-background/60 rounded-xl sm:rounded-2xl md:rounded-3xl shadow-2xl border border-white/8 backdrop-blur-xl backdrop-sate-150">
               <div className="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
-                <div className="p-1.5 sm:p-2 bg-gradient-to-br from-red-500 to-pink-600 rounded-lg sm:rounded-xl shadow-lg flex-shrink-0">
+                <div className="p-1.5 sm:p-2 bg-red-500 rounded-lg sm:rounded-xl shadow-lg flex-shrink-0">
                   <AlertCircle className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h1 className="text-sm sm:text-base md:text-xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent truncate">
+                  <h1 className="text-sm sm:text-base md:text-xl font-bold text-foreground truncate">
                     Preview Error
                   </h1>
                   <p className="text-xs text-muted-foreground/80 -mt-0.5 hidden sm:block">
@@ -561,7 +561,7 @@ export default function PreviewPage() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-8 px-3 lg:h-9 lg:px-4 rounded-lg lg:rounded-xl bg-gradient-to-r from-blue-500/10 to-purple-600/10 hover:from-blue-500/20 hover:to-purple-600/20 border border-blue-500/20 text-blue-600 dark:text-blue-400 transition-all duration-200 hover:scale-105"
+                      className="h-8 px-3 lg:h-9 lg:px-4 rounded-lg lg:rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-600 dark:text-blue-400 transition-all duration-200 hover:scale-105"
                     >
                       Sign In
                     </Button>
@@ -575,7 +575,7 @@ export default function PreviewPage() {
           </div>
         </div>
         <div className="text-center max-w-md mx-auto">
-          <div className="w-20 h-20 mx-auto mb-6 p-4 bg-gradient-to-br from-red-500/10 to-pink-600/10 rounded-3xl border border-red-500/20">
+          <div className="w-20 h-20 mx-auto mb-6 p-4 bg-red-500/10 rounded-3xl border border-red-500/20">
             <AlertCircle className="h-full w-full text-red-500" />
           </div>
           <h1 className="text-2xl font-bold text-foreground mb-3">
@@ -614,7 +614,7 @@ export default function PreviewPage() {
                   }}
                   variant="default"
                   size="sm"
-                  className="mt-4 w-full sm:w-auto rounded-xl bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700"
+                  className="mt-4 w-full sm:w-auto rounded-xl bg-blue-600 hover:bg-blue-700"
                 >
                   <ExternalLink className="h-4 w-4 mr-2" />
                   Open Main App
@@ -697,7 +697,7 @@ export default function PreviewPage() {
                             : "border-border/50 hover:border-primary/40 hover:bg-accent/30"
                         }`}
                       >
-                        <div className={`w-12 h-12 rounded-lg flex-shrink-0 bg-gradient-to-br ${style.color} flex items-center justify-center shadow-md`}>
+                        <div className={`w-12 h-12 rounded-lg flex-shrink-0 ${style.color} flex items-center justify-center shadow-md`}>
                           {style.key === 'modern' && <Layout className="h-6 w-6 text-white" />}
                           {style.key === 'professional' && <Briefcase className="h-6 w-6 text-white" />}
                           {style.key === 'creative' && <Sparkles className="h-6 w-6 text-white" />}
@@ -772,7 +772,7 @@ export default function PreviewPage() {
                               : "border-border/50 hover:border-primary/40 hover:bg-accent/30"
                           }`}
                         >
-                          <div className={`w-10 h-10 rounded-lg flex-shrink-0 bg-gradient-to-br ${style.color} flex items-center justify-center shadow-sm`}>
+                          <div className={`w-10 h-10 rounded-lg flex-shrink-0 ${style.color} flex items-center justify-center shadow-sm`}>
                             {style.key === 'modern' && <Layout className="h-5 w-5 text-white" />}
                             {style.key === 'professional' && <Briefcase className="h-5 w-5 text-white" />}
                             {style.key === 'creative' && <Sparkles className="h-5 w-5 text-white" />}
