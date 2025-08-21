@@ -34,27 +34,49 @@ async def _update_user_profile_from_cv(user: User, cv_data: CVExtractionResult, 
     updated_fields = []
 
     # --- 1. Update User Table Fields ---
-    field_map = {
-        'full_name': 'name',
-        'email': 'email',
-        'phone_number': 'phone',
-        'location': 'address',
-        'linkedin_url': 'linkedin',
-        'summary': 'profile_headline',
-        'skills': 'skills'
-    }
-
-    for cv_key, user_key in field_map.items():
-        cv_value = getattr(cv_data, cv_key, None)
-        if cv_value:
-            if isinstance(cv_value, list):
-                cv_value = ", ".join(skill for skill in cv_value if skill)
-            if not getattr(user, user_key, None):
-                setattr(user, user_key, cv_value)
-                updated_fields.append(user_key)
+    # Extract personal info from cv_data.personal_info
+    personal_info = cv_data.personal_info if cv_data.personal_info else None
     
-    if cv_data.full_name and (not user.first_name or not user.last_name):
-        parts = cv_data.full_name.split()
+    if personal_info:
+        # Map CV personal_info fields to user fields
+        if personal_info.full_name and not user.name:
+            user.name = personal_info.full_name
+            updated_fields.append('name')
+        
+        if personal_info.email and not user.email:
+            user.email = personal_info.email
+            updated_fields.append('email')
+        
+        if personal_info.phone and not user.phone:
+            user.phone = personal_info.phone
+            updated_fields.append('phone')
+        
+        if personal_info.address and not user.address:
+            user.address = personal_info.address
+            updated_fields.append('address')
+        
+        if personal_info.linkedin and not user.linkedin:
+            user.linkedin = personal_info.linkedin
+            updated_fields.append('linkedin')
+        
+        if personal_info.profile_summary and not user.profile_headline:
+            user.profile_headline = personal_info.profile_summary
+            updated_fields.append('profile_headline')
+    
+    # Extract skills from cv_data.skills
+    if cv_data.skills:
+        all_skills = []
+        if cv_data.skills.technical_skills:
+            all_skills.extend(cv_data.skills.technical_skills)
+        if cv_data.skills.soft_skills:
+            all_skills.extend(cv_data.skills.soft_skills)
+        
+        if all_skills and not user.skills:
+            user.skills = ", ".join(all_skills)
+            updated_fields.append('skills')
+    
+    if personal_info and personal_info.full_name and (not user.first_name or not user.last_name):
+        parts = personal_info.full_name.split()
         if len(parts) > 1:
             if not user.first_name:
                 user.first_name = parts[0]
@@ -89,28 +111,67 @@ async def _update_user_profile_from_cv(user: User, cv_data: CVExtractionResult, 
     
     # Update skills from CV
     if cv_data.skills:
-        resume_data['skills'] = cv_data.skills
-        updated_fields.append('skills')
+        all_skills = []
+        if cv_data.skills.technical_skills:
+            all_skills.extend(cv_data.skills.technical_skills)
+        if cv_data.skills.soft_skills:
+            all_skills.extend(cv_data.skills.soft_skills)
+        
+        if all_skills:
+            resume_data['skills'] = all_skills
+            updated_fields.append('skills')
     
     # Update personal info in resume data
     if not resume_data.get('personalInfo'):
         resume_data['personalInfo'] = {}
     
-    if cv_data.full_name:
-        resume_data['personalInfo']['name'] = cv_data.full_name
-    if cv_data.email:
-        resume_data['personalInfo']['email'] = cv_data.email
-    if cv_data.phone_number:
-        resume_data['personalInfo']['phone'] = cv_data.phone_number
-    if cv_data.location:
-        resume_data['personalInfo']['location'] = cv_data.location
-    if cv_data.linkedin_url:
-        resume_data['personalInfo']['linkedin'] = cv_data.linkedin_url
-    if cv_data.summary:
-        resume_data['personalInfo']['summary'] = cv_data.summary
+    if personal_info:
+        if personal_info.full_name:
+            resume_data['personalInfo']['name'] = personal_info.full_name
+        if personal_info.email:
+            resume_data['personalInfo']['email'] = personal_info.email
+        if personal_info.phone:
+            resume_data['personalInfo']['phone'] = personal_info.phone
+        if personal_info.address:
+            resume_data['personalInfo']['location'] = personal_info.address
+        if personal_info.linkedin:
+            resume_data['personalInfo']['linkedin'] = personal_info.linkedin
+        if personal_info.profile_summary:
+            resume_data['personalInfo']['summary'] = personal_info.profile_summary
+        if personal_info.website:
+            resume_data['personalInfo']['website'] = personal_info.website
+    
+    # Update projects from CV
+    if cv_data.projects:
+        resume_data['projects'] = [
+            {
+                'name': proj.title or '',
+                'description': proj.description or '',
+                'technologies': proj.technologies or '',
+                'link': proj.url or proj.github or ''
+            }
+            for proj in cv_data.projects
+        ]
+        updated_fields.append('projects')
+    
+    # Update certifications from CV
+    if cv_data.skills and cv_data.skills.certifications:
+        resume_data['certifications'] = [
+            {'name': cert, 'issuer': '', 'date': ''} 
+            for cert in cv_data.skills.certifications
+        ]
+        updated_fields.append('certifications')
+    
+    # Update languages from CV
+    if cv_data.skills and cv_data.skills.languages:
+        resume_data['languages'] = [
+            {'language': lang, 'proficiency': ''} 
+            for lang in cv_data.skills.languages
+        ]
+        updated_fields.append('languages')
 
     # Update resume data field
-    if 'work_experience' in updated_fields or 'education' in updated_fields or 'skills' in updated_fields or 'resume_record_created' in updated_fields or cv_data.full_name or cv_data.summary:
+    if updated_fields or (personal_info and personal_info.full_name):
         db_resume.data = resume_data
         attributes.flag_modified(db_resume, "data")
 
