@@ -65,40 +65,63 @@ export const ChatContainer = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const checkScrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // Check if user is near bottom of chat
-  const checkIfNearBottom = () => {
-    if (!scrollContainerRef.current) return true;
-    
-    const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+  // Check if user is near bottom (within 200px)
+  const checkScrollPosition = () => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = container;
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
     
-    // Show button if more than 100px from bottom
-    return distanceFromBottom < 100;
+    // Show button if scrolled up more than 200px from bottom and there are messages
+    const shouldShow = distanceFromBottom > 200 && messages.length > 0;
+    
+    // Debug logging
+    console.log('Scroll check:', {
+      distanceFromBottom,
+      shouldShow,
+      messagesLength: messages.length,
+      scrollHeight,
+      scrollTop,
+      clientHeight,
+      currentButtonState: showScrollButton
+    });
+    
+    setShowScrollButton(shouldShow);
   };
 
-  // Handle scroll to show/hide button
+  // Handle scroll events with debounce
   useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
     const handleScroll = () => {
-      if (!scrollContainerRef.current) return;
+      // Clear existing timeout
+      if (checkScrollTimeoutRef.current) {
+        clearTimeout(checkScrollTimeoutRef.current);
+      }
       
-      const isNearBottom = checkIfNearBottom();
-      setShowScrollButton(!isNearBottom && messages.length > 0);
+      // Debounce the check
+      checkScrollTimeoutRef.current = setTimeout(() => {
+        checkScrollPosition();
+      }, 100);
     };
 
-    const scrollContainer = scrollContainerRef.current;
-    if (scrollContainer) {
-      scrollContainer.addEventListener("scroll", handleScroll);
-      handleScroll(); // Check initial state
-    }
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    
+    // Initial check
+    checkScrollPosition();
 
     return () => {
-      if (scrollContainer) {
-        scrollContainer.removeEventListener("scroll", handleScroll);
+      container.removeEventListener('scroll', handleScroll);
+      if (checkScrollTimeoutRef.current) {
+        clearTimeout(checkScrollTimeoutRef.current);
       }
     };
   }, [messages.length]);
@@ -186,8 +209,8 @@ export const ChatContainer = ({
         }}
       >
         <div className="max-w-2xl mx-auto">
-          {/* Scroll to Bottom Button - Above text input - Only show when scrolled up */}
-          {showScrollButton && (
+          {/* Scroll to Bottom Button - Above text input - TEMPORARILY ALWAYS VISIBLE FOR TESTING */}
+          {(true || showScrollButton) && (
             <div className="mb-2 flex justify-center">
               <button
                 type="button"
@@ -199,8 +222,7 @@ export const ChatContainer = ({
                   "border border-white/8 hover:border-white/12",
                   "shadow-2xl",
                   "text-muted-foreground hover:text-foreground",
-                  "hover:scale-110 active:scale-95",
-                  "animate-in fade-in duration-300"
+                  "hover:scale-110 active:scale-95"
                 )}
                 title="Scroll to latest message - Ctrl+End"
                 aria-label="Scroll to bottom"
