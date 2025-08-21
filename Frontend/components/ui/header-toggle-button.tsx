@@ -2,6 +2,7 @@
 
 import { Eye, EyeOff } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useEffect, useState } from "react";
 
 interface HeaderToggleButtonProps {
   isHeaderVisible: boolean;
@@ -9,6 +10,37 @@ interface HeaderToggleButtonProps {
 }
 
 export function HeaderToggleButton({ isHeaderVisible, onToggle }: HeaderToggleButtonProps) {
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+
+  useEffect(() => {
+    // Check for dialog overlays
+    const checkForDialogs = () => {
+      const hasDialog = document.querySelector('[role="dialog"]') !== null ||
+                       document.querySelector('[data-radix-dialog-overlay]') !== null ||
+                       document.querySelector('[data-state="open"]') !== null;
+      setIsDialogOpen(hasDialog);
+    };
+
+    // Check initially
+    checkForDialogs();
+
+    // Set up observer for DOM changes
+    const observer = new MutationObserver(checkForDialogs);
+    observer.observe(document.body, { 
+      childList: true, 
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-state', 'role']
+    });
+
+    return () => observer.disconnect();
+  }, []);
+
+  // Hide button when dialog is open
+  if (isDialogOpen) {
+    return null;
+  }
+
   return (
     <button
       type="button"
