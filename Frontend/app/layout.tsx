@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 import { Inter } from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
+import { GoogleAnalytics } from "@/components/google-analytics";
 
 // This is the only new import being added.
 const CookieConsentBanner = dynamic(
@@ -113,6 +114,9 @@ export default function RootLayout({
           />
         </head>
         <body className={inter.className}>
+          {process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID && (
+            <GoogleAnalytics measurementId={process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID} />
+          )}
           <ThemeProvider
             attribute="class"
             defaultTheme="system"
