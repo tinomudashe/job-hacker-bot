@@ -25,6 +25,7 @@ from langgraph.graph.message import add_messages
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langchain_anthropic import ChatAnthropic
+from app.utils.retry_helper import retry_with_backoff
 from typing_extensions import TypedDict, Annotated
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage, ToolMessage
 
@@ -190,8 +191,27 @@ async def conversation_node(state: WebSocketState) -> WebSocketState:
             {"role": "system", "content": system_prompt}
         ] + [msg for msg in state["messages"]]
         
-        # Generate response
-        response = await model_with_tools.ainvoke(conversation_messages)
+        # Generate response with retry logic for overload errors
+        try:
+            response = await retry_with_backoff(
+                model_with_tools.ainvoke,
+                conversation_messages,
+                max_retries=3,
+                initial_delay=1.0,
+                backoff_factor=2.0
+            )
+        except Exception as e:
+            log.error(f"Failed to generate response after retries: {e}")
+            # Return a friendly error message to the user
+            return {
+                "error_state": {
+                    "type": "overload_error" if "high traffic" in str(e) else "conversation_error",
+                    "message": str(e) if "high traffic" in str(e) else "Failed to process conversation",
+                    "details": str(e)
+                },
+                "processing_stage": "conversation_failed",
+                "confidence_score": 0.0
+            }
         
         # Calculate confidence score
         confidence = calculate_confidence_score(response)

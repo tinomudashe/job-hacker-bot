@@ -28,6 +28,7 @@ from sqlalchemy.orm import attributes
 from app.models_db import User, Resume, Document, GeneratedCoverLetter
 from app.resume import ResumeData, PersonalInfo, Experience, Education, Dates, fix_resume_data_structure
 from app.db import async_session_maker
+from app.utils.retry_helper import retry_with_backoff
 
 # Import the enhanced state from orchestrator
 from app.state_types import WebSocketState
@@ -291,14 +292,19 @@ class ResumeToolsLangGraph:
                 llm = ChatAnthropic(model="claude-3-7-sonnet-20250219", temperature=0.7, max_tokens=4096)
                 chain = prompt | llm | parser
                 
-                # Generate refined resume
-                refined_resume_data = await chain.ainvoke({
-                    "context": base_resume_data.json(),
-                    "target_role": target_role,
-                    "company_name": company_name or "target companies",
-                    "job_description": job_description or f"General {target_role} position requirements",
-                    "format_instructions": parser.get_format_instructions(),
-                })
+                # Generate refined resume with retry logic
+                refined_resume_data = await retry_with_backoff(
+                    chain.ainvoke,
+                    {
+                        "context": base_resume_data.json(),
+                        "target_role": target_role,
+                        "company_name": company_name or "target companies",
+                        "job_description": job_description or f"General {target_role} position requirements",
+                        "format_instructions": parser.get_format_instructions(),
+                    },
+                    max_retries=3,
+                    initial_delay=1.0
+                )
                 
                 # Verify skills were modified
                 original_skills = set(base_resume_data.skills) if base_resume_data.skills else set()
