@@ -1974,10 +1974,28 @@ class DocumentToolsLangGraph:
                 )
 
             search_results = []
-            for item in all_content:
-                content_text = item.get("content", "") or ""
-                if query.lower() in content_text.lower():
-                    search_results.append(item)
+            
+            # Check if the query is asking for CV/resume content
+            cv_keywords = ['cv', 'resume', 'education', 'work experience', 'skills', 'projects', 'full content', 'complete profile']
+            is_cv_query = any(keyword in query.lower() for keyword in cv_keywords)
+            
+            # If it's a CV query, return all resume-type documents
+            if is_cv_query:
+                for item in all_content:
+                    doc_name = item.get("name", "").lower()
+                    content_text = (item.get("content", "") or "").lower()
+                    
+                    # Check if this is a CV/resume document
+                    if ('resume' in doc_name or 'cv' in doc_name or 
+                        'curriculum' in doc_name or item.get("id") == "user_profile" or
+                        ('experience' in content_text and 'education' in content_text)):
+                        search_results.append(item)
+            else:
+                # Original search logic for non-CV queries
+                for item in all_content:
+                    content_text = item.get("content", "") or ""
+                    if query.lower() in content_text.lower():
+                        search_results.append(item)
 
             search_results.sort(key=lambda x: x.get("date_created", datetime.min), reverse=True)
 
@@ -2006,17 +2024,40 @@ class DocumentToolsLangGraph:
                     }
                 )
 
-            response_parts = [
-                f"**Search Results for '{query}'**\n",
-                f"Found {len(search_results)} relevant sections:\n",
-            ]
-            for i, result in enumerate(search_results[:4], 1):
-                content_preview = (result.get("content", "") or "")[:200]
-                response_parts.append(
-                    f"**{i}.** [{result['name']}]\n{content_preview}..."
-                )
-            
-            response_parts.append("\n💬 **Need more specific information? Ask me about any particular aspect or request a detailed analysis!**")
+            # If this is a CV query and we found CV content, return the full content
+            if is_cv_query and search_results:
+                # Get the most recent CV/resume document
+                cv_doc = search_results[0]
+                content = cv_doc.get("content", "")
+                
+                # For CV queries, return the full structured content
+                response_parts = [
+                    f"**Found your CV content from '{cv_doc['name']}':**\n",
+                    "=" * 50,
+                    "\n",
+                    content if len(content) < 3000 else content[:3000] + "\n\n[Content truncated for display...]",
+                    "\n",
+                    "=" * 50,
+                    "\n\n✅ **CV content successfully retrieved!**",
+                    "\n💡 You can now use this content to:",
+                    "\n• Refine your CV for specific roles",
+                    "\n• Generate tailored cover letters", 
+                    "\n• Create professional emails",
+                    "\n• Prepare for interviews"
+                ]
+            else:
+                # Original response for non-CV queries
+                response_parts = [
+                    f"**Search Results for '{query}'**\n",
+                    f"Found {len(search_results)} relevant sections:\n",
+                ]
+                for i, result in enumerate(search_results[:4], 1):
+                    content_preview = (result.get("content", "") or "")[:200]
+                    response_parts.append(
+                        f"**{i}.** [{result['name']}]\n{content_preview}..."
+                    )
+                
+                response_parts.append("\n💬 **Need more specific information? Ask me about any particular aspect or request a detailed analysis!**")
             
             log.info(f"Document search completed successfully for query: '{query}' - found {len(search_results)} results")
             return "\n\n".join(response_parts)
