@@ -1528,6 +1528,44 @@ export function ChatMessage({
     }
   };
 
+  // Sanitize text for natural TTS output
+  const sanitizeTextForTTS = (text: string): string => {
+    return text
+      // Remove markdown formatting
+      .replace(/\*\*([^*]+)\*\*/g, '$1') // Bold text
+      .replace(/\*([^*]+)\*/g, '$1') // Italic text
+      .replace(/#{1,6}\s+/g, '') // Headers
+      .replace(/```[^`]*```/g, '') // Code blocks
+      .replace(/`([^`]+)`/g, '$1') // Inline code
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Links
+      
+      // Remove special characters and symbols
+      .replace(/[\u{1F300}-\u{1F9FF}]/gu, '') // Emojis
+      .replace(/[•·▪▫◦‣⁃]/g, '') // Bullet points
+      .replace(/[│├└─]/g, '') // Box drawing characters
+      .replace(/[✓✔✗✘×]/g, '') // Checkmarks and crosses
+      .replace(/[→←↑↓⇒⇐⇑⇓]/g, '') // Arrows
+      .replace(/[★☆✦✧]/g, '') // Stars
+      .replace(/\|/g, '') // Pipe characters
+      
+      // Clean up formatting artifacts
+      .replace(/\n{3,}/g, '\n\n') // Multiple newlines to double
+      .replace(/---+/g, '') // Horizontal rules
+      .replace(/===+/g, '') // Double horizontal rules
+      .replace(/\s*-\s*-\s*-\s*/g, '') // Spaced dashes
+      
+      // Clean up whitespace
+      .replace(/\s+/g, ' ') // Multiple spaces to single
+      .replace(/^\s+|\s+$/g, '') // Trim
+      
+      // Add pauses for better speech flow
+      .replace(/\.\s+/g, '. ') // Period pause
+      .replace(/\?\s+/g, '? ') // Question pause
+      .replace(/!\s+/g, '! ') // Exclamation pause
+      .replace(/:\s+/g, ': ') // Colon pause
+      .replace(/;\s+/g, '; '); // Semicolon pause
+  };
+
   const handleReadAloud = async () => {
     // Stop current audio if playing
     if (isSpeaking && audioRef.current) {
@@ -1544,8 +1582,11 @@ export function ChatMessage({
     setIsFetchingAudio(true);
 
     try {
+      // Sanitize text for natural speech
+      const sanitizedText = sanitizeTextForTTS(plainTextContent);
+      
       // Validate content length
-      if (plainTextContent.length > 5000) {
+      if (sanitizedText.length > 5000) {
         throw new Error(
           "Text too long for audio conversion (max 5000 characters)"
         );
@@ -1555,7 +1596,7 @@ export function ChatMessage({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          text: plainTextContent.slice(0, 5000), // Limit text length
+          text: sanitizedText.slice(0, 5000), // Use sanitized text
           api_key: process.env.NEXT_PUBLIC_GOOGLE_TTS_API_KEY,
         }),
       });

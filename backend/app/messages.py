@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List, Optional
 import json
+import logging
 
 from app.db import get_db
 from app.models_db import ChatMessage, User,Page
@@ -11,6 +12,8 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 
 import uuid
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -153,18 +156,44 @@ async def delete_message(
     If cascade is true, also deletes all subsequent messages in the conversation.
     If above is true, only deletes messages after the specified message.
     """
+    logger.info(f"Delete message request: message_id={message_id}, cascade={cascade}, above={above}, user={current_user.id}")
+    
+    # Validate UUID format
+    try:
+        uuid.UUID(message_id)
+    except ValueError:
+        logger.warning(f"Invalid message ID format: {message_id}")
+        raise HTTPException(status_code=400, detail="Invalid message ID format")
+    
     result = await db.execute(
         select(ChatMessage).where(ChatMessage.id == message_id)
     )
     message = result.scalar_one_or_none()
     
     if message is None:
+        # Check if the message might have already been soft-deleted
+        deleted_result = await db.execute(
+            select(ChatMessage).where(
+                ChatMessage.id == message_id,
+                ChatMessage.deleted_at.isnot(None)
+            )
+        )
+        deleted_message = deleted_result.scalar_one_or_none()
+        
+        if deleted_message:
+            # Message was already deleted, return success
+            logger.info(f"Message {message_id} was already soft-deleted, returning success")
+            return
+        
+        # Message doesn't exist at all
+        logger.warning(f"Message {message_id} not found in database for user {current_user.id}")
         raise HTTPException(status_code=404, detail="Message not found")
         
     if message.user_id != current_user.id:
+        logger.warning(f"User {current_user.id} attempted to delete message {message_id} owned by user {message.user_id}")
         raise HTTPException(status_code=403, detail="Not authorized to delete this message")
     
-    print(f"Delete request: message_id={message_id}, page_id={message.page_id}, cascade={cascade}, above={above}")
+    logger.info(f"Processing delete: message_id={message_id}, page_id={message.page_id}, cascade={cascade}, above={above}")
     
     if cascade:
         # Get all messages after the one to be deleted
@@ -187,17 +216,24 @@ async def delete_message(
                 .order_by(ChatMessage.created_at)
             )
         messages_to_delete = result.scalars().all()
-        print(f"Soft deleting {len(messages_to_delete)} messages (cascade={cascade}, above={above})")
+        logger.info(f"Soft deleting {len(messages_to_delete)} messages (cascade={cascade}, above={above})")
         from datetime import datetime
         for msg in messages_to_delete:
-            print(f"  - Soft deleting message {msg.id}: {msg.message[:50]}...")
+            logger.debug(f"  - Soft deleting message {msg.id}: {msg.message[:50] if msg.message else 'empty'}...")
             msg.deleted_at = datetime.utcnow()
     else:
         from datetime import datetime
         message.deleted_at = datetime.utcnow()
-        print(f"Soft deleting single message {message.id}")
-        
-    await db.commit()
+        logger.info(f"Soft deleting single message {message.id}")
+    
+    try:
+        await db.commit()
+        logger.info(f"Successfully deleted message(s) for message_id={message_id}")
+    except Exception as e:
+        logger.error(f"Failed to commit message deletion: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to delete message")
+    
     return
 
 @router.put("/messages/{message_id}", response_model=ChatMessageResponse)

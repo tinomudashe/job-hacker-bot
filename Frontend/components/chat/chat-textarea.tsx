@@ -34,6 +34,7 @@ export function ChatTextarea({
   const [message, setMessage] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [showHelperText, setShowHelperText] = useState(true);
@@ -326,6 +327,9 @@ export function ChatTextarea({
           process.env.NEXT_PUBLIC_GOOGLE_TTS_API_KEY || ""
         );
 
+        // Start processing state
+        setIsProcessingAudio(true);
+        
         try {
           const response = await fetch("/api/stt", {
             method: "POST",
@@ -341,6 +345,8 @@ export function ChatTextarea({
           const errorMessage =
             error instanceof Error ? error.message : "Transcription failed";
           toast.error("Transcription failed", { description: errorMessage });
+        } finally {
+          setIsProcessingAudio(false);
         }
       };
 
@@ -460,7 +466,27 @@ export function ChatTextarea({
             selectedFile && "ring-2 ring-blue-500/50 border-blue-500"
           )}
         >
-          {isRecording ? (
+          {isProcessingAudio ? (
+            // Processing audio mode - Show loader
+            <div className="flex items-center justify-center w-full py-2">
+              <div className="flex items-center gap-3 text-sm font-mono text-gray-700 dark:text-gray-300 px-4 py-3 bg-background/60 backdrop-blur-xl backdrop-saturate-150 rounded-2xl border border-white/8 shadow-2xl">
+                <div className="flex items-center gap-2">
+                  {/* Animated processing indicator */}
+                  <div className="relative flex items-center justify-center">
+                    <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                  </div>
+                  <span className="text-blue-500 font-bold text-xs tracking-wide">
+                    PROCESSING VOICE NOTE
+                  </span>
+                </div>
+                <div className="flex gap-1">
+                  <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                </div>
+              </div>
+            </div>
+          ) : isRecording ? (
             // Recording mode - Enhanced with better animations
             <div className="flex items-center justify-between w-full">
               <button
@@ -604,12 +630,15 @@ export function ChatTextarea({
                 <button
                   type="button"
                   onClick={startRecording}
+                  disabled={isProcessingAudio}
                   className={cn(
                     "flex items-center justify-center p-3",
                     "text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200",
                     "hover:bg-gray-100 dark:hover:bg-gray-700 rounded-2xl transition-all duration-200",
-                    "hover:scale-105 active:scale-95"
+                    "hover:scale-105 active:scale-95",
+                    isProcessingAudio && "opacity-50 cursor-not-allowed"
                   )}
+                  title={isProcessingAudio ? "Processing voice note..." : "Start recording"}
                 >
                   <Mic className="h-5 w-5" />
                 </button>

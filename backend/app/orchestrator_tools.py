@@ -2061,8 +2061,14 @@ class DocumentToolsLangGraph:
                     {"id": "user_profile", "name": "USER PROFILE", "content": user_profile_content, "date_created": datetime.utcnow()}
                 )
             for doc in documents:
+                # Ensure date_created is timezone-naive for comparison
+                doc_date = doc.date_created
+                if doc_date and hasattr(doc_date, 'replace'):
+                    # If it's timezone-aware, convert to naive
+                    if doc_date.tzinfo is not None:
+                        doc_date = doc_date.replace(tzinfo=None)
                 all_content.append(
-                    {"id": doc.id, "name": doc.name, "content": doc.content, "date_created": doc.date_created}
+                    {"id": doc.id, "name": doc.name, "content": doc.content, "date_created": doc_date}
                 )
 
             search_results = []
@@ -2089,7 +2095,17 @@ class DocumentToolsLangGraph:
                     if query.lower() in content_text.lower():
                         search_results.append(item)
 
-            search_results.sort(key=lambda x: x.get("date_created", datetime.min), reverse=True)
+            # Sort results by date, handling both timezone-aware and naive datetimes
+            def get_sort_date(item):
+                date = item.get("date_created")
+                if date is None:
+                    return datetime(1970, 1, 1)
+                # Ensure we have a timezone-naive datetime for comparison
+                if hasattr(date, 'tzinfo') and date.tzinfo is not None:
+                    return date.replace(tzinfo=None)
+                return date
+            
+            search_results.sort(key=get_sort_date, reverse=True)
 
             if not search_results:
                 # Update state with no results found
@@ -2244,7 +2260,16 @@ class DocumentToolsLangGraph:
             # Generate insights (simplified version preserved)
             doc_types = {}
             total_docs = len(documents)
-            latest_doc = max(documents, key=lambda x: x.date_created)
+            # Handle timezone-aware and naive datetimes when finding latest doc
+            def get_doc_date_for_comparison(doc):
+                if doc.date_created is None:
+                    return datetime(1970, 1, 1)
+                # Convert timezone-aware to naive for comparison
+                if hasattr(doc.date_created, 'tzinfo') and doc.date_created.tzinfo is not None:
+                    return doc.date_created.replace(tzinfo=None)
+                return doc.date_created
+            
+            latest_doc = max(documents, key=get_doc_date_for_comparison)
             
             for doc in documents:
                 doc_type = doc.type or "unknown"
@@ -2263,7 +2288,14 @@ class DocumentToolsLangGraph:
                 type_summary = ", ".join([f"{count} {doc_type}(s)" for doc_type, count in doc_types.items()])
                 response_parts.append(f"- Types: {type_summary}")
             
-            response_parts.append(f"- Last Updated: {latest_doc.date_created.strftime('%Y-%m-%d')}")
+            # Format date, handling both timezone-aware and naive
+            latest_date = latest_doc.date_created
+            if latest_date:
+                if hasattr(latest_date, 'tzinfo') and latest_date.tzinfo is not None:
+                    latest_date = latest_date.replace(tzinfo=None)
+                response_parts.append(f"- Last Updated: {latest_date.strftime('%Y-%m-%d')}")
+            else:
+                response_parts.append("- Last Updated: Unknown")
             response_parts.append("")
             
             response_parts.append("💬 **Need help with any specific document? Just ask me to analyze a particular file or help you improve your resume/cover letter!**")
@@ -2278,7 +2310,7 @@ class DocumentToolsLangGraph:
                         "document_count": total_docs,
                         "doc_types": doc_types,
                         "insights_generated": True,
-                        "latest_doc_date": latest_doc.date_created.isoformat()
+                        "latest_doc_date": latest_date.isoformat() if latest_date else None
                     }
                 )
             

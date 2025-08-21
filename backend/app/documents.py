@@ -2,6 +2,7 @@ from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, s
 from sqlalchemy import desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm import attributes
 from app.db import get_db
 from app.models_db import Document, User, Resume
 from app.dependencies import get_current_active_user
