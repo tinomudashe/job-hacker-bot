@@ -305,19 +305,34 @@ async def get_resume_data(
             "projects": [], "certifications": [], "languages": [], "interests": []
         }
 
-    # Always overwrite personal info and skills with the latest from the User profile
-    # to ensure consistency.
-    final_data["personalInfo"]["name"] = current_user.name
-    final_data["personalInfo"]["email"] = current_user.email
-    final_data["personalInfo"]["phone"] = current_user.phone
-    final_data["personalInfo"]["linkedin"] = current_user.linkedin
-    final_data["personalInfo"]["summary"] = current_user.profile_headline
-    final_data["personalInfo"]["location"] = getattr(current_user, 'address', '') # Use address for location
-
-    if current_user.skills:
-        final_data["skills"] = [s.strip() for s in current_user.skills.split(',')]
-    else:
-        final_data["skills"] = []
+    # Only fill in missing personal info from the User profile
+    # This preserves any refined/enhanced data while ensuring completeness
+    if not final_data.get("personalInfo"):
+        final_data["personalInfo"] = {}
+    
+    # Only update fields that are missing or empty in the resume data
+    if not final_data["personalInfo"].get("name"):
+        final_data["personalInfo"]["name"] = current_user.name
+    if not final_data["personalInfo"].get("email"):
+        final_data["personalInfo"]["email"] = current_user.email
+    if not final_data["personalInfo"].get("phone"):
+        final_data["personalInfo"]["phone"] = current_user.phone
+    if not final_data["personalInfo"].get("linkedin"):
+        final_data["personalInfo"]["linkedin"] = current_user.linkedin
+    if not final_data["personalInfo"].get("location"):
+        final_data["personalInfo"]["location"] = getattr(current_user, 'address', '')
+    
+    # IMPORTANT: Don't overwrite the summary if it exists (preserves refined summaries)
+    if not final_data["personalInfo"].get("summary"):
+        final_data["personalInfo"]["summary"] = current_user.profile_headline
+    
+    # Only use user profile skills if resume has no skills at all
+    # This preserves refined/enhanced skills
+    if not final_data.get("skills") or len(final_data["skills"]) == 0:
+        if current_user.skills:
+            final_data["skills"] = [s.strip() for s in current_user.skills.split(',')]
+        else:
+            final_data["skills"] = []
 
     # Transform language field for frontend compatibility: 'language' -> 'name'
     if 'languages' in final_data and isinstance(final_data['languages'], list):
