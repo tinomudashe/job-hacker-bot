@@ -7,6 +7,7 @@ import { Inter } from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
 import { GoogleAnalytics } from "@/components/google-analytics";
+import { TikTokPixel } from "@/components/tiktok-pixel";
 
 // This is the only new import being added.
 const CookieConsentBanner = dynamic(
@@ -117,6 +118,7 @@ export default function RootLayout({
           {process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID && (
             <GoogleAnalytics measurementId={process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID} />
           )}
+          <TikTokPixel pixelId="D2K46TRC77U0CGBH7UH0" />
           <ThemeProvider
             attribute="class"
             defaultTheme="system"
