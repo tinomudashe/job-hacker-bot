@@ -67,9 +67,11 @@ export default function OnboardingPage() {
       // Step 1: Upload the file
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("name", file.name);
+      formData.append("auto_update_profile", "true");
 
       const token = await getToken();
-      const uploadResponse = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/uploads/cv`, {
+      const uploadResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/documents/cv-upload`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -78,6 +80,8 @@ export default function OnboardingPage() {
       });
 
       if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text();
+        console.error("Upload failed:", errorText);
         throw new Error("Failed to upload CV");
       }
 
@@ -89,28 +93,25 @@ export default function OnboardingPage() {
       setIsParsing(true);
       toast.success("CV uploaded! Processing your information...");
 
-      // Parse the CV content (you might need to adjust this based on your backend)
-      const parseResponse = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/cv/parse`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ 
-          file_path: uploadData.file_path,
-          file_id: uploadData.file_id 
-        }),
-      });
-
-      if (!parseResponse.ok) {
-        throw new Error("Failed to parse CV");
+      // Use the extracted info from the upload response
+      let parsedInfo;
+      if (uploadData.extracted_info) {
+        parsedInfo = uploadData.extracted_info;
+      } else if (uploadData.document) {
+        // If no extraction, use document content
+        parsedInfo = {
+          personal_info: {},
+          experience: [],
+          education: [],
+          skills: [],
+          summary: uploadData.document.content?.substring(0, 500) || ""
+        };
       }
-
-      const parsedResult = await parseResponse.json();
-      setParsedData(parsedResult);
+      
+      setParsedData(parsedInfo);
       
       // Format the parsed data into resume content
-      const formattedResume = formatParsedDataToResume(parsedResult);
+      const formattedResume = formatParsedDataToResume(parsedInfo);
       setResumeContent(formattedResume);
       
       setIsParsing(false);
@@ -172,7 +173,7 @@ export default function OnboardingPage() {
       // Mark onboarding as complete
       try {
         const token = await getToken();
-        await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/users/onboarding/complete`, {
+        await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/users/onboarding/complete`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
