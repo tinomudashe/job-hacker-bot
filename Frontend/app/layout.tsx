@@ -8,6 +8,7 @@ import { Toaster } from "sonner";
 import "./globals.css";
 import { GoogleAnalytics } from "@/components/google-analytics";
 import { TikTokPixel } from "@/components/tiktok-pixel";
+import { UserbackWidget } from "@/components/userback-widget";
 
 // This is the only new import being added.
 const CookieConsentBanner = dynamic(
@@ -126,6 +127,7 @@ export default function RootLayout({
             disableTransitionOnChange
           >
             {children}
+            <UserbackWidget />
             <Toaster
               closeButton={true}
               richColors={true}

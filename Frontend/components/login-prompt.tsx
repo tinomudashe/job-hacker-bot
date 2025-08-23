@@ -18,25 +18,19 @@ import {
 import Image from "next/image";
 import * as React from "react";
 import { Button } from "./ui/button";
-import { Logo } from "./ui/logo";
 import { ThemedImage } from "./ui/themed-image";
 
 export function LoginPrompt() {
 
   return (
     <>
-      <div className="relative min-h-screen bg-white dark:bg-black overflow-hidden">
+      <div className="relative min-h-full bg-white dark:bg-black overflow-hidden pt-14 sm:pt-16 md:pt-20">
         {/* Sophisticated Background Grid with Animation */}
-        <div className="fixed inset-0 top-0 left-0 right-0 bottom-0 bg-[linear-gradient(to_right,#f1f5f9_1px,transparent_1px),linear-gradient(to_bottom,#f1f5f9_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_110%)] dark:bg-[linear-gradient(to_right,#0f172a_1px,transparent_1px),linear-gradient(to_bottom,#0f172a_1px,transparent_1px)] animate-grid-float" />
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#f1f5f9_1px,transparent_1px),linear-gradient(to_bottom,#f1f5f9_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_110%)] dark:bg-[linear-gradient(to_right,#0f172a_1px,transparent_1px),linear-gradient(to_bottom,#0f172a_1px,transparent_1px)] animate-grid-float" />
 
         {/* Hero Section */}
-        <section className="relative px-6 pt-12 pb-16 sm:pt-16 sm:pb-24 lg:px-8">
+        <section className="relative px-6 pt-8 pb-16 sm:pt-12 sm:pb-24 lg:px-8">
           <div className="mx-auto max-w-7xl">
-            {/* Logo Section with Animation */}
-            <div className="flex justify-center mb-10 animate-float">
-              <Logo size="lg" />
-            </div>
-
             {/* Main Headline with Animation */}
             <div className="text-center animate-fade-in-up">
               <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight text-gray-900 dark:text-white mb-6">

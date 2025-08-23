@@ -1,0 +1,60 @@
+TINOUDASHE HAPSON MARECHA
+jnrhapson@yahoo.com | Portfolio: tinomudashe.com | GitHub: github.com/tinomudashe
+LinkedIn: linkedin.com/in/tinomudashe-hapson-marecha | +48 794 281 730 | Gdansk Area, Poland
+
+SUMMARY
+I am a software engineer with 3+ years of professional experience as a full-stack web developer using Java and React.js. I am a technology hobbyist, and software engineering is both my career and my hobby. I have been tinkering with AI engineering and LLMs out of fear of becoming redundant, working with Python, LangChain, MCPs, and RAG, which have been my experimental ground of late.
+
+SKILLS
+• Programming Languages: JavaScript, TypeScript, Java, Python, Dart, C#
+• Frontend: React.js, Next.js, Tailwind CSS, PostCSS
+• Backend: Spring Boot, Node.js, FastApi, Alembic
+• Databases: MySQL, PostgreSQL, MongoDB
+• DevOps & Cloud: Google Cloud Platform (GCP), Docker, Git, LangSmith
+• AI: Langchain, RAG (Retrieval-Augmented Generation), MCP (Model Context Protocol), Prompt Engineering
+• Architecture & Design: System Design, Microservices, API design, Cloud-native architectures, Scalability & Performance Optimization
+
+EXPERIENCE
+Full-Stack Developer | Freelance via Upwork | Jul 2022 – Mar 2025 | Remote
+• Built scalable SaaS and mobile applications using React.js, Next.js, Spring Boot, and Flutter
+• Designed secure, performant APIs and managed databases with MySQL, MongoDB, and Firebase
+• Deployed and managed applications, including Dockerized backends in Google Cloud Run, on Google Cloud Platform (GCP), Vercel, and Netlify for robust and scalable cloud infrastructure
+• Delivered client-focused solutions, translating requirements into production-ready applications
+
+Technical Support Advocate | Foundever (BPO) | Jan 2023 – Apr 2025 | Gdańsk, Poland
+• Provided expert technical support for a U.S. fintech client, handling API integration and SaaS troubleshooting
+• Used Jira and Salesforce for ticket tracking and client communications
+• Built internal tools and scripts to streamline workflows and enhance support delivery
+
+Full-Stack Developer | Alpha & Omega MedTech (China) | Jun 2021 – Sep 2022
+• Developed a dynamic Item Library with React, Redux, and MUI from scratch
+• Refactored features into a reusable component library aligned with company design standards
+• Implemented responsive UI improvements, increasing user conversion by 5.6%
+• Maintained backend services with Spring Boot and MySQL
+
+PROJECTS
+ScrapeFlow (In Progress) - AI-powered scraping automation platform for structured, high-volume data extraction
+Tech Stack: Next.js 14, TypeScript, Prisma, TailwindCSS, Shadcn UI, Zod, Recharts
+GitHub: github.com/tinomudashe/ScrapeFlow
+
+BlogAi - AI application that converts audio/video into SEO-ready blog posts
+Tech Stack: Next.js, Gemini, Google Cloud Speech, Clerk, NeonDB, MDX, Langchain, Zod
+Live Site: blogai.blog | GitHub: github.com/tinomudashe/blogai
+
+krótkiLink - Full-stack URL shortener
+Frontend: React.js, MUI, Tailwind CSS
+Backend: Java 21, Spring Boot, JWT, MySQL
+Live Site: krotkilink.online | Frontend Repo: github.com/tinomudashe/krotkilink-frontend | Backend Repo: github.com/tinomudashe/krotkilink-backend
+
+Jobhacker - A conversational career agent
+Frontend: Next.js, shadcn
+Backend: Python, FastAPI, Uvicorn, langgraph, Alembic, PostgresSQL
+Live Site: jobhackerbot.com
+
+EDUCATION
+B.E. in Computer Software Engineering | Uniwersytet WSB Merito Gdańsk | Sep 2023 – Present
+B.Sc. in Computer Software | Wenzhou University, China | Jul 2018 – Jun 2022
+
+REFERENCES
+Dr. Brett Lyndall | CEO, AOM Group | Phone: +86 15658752303 | Email: me@drbrettlyndall.com
+Blessings Nyathi | Team Manager, Foundever | Phone: +48 794128149 | Email: bnyathi@foundever.com

@@ -408,19 +408,33 @@ async def upload_cv_with_extraction(
         with open(file_path, "wb") as f:
             f.write(await file.read())
         
-        # Enhanced text extraction
+        # Enhanced text extraction with proper file type handling
         if file.filename and file.filename.lower().endswith(".pdf"):
             try:
                 pdf = PdfReader(str(file_path))
                 text = "".join(page.extract_text() or "" for page in pdf.pages)
             except Exception as e:
                 raise HTTPException(status_code=400, detail=f"Error processing PDF: {e}")
-        else:
+        elif file.filename and file.filename.lower().endswith((".docx", ".doc")):
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    text = f.read()
+                import docx
+                doc = docx.Document(str(file_path))
+                text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
             except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Error reading file: {e}")
+                raise HTTPException(status_code=400, detail=f"Error processing Word document: {e}")
+        else:
+            # For text files, try different encodings
+            encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+            text = None
+            for encoding in encodings:
+                try:
+                    with open(file_path, "r", encoding=encoding) as f:
+                        text = f.read()
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if text is None:
+                raise HTTPException(status_code=400, detail=f"Error reading file: Unable to decode text file with common encodings")
         
         # Store document metadata with basic FAISS processing
         now = datetime.utcnow()

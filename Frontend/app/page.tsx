@@ -185,14 +185,14 @@ export default function Home() {
   return (
     <div className="flex flex-col h-screen bg-background">
       <div className="flex flex-col flex-1">
-        {/* Pass visibility state to Header */}
+        {/* Pass visibility state to Header - always visible when signed out */}
         <Header
           onNewChat={handleNewChat}
           onClearChat={clearAllChats}
           currentPageId={currentPageId || undefined}
           onSelectPage={handleSelectPage}
           isLoginPage={!isSignedIn}
-          isVisible={isHeaderVisible}
+          isVisible={!isSignedIn ? true : isHeaderVisible}
         />
 
         {/* Header toggle button - only show when signed in */}

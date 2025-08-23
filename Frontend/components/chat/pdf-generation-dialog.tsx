@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/lib/toast";
 import { useAuth } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
 import {
   Award,
   Briefcase,
@@ -34,6 +35,7 @@ interface PDFGenerationDialogProps {
   contentId?: string;
   companyName?: string;
   jobTitle?: string;
+  onNavigate?: () => void;
 }
 
 // Enhanced style options with better colors
@@ -96,7 +98,12 @@ export function PDFGenerationDialog({
   contentId,
   companyName = "",
   jobTitle = "",
+  onNavigate,
 }: PDFGenerationDialogProps) {
+  // Check if this is from onboarding based on contentId
+  const isOnboarding = contentId && contentId.startsWith('onboarding-');
+  const router = useRouter();
+  
   const [selectedStyle, setSelectedStyle] = React.useState("modern");
   const [editedContent, setEditedContent] = React.useState(
     cleanMarkdownFormatting(initialContent)
@@ -536,10 +543,116 @@ export function PDFGenerationDialog({
     };
   }, [open]);
 
-  // Initialize content
+  // Initialize content and parse onboarding data if present
   React.useEffect(() => {
-    if (initialContent && !editedContent) {
-      setEditedContent(cleanMarkdownFormatting(initialContent));
+    if (initialContent) {
+      // Check if this is from onboarding with structured data
+      const onboardingDataMatch = initialContent.match(/\[ONBOARDING_RESUME_DATA\](.*?)\[\/ONBOARDING_RESUME_DATA\]/s);
+      
+      if (onboardingDataMatch) {
+        try {
+          const parsedData = JSON.parse(onboardingDataMatch[1]);
+          console.log("Parsed onboarding data:", parsedData);
+          
+          // Set personal info
+          if (parsedData.personal_info) {
+            const info = parsedData.personal_info;
+            setPersonalInfo({
+              fullName: info.full_name || "",
+              email: info.email || "",
+              phone: info.phone || "",
+              address: info.address || "",
+              linkedin: info.linkedin || "",
+              website: info.website || "",
+              summary: info.profile_summary || "",
+            });
+          }
+          
+          // Set work experience
+          if (parsedData.experience && parsedData.experience.length > 0) {
+            console.log("Setting work experience from parsed data:", parsedData.experience);
+            setWorkExperience(
+              parsedData.experience.map((exp: any) => {
+                const workExp = {
+                  id: crypto.randomUUID(),
+                  title: exp.job_title || exp.jobTitle || exp.title || "",  // Check all possible field names
+                  company: exp.company || "",
+                  startYear: exp.duration ? exp.duration.split(" - ")[0] || "" : "",
+                  endYear: exp.duration ? exp.duration.split(" - ")[1] || "" : "",
+                  description: exp.description || "",
+                };
+                console.log("Mapped work experience:", workExp);
+                return workExp;
+              })
+            );
+          }
+          
+          // Set education
+          if (parsedData.education && parsedData.education.length > 0) {
+            setEducation(
+              parsedData.education.map((edu: any) => ({
+                id: crypto.randomUUID(),
+                degree: edu.degree || "",
+                school: edu.institution || "",
+                year: edu.graduation_year || "",
+                description: edu.gpa ? `GPA: ${edu.gpa}` : "",
+              }))
+            );
+          }
+          
+          // Set projects
+          if (parsedData.projects && parsedData.projects.length > 0) {
+            setProjects(
+              parsedData.projects.map((proj: any) => ({
+                name: proj.title || "",
+                description: proj.description || "",
+                technologies: proj.technologies || "",
+                url: proj.url || proj.github || "",
+              }))
+            );
+          }
+          
+          // Set skills
+          if (parsedData.skills) {
+            const allSkills = [
+              ...(parsedData.skills.technical_skills || []),
+              ...(parsedData.skills.soft_skills || []),
+            ];
+            setSkillsArray(allSkills);
+            setSkills(allSkills.join(", "));
+            
+            // Set certifications
+            if (parsedData.skills.certifications && parsedData.skills.certifications.length > 0) {
+              setCertifications(
+                parsedData.skills.certifications.map((cert: string) => ({
+                  name: cert,
+                  issuing_organization: "",
+                  date_issued: "",
+                }))
+              );
+            }
+            
+            // Set languages
+            if (parsedData.skills.languages && parsedData.skills.languages.length > 0) {
+              setLanguages(
+                parsedData.skills.languages.map((lang: string) => ({
+                  name: lang,
+                  proficiency: "",
+                }))
+              );
+            }
+          }
+          
+          // Clean the content to remove the marker
+          const cleanContent = initialContent.replace(/\[ONBOARDING_RESUME_DATA\].*?\[\/ONBOARDING_RESUME_DATA\]\n\n/s, "");
+          setEditedContent(cleanMarkdownFormatting(cleanContent));
+        } catch (error) {
+          console.error("Error parsing onboarding data:", error);
+          setEditedContent(cleanMarkdownFormatting(initialContent));
+        }
+      } else {
+        setEditedContent(cleanMarkdownFormatting(initialContent));
+      }
     }
   }, [initialContent]);
 
@@ -954,10 +1067,10 @@ export function PDFGenerationDialog({
               </div>
               <div className="min-w-0 flex-1">
                 <DialogTitle className="text-lg font-bold text-gray-900 dark:text-gray-100 leading-tight">
-                  {contentType === "cover_letter" ? "Cover Letter" : "Resume"}
+                  {contentType === "cover_letter" ? "Cover Letter Generator" : "Resume Information"}
                 </DialogTitle>
                 <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5 leading-tight">
-                  Generator
+                  Create and customize your professional document
                 </p>
               </div>
             </div>
@@ -994,16 +1107,83 @@ export function PDFGenerationDialog({
               )}
               <span>{isSaving ? "Saving..." : "Save"}</span>
             </Button>
-            <Button
-              onClick={handlePreview}
-              disabled={isSaving || !isContentValid}
-              size="sm"
-              // --- UI FIX: This button will now correctly grow to fill the remaining space. ---
-              className="flex-1 flex items-center gap-2 !bg-primary hover:!bg-primary/90 text-primary-foreground text-sm px-4 h-9 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 hover:scale-105 disabled:hover:scale-100"
-            >
-              <ExternalLink className="h-4 w-4" />
-              <span>Preview</span>
-            </Button>
+            {isOnboarding ? (
+              <Button
+                onClick={async () => {
+                  console.log("Save & Proceed clicked, isOnboarding:", isOnboarding);
+                  if (isSaving) return;
+                  
+                  try {
+                    // Save resume first
+                    const saveSuccess = await handleSaveResume();
+                    console.log("Save result:", saveSuccess);
+                    
+                    if (saveSuccess) {
+                      console.log("Save successful, completing onboarding");
+                      
+                      // Complete onboarding in the backend
+                      const token = await getToken();
+                      if (token) {
+                        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/users/onboarding/complete`, {
+                          method: "POST",
+                          headers: {
+                            Authorization: `Bearer ${token}`,
+                            "Content-Type": "application/json",
+                          },
+                          body: JSON.stringify({ 
+                            completed: true,
+                            cv_uploaded: true 
+                          }),
+                        });
+                        
+                        if (response.ok) {
+                          console.log("Onboarding completed, navigating to chat");
+                          // Show success message before navigation
+                          toast.success("Setup complete! Redirecting to chat...");
+                          // Call onNavigate callback if provided (for hiding welcome screen)
+                          if (onNavigate) {
+                            onNavigate();
+                          }
+                          // Modern 2025 approach: Force hard navigation with window.location
+                          // This ensures complete page refresh and bypasses any state issues
+                          window.location.href = "/";
+                        } else {
+                          console.error("Failed to complete onboarding");
+                          toast.error("Failed to complete setup. Please try again.");
+                        }
+                      }
+                    } else {
+                      console.log("Save was not successful");
+                      toast.error("Failed to save resume. Please try again.");
+                    }
+                  } catch (error) {
+                    console.error("Error in Save & Proceed:", error);
+                    toast.error("An error occurred. Please try again.");
+                  }
+                }}
+                disabled={isSaving || !isContentValid}
+                size="sm"
+                className="flex-1 flex items-center gap-2 !bg-primary hover:!bg-primary/90 text-primary-foreground text-sm px-4 h-9 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 hover:scale-105 disabled:hover:scale-100"
+              >
+                {isSaving ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                <span>{isSaving ? "Saving..." : "Save & Proceed"}</span>
+              </Button>
+            ) : (
+              <Button
+                onClick={handlePreview}
+                disabled={isSaving || !isContentValid}
+                size="sm"
+                // --- UI FIX: This button will now correctly grow to fill the remaining space. ---
+                className="flex-1 flex items-center gap-2 !bg-primary hover:!bg-primary/90 text-primary-foreground text-sm px-4 h-9 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 hover:scale-105 disabled:hover:scale-100"
+              >
+                <ExternalLink className="h-4 w-4" />
+                <span>Preview</span>
+              </Button>
+            )}
           </div>
 
           {/* Desktop Header */}
@@ -1014,8 +1194,7 @@ export function PDFGenerationDialog({
               </div>
               <div>
                 <DialogTitle className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                  {contentType === "cover_letter" ? "Cover Letter" : "Resume"}{" "}
-                  Generator
+                  {contentType === "cover_letter" ? "Cover Letter Generator" : "Resume Information"}
                 </DialogTitle>
                 <p className="text-sm text-gray-600 dark:text-gray-400 -mt-0.5">
                   Create and customize your professional document
@@ -1041,15 +1220,80 @@ export function PDFGenerationDialog({
                 )}
                 <span>{isSaving ? "Saving..." : "Save"}</span>
               </Button>
-              <Button
-                onClick={handlePreview}
-                disabled={isSaving || !isContentValid}
-                size="sm"
-                className="flex items-center gap-2 !bg-primary hover:!bg-primary/90 text-primary-foreground text-sm px-5 h-10 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 hover:scale-105 disabled:hover:scale-100"
-              >
-                <ExternalLink className="h-4 w-4" />
-                <span>Preview & Download</span>
-              </Button>
+              {isOnboarding ? (
+                <Button
+                  onClick={async () => {
+                    console.log("Save & Proceed clicked (desktop), isOnboarding:", isOnboarding);
+                    if (isSaving) return;
+                    
+                    try {
+                      // Save resume first
+                      const saveSuccess = await handleSaveResume();
+                      console.log("Save result (desktop):", saveSuccess);
+                      
+                      if (saveSuccess) {
+                        console.log("Save successful, completing onboarding (desktop)");
+                        
+                        // Complete onboarding in the backend
+                        const token = await getToken();
+                        if (token) {
+                          const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/users/onboarding/complete`, {
+                            method: "POST",
+                            headers: {
+                              Authorization: `Bearer ${token}`,
+                              "Content-Type": "application/json",
+                            },
+                            body: JSON.stringify({ 
+                              completed: true,
+                              cv_uploaded: true 
+                            }),
+                          });
+                          
+                          if (response.ok) {
+                            console.log("Onboarding completed, navigating to chat (desktop)");
+                            // Call onNavigate callback if provided (for hiding welcome screen)
+                            if (onNavigate) {
+                              onNavigate();
+                            }
+                            // Modern 2025 approach: Force hard navigation with window.location
+                            // This ensures complete page refresh and bypasses any state issues
+                            window.location.href = "/";
+                          } else {
+                            console.error("Failed to complete onboarding (desktop)");
+                            toast.error("Failed to complete setup. Please try again.");
+                          }
+                        }
+                      } else {
+                        console.log("Save was not successful (desktop)");
+                        toast.error("Failed to save resume. Please try again.");
+                      }
+                    } catch (error) {
+                      console.error("Error in Save & Proceed (desktop):", error);
+                      toast.error("An error occurred. Please try again.");
+                    }
+                  }}
+                  disabled={isSaving || !isContentValid}
+                  size="sm"
+                  className="flex items-center gap-2 !bg-primary hover:!bg-primary/90 text-primary-foreground text-sm px-5 h-10 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 hover:scale-105 disabled:hover:scale-100"
+                >
+                  {isSaving ? (
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4" />
+                  )}
+                  <span>{isSaving ? "Saving..." : "Save & Proceed"}</span>
+                </Button>
+              ) : (
+                <Button
+                  onClick={handlePreview}
+                  disabled={isSaving || !isContentValid}
+                  size="sm"
+                  className="flex items-center gap-2 !bg-primary hover:!bg-primary/90 text-primary-foreground text-sm px-5 h-10 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-300 hover:scale-105 disabled:hover:scale-100"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  <span>Preview & Download</span>
+                </Button>
+              )}
               {/* This is the close button for DESKTOP ONLY */}
               <Button
                 variant="ghost"
