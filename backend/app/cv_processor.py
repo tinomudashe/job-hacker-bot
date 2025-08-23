@@ -149,52 +149,58 @@ class CVProcessor:
         return f"""
 You are an expert CV/Resume parser. Extract the following information from the CV text below and return it as a JSON object.
 
-IMPORTANT: Return ONLY valid JSON, no additional text or formatting.
+CRITICAL INSTRUCTIONS:
+1. PRESERVE ALL ORIGINAL INFORMATION - Do not omit any details from the CV
+2. Keep EXACT job titles, company names, and dates as they appear in the CV
+3. Include ALL bullet points and descriptions exactly as written
+4. Maintain the original date formats (don't convert or modify dates)
+5. Extract EVERYTHING mentioned - even if it seems minor
+6. Return ONLY valid JSON, no additional text or formatting
 
 Expected JSON structure:
 {{
     "personal_info": {{
-        "full_name": "Full name of the person",
+        "full_name": "Exact full name as it appears",
         "first_name": "First name only",
         "last_name": "Last name only", 
-        "email": "Email address",
-        "phone": "Phone number",
-        "address": "Full address or location",
-        "linkedin": "LinkedIn profile URL",
-        "website": "Personal website URL",
-        "profile_summary": "Professional summary or objective"
+        "email": "Email address exactly as shown",
+        "phone": "Phone number exactly as shown",
+        "address": "Full address or location exactly as written",
+        "linkedin": "LinkedIn profile URL if present",
+        "website": "Personal website URL if present",
+        "profile_summary": "Complete professional summary or objective - include EVERY word"
     }},
     "experience": [
         {{
-            "job_title": "Position title",
-            "company": "Company name",
-            "duration": "Employment duration (e.g., '2020-2023')",
-            "description": "Job description and achievements"
+            "job_title": "EXACT position title as written",
+            "company": "EXACT company name as written",
+            "duration": "EXACT dates/duration as written (e.g., 'Jan 2020 - Dec 2023' or 'January 2020 - Present')",
+            "description": "COMPLETE job description including ALL bullet points, achievements, and responsibilities. Preserve formatting with bullet points using • or -"
         }}
     ],
     "education": [
         {{
-            "degree": "Degree name",
-            "institution": "University/School name",
-            "graduation_year": "Year of graduation",
-            "gpa": "GPA if mentioned"
+            "degree": "EXACT degree name as written",
+            "institution": "EXACT university/school name as written",
+            "graduation_year": "EXACT graduation date/year as written",
+            "gpa": "GPA exactly as mentioned (e.g., '3.8/4.0')"
         }}
     ],
     "projects": [
         {{
-            "title": "Project name",
-            "description": "Project description and achievements",
-            "technologies": "Technologies used (e.g., 'React, Node.js, MongoDB')",
+            "title": "EXACT project name",
+            "description": "COMPLETE project description with all details",
+            "technologies": "All technologies exactly as listed",
             "url": "Project URL if available",
             "github": "GitHub repository URL if mentioned",
-            "duration": "Project duration or date"
+            "duration": "EXACT project dates or duration as written"
         }}
     ],
     "skills": {{
-        "technical_skills": ["List of technical skills"],
-        "soft_skills": ["List of soft skills"],
-        "languages": ["Languages spoken"],
-        "certifications": ["Professional certifications"]
+        "technical_skills": ["Extract ALL technical skills exactly as written"],
+        "soft_skills": ["Extract ALL soft skills exactly as written"],
+        "languages": ["ALL languages exactly as listed"],
+        "certifications": ["ALL certifications with full names and dates if mentioned"]
     }},
     "confidence_score": 0.95
 }}
@@ -202,7 +208,7 @@ Expected JSON structure:
 CV TEXT:
 {cv_text}
 
-Extract all available information. If a field is not found, use null for strings or empty arrays for lists. Be as accurate as possible and ensure the confidence_score reflects how well you could extract the information (0.0 to 1.0).
+REMEMBER: Extract ALL information exactly as it appears. Do not summarize, shorten, or modify any content. Preserve all dates, titles, and descriptions in their original form.
 """
     
     def _parse_llm_response(self, response: str, raw_text: str) -> CVExtractionResult:

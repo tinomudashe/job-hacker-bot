@@ -130,40 +130,99 @@ export default function OnboardingPage() {
   };
 
   const formatParsedDataToResume = (data: any): string => {
-    // Format the parsed data into a resume string
-    // This should match the format expected by PDFGenerationDialog
+    // Format the parsed data into a resume string while preserving ALL information
     let resume = "";
     
+    // Personal Information
     if (data.personal_info) {
-      resume += `${data.personal_info.name || ""}\n`;
-      resume += `${data.personal_info.email || ""} | ${data.personal_info.phone || ""}\n`;
-      resume += `${data.personal_info.location || ""}\n\n`;
+      const info = data.personal_info;
+      if (info.full_name) resume += `${info.full_name}\n`;
+      
+      // Contact line
+      const contactParts = [];
+      if (info.email) contactParts.push(info.email);
+      if (info.phone) contactParts.push(info.phone);
+      if (info.linkedin) contactParts.push(info.linkedin);
+      if (info.website) contactParts.push(info.website);
+      if (contactParts.length > 0) {
+        resume += contactParts.join(" | ") + "\n";
+      }
+      
+      if (info.address) resume += `${info.address}\n`;
+      
+      // Professional Summary
+      if (info.profile_summary) {
+        resume += `\nPROFESSIONAL SUMMARY\n${info.profile_summary}\n`;
+      }
+      resume += "\n";
     }
     
-    if (data.summary) {
-      resume += `PROFESSIONAL SUMMARY\n${data.summary}\n\n`;
-    }
-    
+    // Work Experience - preserve exact titles and dates
     if (data.experience && data.experience.length > 0) {
-      resume += `WORK EXPERIENCE\n`;
+      resume += "WORK EXPERIENCE\n";
       data.experience.forEach((exp: any) => {
-        resume += `${exp.title} at ${exp.company}\n`;
-        resume += `${exp.dates}\n`;
-        resume += `${exp.description}\n\n`;
+        if (exp.job_title) resume += `${exp.job_title}`;
+        if (exp.company) resume += ` at ${exp.company}`;
+        resume += "\n";
+        if (exp.duration) resume += `${exp.duration}\n`;
+        if (exp.description) {
+          // Preserve formatting including bullet points
+          resume += `${exp.description}\n`;
+        }
+        resume += "\n";
       });
     }
     
+    // Education - preserve exact degree names and dates
     if (data.education && data.education.length > 0) {
-      resume += `EDUCATION\n`;
+      resume += "EDUCATION\n";
       data.education.forEach((edu: any) => {
-        resume += `${edu.degree} - ${edu.school}\n`;
-        resume += `${edu.dates}\n\n`;
+        if (edu.degree) resume += `${edu.degree}`;
+        if (edu.institution) resume += ` - ${edu.institution}`;
+        resume += "\n";
+        if (edu.graduation_year) resume += `${edu.graduation_year}\n`;
+        if (edu.gpa) resume += `GPA: ${edu.gpa}\n`;
+        resume += "\n";
       });
     }
     
-    if (data.skills && data.skills.length > 0) {
-      resume += `SKILLS\n`;
-      resume += data.skills.join(", ");
+    // Projects
+    if (data.projects && data.projects.length > 0) {
+      resume += "PROJECTS\n";
+      data.projects.forEach((proj: any) => {
+        if (proj.title) resume += `${proj.title}`;
+        if (proj.duration) resume += ` (${proj.duration})`;
+        resume += "\n";
+        if (proj.description) resume += `${proj.description}\n`;
+        if (proj.technologies) resume += `Technologies: ${proj.technologies}\n`;
+        if (proj.url || proj.github) {
+          if (proj.url) resume += `URL: ${proj.url}\n`;
+          if (proj.github) resume += `GitHub: ${proj.github}\n`;
+        }
+        resume += "\n";
+      });
+    }
+    
+    // Skills - preserve all categories
+    if (data.skills) {
+      resume += "SKILLS\n";
+      if (data.skills.technical_skills && data.skills.technical_skills.length > 0) {
+        resume += `Technical: ${data.skills.technical_skills.join(", ")}\n`;
+      }
+      if (data.skills.soft_skills && data.skills.soft_skills.length > 0) {
+        resume += `Soft Skills: ${data.skills.soft_skills.join(", ")}\n`;
+      }
+      if (data.skills.languages && data.skills.languages.length > 0) {
+        resume += `Languages: ${data.skills.languages.join(", ")}\n`;
+      }
+      if (data.skills.certifications && data.skills.certifications.length > 0) {
+        resume += `Certifications: ${data.skills.certifications.join(", ")}\n`;
+      }
+    }
+    
+    // If raw_text exists and nothing was extracted, use the raw text
+    if (data.raw_text && !resume.trim()) {
+      resume = data.raw_text;
     }
     
     return resume;
