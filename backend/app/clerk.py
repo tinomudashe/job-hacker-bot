@@ -172,4 +172,44 @@ async def get_primary_email_address(user_id: str) -> Optional[str]:
         return None
     except Exception as e:
         logger.error(f"An unexpected error occurred while fetching user email: {e}", exc_info=True)
-        return None 
+        return None
+
+
+async def update_user_metadata(user_id: str, public_metadata: Dict[str, Any]) -> bool:
+    """
+    Updates a user's public metadata in Clerk.
+    
+    Args:
+        user_id: The Clerk user ID
+        public_metadata: Dictionary of metadata to update
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    if not CLERK_SECRET_KEY or not CLERK_API_URL:
+        logger.error("Clerk Secret Key or API URL is not configured. Cannot update metadata.")
+        return False
+        
+    headers = {
+        "Authorization": f"Bearer {CLERK_SECRET_KEY}",
+        "Content-Type": "application/json"
+    }
+    url = f"{CLERK_API_URL}/v1/users/{user_id}"
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.patch(
+                url, 
+                headers=headers,
+                json={"public_metadata": public_metadata}
+            )
+            response.raise_for_status()
+            logger.info(f"Successfully updated metadata for user {user_id}")
+            return True
+            
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Failed to update user metadata in Clerk: {e.response.status_code} - {e.response.text}")
+        return False
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while updating user metadata: {e}", exc_info=True)
+        return False 

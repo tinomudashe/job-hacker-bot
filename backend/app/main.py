@@ -33,6 +33,7 @@ from app.cover_letter_documents import router as cover_letter_documents_router
 from app.marketing import router as marketing_router
 from app.admin import router as admin_router
 from app.email_api import router as email_router
+from app.onboarding import router as onboarding_router
 
 app = FastAPI()
 
@@ -78,6 +79,7 @@ app.include_router(cover_letter_documents_router, prefix="/api", tags=["cover-le
 app.include_router(marketing_router, tags=["marketing"])
 app.include_router(admin_router, tags=["admin"])
 app.include_router(email_router, tags=["email"])
+app.include_router(onboarding_router, prefix="/api", tags=["onboarding"])
 
 # Add validation error handler to see what's failing
 @app.exception_handler(RequestValidationError)
