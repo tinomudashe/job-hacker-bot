@@ -19,6 +19,7 @@ export default function OnboardingPage() {
   const [isPDFDialogOpen, setIsPDFDialogOpen] = useState(false);
   const [resumeContent, setResumeContent] = useState("");
   const [dragActive, setDragActive] = useState(false);
+  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -168,36 +169,82 @@ export default function OnboardingPage() {
     return resume;
   };
 
-  const handlePDFDialogClose = async (saved: boolean) => {
-    if (saved) {
-      // Mark onboarding as complete
-      try {
-        const token = await getToken();
-        await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/users/onboarding/complete`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ 
-            completed: true,
-            cv_uploaded: true 
-          }),
-        });
-        
-        // Metadata is updated server-side, just redirect
+  const completeOnboarding = async () => {
+    if (hasCompletedOnboarding) return;
+    
+    try {
+      const token = await getToken();
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/users/onboarding/complete`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ 
+          completed: true,
+          cv_uploaded: true 
+        }),
+      });
+
+      if (response.ok) {
+        setHasCompletedOnboarding(true);
         toast.success("Welcome to Job Hacker Bot! Let's find your dream job");
         
         // Small delay to ensure metadata propagates
         setTimeout(() => {
           router.push("/");
-        }, 500);
-      } catch (error) {
-        console.error("Error completing onboarding:", error);
-        toast.error("Failed to complete setup. Please try again.");
+        }, 1000);
       }
+    } catch (error) {
+      console.error("Error completing onboarding:", error);
+      toast.error("Failed to complete setup. Please try again.");
     }
+  };
+
+  const handlePDFDialogClose = () => {
     setIsPDFDialogOpen(false);
+    
+    // Check if user has saved data (we assume if they close after opening, they might have saved)
+    // We'll prompt them to confirm they want to complete onboarding
+    if (!hasCompletedOnboarding && parsedData) {
+      // Give them option to complete onboarding after closing dialog
+      setTimeout(() => {
+        toast(
+          <div className="flex flex-col gap-2">
+            <p>Have you saved your CV?</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  completeOnboarding();
+                  toast.dismiss();
+                }}
+                className="px-3 py-1 bg-primary text-primary-foreground rounded-md text-sm"
+              >
+                Yes, continue
+              </button>
+              <button
+                onClick={() => {
+                  // Reset state to show upload options again
+                  setParsedData(null);
+                  setResumeContent("");
+                  setUploadedFileName("");
+                  toast.dismiss();
+                }}
+                className="px-3 py-1 bg-secondary text-secondary-foreground rounded-md text-sm"
+              >
+                No, go back
+              </button>
+            </div>
+          </div>,
+          {
+            duration: 10000,
+          }
+        );
+      }, 100);
+    } else if (!hasCompletedOnboarding && !parsedData) {
+      // Manual entry was cancelled without any data
+      toast.info("Please upload your CV or enter your information to continue");
+    }
   };
 
   const handleManualEntry = () => {
@@ -332,12 +379,10 @@ export default function OnboardingPage() {
       <PDFGenerationDialog
         open={isPDFDialogOpen}
         onOpenChange={(open) => {
-          if (!open && !parsedData) {
-            // Don't allow closing without action during onboarding
-            toast.error("Please save or edit your CV to continue");
-            return;
+          if (!open) {
+            // Dialog is closing
+            handlePDFDialogClose();
           }
-          handlePDFDialogClose(!open);
         }}
         contentType="resume"
         initialContent={resumeContent}
