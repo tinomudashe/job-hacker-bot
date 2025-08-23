@@ -4,7 +4,7 @@ import { PDFGenerationDialog } from "@/components/chat/pdf-generation-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@clerk/nextjs";
-import { FileUp, Loader2, Upload } from "lucide-react";
+import { FileUp, Loader2, Upload, FileText } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
@@ -199,84 +199,131 @@ export default function OnboardingPage() {
     setIsPDFDialogOpen(false);
   };
 
+  const handleManualEntry = () => {
+    // Open PDF dialog with empty resume for manual entry
+    setResumeContent("");
+    setParsedData({}); // Set empty parsed data
+    setIsPDFDialogOpen(true);
+  };
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-      <Card className="w-full max-w-xl">
-        <CardHeader className="text-center space-y-1">
-          <CardTitle className="text-2xl font-bold">Welcome to Job Hacker Bot! 🚀</CardTitle>
-          <CardDescription className="text-base">
-            Let's get started by uploading your CV. We'll help you optimize it for your job search.
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-2xl bg-background/60 backdrop-blur-xl backdrop-saturate-150 border-white/8 shadow-2xl">
+        <CardHeader className="text-center space-y-2 pb-8">
+          <div className="flex justify-center mb-4">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg">
+              <FileText className="w-8 h-8 text-white" />
+            </div>
+          </div>
+          <CardTitle className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+            Welcome to Job Hacker Bot!
+          </CardTitle>
+          <CardDescription className="text-base text-muted-foreground">
+            Let's set up your profile to personalize your job search experience
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-6">
           {!isParsing && !parsedData && (
-            <div
-              className={`relative border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-                dragActive 
-                  ? "border-primary bg-primary/5" 
-                  : "border-muted-foreground/25 hover:border-primary/50"
-              }`}
-              onDragEnter={handleDrag}
-              onDragLeave={handleDrag}
-              onDragOver={handleDrag}
-              onDrop={handleDrop}
-            >
-              <input
-                type="file"
-                id="cv-upload"
-                className="hidden"
-                accept=".pdf,.doc,.docx,.txt"
-                onChange={handleFileSelect}
-                disabled={isUploading}
-              />
-              
-              <div className="space-y-4">
-                {isUploading ? (
-                  <>
-                    <Loader2 className="w-12 h-12 mx-auto text-primary animate-spin" />
-                    <div>
-                      <p className="text-sm font-medium">Uploading {uploadedFileName}...</p>
-                      <p className="text-xs text-muted-foreground mt-1">Please wait</p>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-12 h-12 mx-auto text-muted-foreground" />
-                    <div>
-                      <p className="text-sm font-medium">Drop your CV here</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        or click to browse (PDF, DOC, DOCX, TXT - Max 10MB)
-                      </p>
-                    </div>
-                    <Button
-                      onClick={() => document.getElementById("cv-upload")?.click()}
-                      variant="outline"
-                      className="mt-2"
-                    >
-                      <FileUp className="w-4 h-4 mr-2" />
-                      Choose File
-                    </Button>
-                  </>
-                )}
+            <>
+              <div
+                className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-all duration-200 ${
+                  dragActive 
+                    ? "border-primary bg-primary/10 scale-[1.02]" 
+                    : "border-muted-foreground/20 hover:border-primary/50 bg-muted/30"
+                }`}
+                onDragEnter={handleDrag}
+                onDragLeave={handleDrag}
+                onDragOver={handleDrag}
+                onDrop={handleDrop}
+              >
+                <input
+                  type="file"
+                  id="cv-upload"
+                  className="hidden"
+                  accept=".pdf,.doc,.docx,.txt"
+                  onChange={handleFileSelect}
+                  disabled={isUploading}
+                  aria-label="Upload CV file"
+                />
+                
+                <div className="space-y-4">
+                  {isUploading ? (
+                    <>
+                      <Loader2 className="w-12 h-12 mx-auto text-primary animate-spin" />
+                      <div>
+                        <p className="text-sm font-medium">Uploading {uploadedFileName}...</p>
+                        <p className="text-xs text-muted-foreground mt-1">Please wait</p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-14 h-14 mx-auto rounded-xl bg-primary/10 flex items-center justify-center">
+                        <Upload className="w-7 h-7 text-primary" />
+                      </div>
+                      <div>
+                        <p className="font-medium">Upload your CV/Resume</p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Drag & drop or click to browse
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          Supports PDF, DOC, DOCX, TXT (Max 10MB)
+                        </p>
+                      </div>
+                      <Button
+                        onClick={() => document.getElementById("cv-upload")?.click()}
+                        className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg"
+                      >
+                        <FileUp className="w-4 h-4 mr-2" />
+                        Choose File
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
+
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-muted-foreground/20" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-background px-2 text-muted-foreground">Or</span>
+                </div>
+              </div>
+
+              <div className="text-center space-y-4">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Don't have a CV ready?</p>
+                  <p className="text-xs text-muted-foreground">
+                    No worries! You can create one by entering your information manually
+                  </p>
+                </div>
+                <Button
+                  onClick={handleManualEntry}
+                  variant="outline"
+                  className="border-primary/50 hover:bg-primary/10"
+                >
+                  <FileText className="w-4 h-4 mr-2" />
+                  Enter Information Manually
+                </Button>
+              </div>
+            </>
           )}
 
           {isParsing && (
-            <div className="text-center py-8 space-y-4">
-              <Loader2 className="w-12 h-12 mx-auto text-primary animate-spin" />
-              <div>
-                <p className="text-sm font-medium">Processing your CV...</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Extracting your information and optimizing for ATS
+            <div className="text-center py-12 space-y-4">
+              <div className="relative">
+                <div className="w-16 h-16 mx-auto rounded-2xl bg-primary/10 flex items-center justify-center">
+                  <Loader2 className="w-8 h-8 text-primary animate-spin" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <p className="font-medium">Processing your CV</p>
+                <p className="text-sm text-muted-foreground">
+                  Extracting information and optimizing for ATS systems...
                 </p>
               </div>
             </div>
           )}
-
-          <p className="text-xs text-center text-muted-foreground">
-            Your CV is required to personalize your job search experience
-          </p>
         </CardContent>
       </Card>
 
