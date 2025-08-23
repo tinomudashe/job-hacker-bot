@@ -1144,9 +1144,13 @@ export function PDFGenerationDialog({
                           if (onNavigate) {
                             onNavigate();
                           }
-                          // Modern 2025 approach: Force hard navigation with window.location
-                          // This ensures complete page refresh and bypasses any state issues
-                          window.location.href = "/";
+                          // Add a small delay to ensure Clerk metadata updates propagate
+                          // This prevents the middleware from redirecting back to onboarding
+                          setTimeout(() => {
+                            // Force hard navigation with window.location
+                            // This ensures complete page refresh and bypasses any state issues
+                            window.location.href = "/";
+                          }, 1500); // 1.5 second delay for Clerk to update
                         } else {
                           console.error("Failed to complete onboarding");
                           toast.error("Failed to complete setup. Please try again.");
@@ -1255,9 +1259,13 @@ export function PDFGenerationDialog({
                             if (onNavigate) {
                               onNavigate();
                             }
-                            // Modern 2025 approach: Force hard navigation with window.location
-                            // This ensures complete page refresh and bypasses any state issues
-                            window.location.href = "/";
+                            // Add a small delay to ensure Clerk metadata updates propagate
+                            // This prevents the middleware from redirecting back to onboarding
+                            setTimeout(() => {
+                              // Force hard navigation with window.location
+                              // This ensures complete page refresh and bypasses any state issues
+                              window.location.href = "/";
+                            }, 1500); // 1.5 second delay for Clerk to update
                           } else {
                             console.error("Failed to complete onboarding (desktop)");
                             toast.error("Failed to complete setup. Please try again.");
