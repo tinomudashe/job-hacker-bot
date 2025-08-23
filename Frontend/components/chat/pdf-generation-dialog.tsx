@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/lib/toast";
-import { useAuth } from "@clerk/nextjs";
+import { useAuth, useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import {
   Award,
@@ -227,6 +227,7 @@ export function PDFGenerationDialog({
   }, [skills, skillsArray.length]);
 
   const { getToken } = useAuth();
+  const { user } = useUser();
 
   // Fetch user data when dialog opens
   React.useEffect(() => {
@@ -1137,20 +1138,32 @@ export function PDFGenerationDialog({
                         });
                         
                         if (response.ok) {
-                          console.log("Onboarding completed, navigating to chat");
+                          console.log("Onboarding completed, forcing token refresh");
                           // Show success message before navigation
                           toast.success("Setup complete! Redirecting to chat...");
                           // Call onNavigate callback if provided (for hiding welcome screen)
                           if (onNavigate) {
                             onNavigate();
                           }
-                          // Add a small delay to ensure Clerk metadata updates propagate
-                          // This prevents the middleware from redirecting back to onboarding
+                          
+                          // Force token refresh to get updated metadata immediately
+                          // This is the 2025 way to ensure Clerk metadata is available
+                          try {
+                            if (user) {
+                              await user.reload();
+                              console.log("User reloaded, metadata should be updated");
+                            }
+                            // Also force token refresh with skipCache
+                            await getToken({ skipCache: true });
+                            console.log("Token refreshed with updated metadata");
+                          } catch (refreshError) {
+                            console.error("Error refreshing token:", refreshError);
+                          }
+                          
+                          // Small delay then navigate
                           setTimeout(() => {
-                            // Force hard navigation with window.location
-                            // This ensures complete page refresh and bypasses any state issues
                             window.location.href = "/";
-                          }, 1500); // 1.5 second delay for Clerk to update
+                          }, 500); // Reduced delay since we're forcing refresh
                         } else {
                           console.error("Failed to complete onboarding");
                           toast.error("Failed to complete setup. Please try again.");
@@ -1254,18 +1267,32 @@ export function PDFGenerationDialog({
                           });
                           
                           if (response.ok) {
-                            console.log("Onboarding completed, navigating to chat (desktop)");
+                            console.log("Onboarding completed, forcing token refresh (desktop)");
+                            // Show success message before navigation
+                            toast.success("Setup complete! Redirecting to chat...");
                             // Call onNavigate callback if provided (for hiding welcome screen)
                             if (onNavigate) {
                               onNavigate();
                             }
-                            // Add a small delay to ensure Clerk metadata updates propagate
-                            // This prevents the middleware from redirecting back to onboarding
+                            
+                            // Force token refresh to get updated metadata immediately
+                            // This is the 2025 way to ensure Clerk metadata is available
+                            try {
+                              if (user) {
+                                await user.reload();
+                                console.log("User reloaded, metadata should be updated (desktop)");
+                              }
+                              // Also force token refresh with skipCache
+                              await getToken({ skipCache: true });
+                              console.log("Token refreshed with updated metadata (desktop)");
+                            } catch (refreshError) {
+                              console.error("Error refreshing token (desktop):", refreshError);
+                            }
+                            
+                            // Small delay then navigate
                             setTimeout(() => {
-                              // Force hard navigation with window.location
-                              // This ensures complete page refresh and bypasses any state issues
                               window.location.href = "/";
-                            }, 1500); // 1.5 second delay for Clerk to update
+                            }, 500); // Reduced delay since we're forcing refresh
                           } else {
                             console.error("Failed to complete onboarding (desktop)");
                             toast.error("Failed to complete setup. Please try again.");
