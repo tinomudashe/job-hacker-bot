@@ -185,7 +185,7 @@ export default function OnboardingPage() {
         });
         
         // Metadata is updated server-side, just redirect
-        toast.success("Welcome to Job Hacker Bot! Let's find your dream job!");
+        toast.success("Welcome to Job Hacker Bot! Let's find your dream job");
         
         // Small delay to ensure metadata propagates
         setTimeout(() => {
@@ -208,15 +208,15 @@ export default function OnboardingPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-2xl bg-background/60 backdrop-blur-xl backdrop-saturate-150 border-white/8 shadow-2xl">
+      <Card className="w-full max-w-2xl bg-background/60 backdrop-blur-xl backdrop-saturate-150 border border-white/8 shadow-2xl rounded-2xl">
         <CardHeader className="text-center space-y-2 pb-8">
           <div className="flex justify-center mb-4">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg">
-              <FileText className="w-8 h-8 text-white" />
+            <div className="w-16 h-16 rounded-2xl bg-blue-500/20 border border-blue-400/40 flex items-center justify-center shadow-lg">
+              <FileText className="w-8 h-8 text-blue-600 dark:text-blue-400" />
             </div>
           </div>
-          <CardTitle className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-            Welcome to Job Hacker Bot!
+          <CardTitle className="text-3xl font-bold">
+            Welcome to Job Hacker Bot
           </CardTitle>
           <CardDescription className="text-base text-muted-foreground">
             Let's set up your profile to personalize your job search experience
@@ -228,8 +228,8 @@ export default function OnboardingPage() {
               <div
                 className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-all duration-200 ${
                   dragActive 
-                    ? "border-primary bg-primary/10 scale-[1.02]" 
-                    : "border-muted-foreground/20 hover:border-primary/50 bg-muted/30"
+                    ? "border-primary bg-primary/5" 
+                    : "border-muted-foreground/25 hover:border-primary/50"
                 }`}
                 onDragEnter={handleDrag}
                 onDragLeave={handleDrag}
@@ -271,7 +271,7 @@ export default function OnboardingPage() {
                       </div>
                       <Button
                         onClick={() => document.getElementById("cv-upload")?.click()}
-                        className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg"
+                        variant="default"
                       >
                         <FileUp className="w-4 h-4 mr-2" />
                         Choose File
