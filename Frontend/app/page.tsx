@@ -55,6 +55,17 @@ export default function Home() {
       // Clean the URL
       window.history.replaceState(null, "", window.location.pathname);
     }
+    
+    // Check if we just completed onboarding
+    const justCompletedOnboarding = localStorage.getItem('onboarding_just_completed');
+    if (justCompletedOnboarding === 'true') {
+      console.log("Just completed onboarding, clearing flag");
+      localStorage.removeItem('onboarding_just_completed');
+      // Show success message
+      toast.success("Welcome to Job Hacker Bot!", {
+        description: "Your profile has been set up successfully.",
+      });
+    }
   }, [fetchSubscription]);
 
 

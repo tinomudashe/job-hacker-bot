@@ -1146,6 +1146,11 @@ export function PDFGenerationDialog({
                             onNavigate();
                           }
                           
+                          // Set a flag in localStorage to bypass onboarding check temporarily
+                          localStorage.setItem('onboarding_just_completed', 'true');
+                          // Also set a cookie that middleware can check
+                          document.cookie = "onboarding_completed_temp=true; path=/; max-age=60";
+                          
                           // Force token refresh to get updated metadata immediately
                           // This is the 2025 way to ensure Clerk metadata is available
                           try {
@@ -1160,10 +1165,8 @@ export function PDFGenerationDialog({
                             console.error("Error refreshing token:", refreshError);
                           }
                           
-                          // Small delay then navigate
-                          setTimeout(() => {
-                            window.location.href = "/";
-                          }, 500); // Reduced delay since we're forcing refresh
+                          // Navigate immediately
+                          window.location.href = "/";
                         } else {
                           console.error("Failed to complete onboarding");
                           toast.error("Failed to complete setup. Please try again.");
@@ -1275,6 +1278,11 @@ export function PDFGenerationDialog({
                               onNavigate();
                             }
                             
+                            // Set a flag in localStorage to bypass onboarding check temporarily
+                            localStorage.setItem('onboarding_just_completed', 'true');
+                            // Also set a cookie that middleware can check
+                            document.cookie = "onboarding_completed_temp=true; path=/; max-age=60";
+                            
                             // Force token refresh to get updated metadata immediately
                             // This is the 2025 way to ensure Clerk metadata is available
                             try {
@@ -1289,10 +1297,8 @@ export function PDFGenerationDialog({
                               console.error("Error refreshing token (desktop):", refreshError);
                             }
                             
-                            // Small delay then navigate
-                            setTimeout(() => {
-                              window.location.href = "/";
-                            }, 500); // Reduced delay since we're forcing refresh
+                            // Navigate immediately
+                            window.location.href = "/";
                           } else {
                             console.error("Failed to complete onboarding (desktop)");
                             toast.error("Failed to complete setup. Please try again.");
