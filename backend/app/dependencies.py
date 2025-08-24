@@ -94,7 +94,7 @@ async def get_current_user(
         auth_token = extract_token_from_request(request, token)
         
         if not auth_token:
-            logger.warning("No authentication token found")
+            logger.warning(f"No authentication token found. Headers: {list(request.headers.keys())}, Cookies: {list(request.cookies.keys())}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Not authenticated",

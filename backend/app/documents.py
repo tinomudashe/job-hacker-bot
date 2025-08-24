@@ -398,6 +398,8 @@ async def upload_cv_with_extraction(
     Simplified CV upload without enhanced memory features to avoid greenlet errors
     """
     
+    logger.info(f"CV upload request received for user: {db_user.id if db_user else 'No user authenticated'}")
+    
     try:
         # Save file
         doc_id = str(uuid.uuid4())

@@ -61,6 +61,7 @@ async def verify_token(token: str) -> ClerkUser:
     """
     # Validate token format first
     if not token or not isinstance(token, str):
+        logger.error("Token validation failed: Token is None or not a string")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token format",
@@ -69,7 +70,7 @@ async def verify_token(token: str) -> ClerkUser:
     
     # Check if token has the correct number of segments (header.payload.signature)
     if token.count('.') != 2:
-        logger.error(f"Invalid token format - wrong number of segments: {token[:20]}...")
+        logger.error(f"Invalid token format - wrong number of segments: {token[:20]}... (segments: {token.count('.')})")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token format",
