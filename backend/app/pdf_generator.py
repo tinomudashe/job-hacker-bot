@@ -48,6 +48,107 @@ class PDFGenerationRequest(BaseModel):
 
 # Professional CSS styles for different themes
 STYLES = {
+    "ats": """
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            line-height: 1.5;
+            color: #000000;
+            margin: 0;
+            padding: 30px;
+            background: white;
+            font-size: 11pt;
+        }
+        
+        .header {
+            margin-bottom: 20px;
+            border-bottom: 2px solid #000000;
+            padding-bottom: 10px;
+        }
+        
+        .header h1 {
+            margin: 0 0 5px 0;
+            font-size: 18pt;
+            font-weight: bold;
+            color: #000000;
+            text-transform: uppercase;
+        }
+        
+        .contact-info {
+            font-size: 10pt;
+            margin: 5px 0;
+            color: #000000;
+        }
+        
+        .section {
+            margin-bottom: 20px;
+        }
+        
+        .section h2 {
+            font-size: 12pt;
+            font-weight: bold;
+            color: #000000;
+            margin: 15px 0 10px 0;
+            text-transform: uppercase;
+            border-bottom: 1px solid #000000;
+            padding-bottom: 3px;
+        }
+        
+        .section-content {
+            margin-left: 0;
+        }
+        
+        .experience-item, .education-item, .project-item {
+            margin-bottom: 15px;
+        }
+        
+        .item-header {
+            margin-bottom: 5px;
+        }
+        
+        .job-title, .degree-name {
+            font-weight: bold;
+            font-size: 11pt;
+            margin: 0;
+        }
+        
+        .company-name, .institution-name {
+            font-style: italic;
+            margin: 0;
+        }
+        
+        .dates {
+            font-size: 10pt;
+            margin: 0;
+        }
+        
+        .description {
+            margin: 5px 0;
+        }
+        
+        ul {
+            margin: 5px 0;
+            padding-left: 20px;
+        }
+        
+        li {
+            margin-bottom: 3px;
+        }
+        
+        .skills-list {
+            margin: 0;
+            padding: 0;
+        }
+        
+        p {
+            margin: 5px 0;
+        }
+        
+        /* No colors, no graphics, simple formatting for ATS */
+        a {
+            color: #000000;
+            text-decoration: none;
+        }
+    """,
     "modern": """
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         

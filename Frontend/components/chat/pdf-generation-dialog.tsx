@@ -38,12 +38,48 @@ interface PDFGenerationDialogProps {
   onNavigate?: () => void;
 }
 
-// Enhanced style options with better colors
+// Professional resume template styles based on industry standards
 const PDF_STYLES = [
   {
-    key: "modern",
-    name: "Modern",
-    description: "Clean design with blue accents",
+    key: "ats-chronological",
+    name: "ATS Chronological",
+    description: "Standard reverse-chronological format optimized for Applicant Tracking Systems",
+    colors: {
+      primary: "#000000",
+      secondary: "#333333",
+      accent: "#000000",
+      background: "#ffffff",
+      text: "#000000",
+    },
+  },
+  {
+    key: "harvard",
+    name: "Harvard Format",
+    description: "Academic-focused template with education prominently featured",
+    colors: {
+      primary: "#8B0000",  // Harvard Crimson
+      secondary: "#2C2C2C",
+      accent: "#8B0000",
+      background: "#ffffff",
+      text: "#1a1a1a",
+    },
+  },
+  {
+    key: "executive",
+    name: "Executive Professional",
+    description: "Sophisticated design for senior-level positions and leadership roles",
+    colors: {
+      primary: "#1e3a5f",  // Deep professional blue
+      secondary: "#2d4a6b",
+      accent: "#4a6fa5",
+      background: "#ffffff",
+      text: "#0f172a",
+    },
+  },
+  {
+    key: "combination",
+    name: "Combination Hybrid",
+    description: "Balanced format highlighting both skills and experience",
     colors: {
       primary: "#2563eb",
       secondary: "#1e40af",
@@ -53,27 +89,39 @@ const PDF_STYLES = [
     },
   },
   {
-    key: "professional",
-    name: "Professional",
-    description: "Traditional business layout",
+    key: "functional",
+    name: "Functional Skills-Based",
+    description: "Emphasizes skills and competencies over chronological work history",
     colors: {
-      primary: "#374151",
-      secondary: "#1f2937",
-      accent: "#6b7280",
+      primary: "#059669",
+      secondary: "#047857",
+      accent: "#10b981",
       background: "#ffffff",
-      text: "#111827",
+      text: "#064e3b",
     },
   },
   {
-    key: "creative",
-    name: "Creative",
-    description: "Modern layout with purple accents",
+    key: "stanford",
+    name: "Stanford Modern",
+    description: "Clean, innovative design preferred by tech and startup companies",
     colors: {
-      primary: "#7c3aed",
-      secondary: "#5b21b6",
-      accent: "#a855f7",
+      primary: "#8C1515",  // Stanford Cardinal
+      secondary: "#2e2d29",
+      accent: "#007c92",
       background: "#ffffff",
-      text: "#1f2937",
+      text: "#2e2d29",
+    },
+  },
+  {
+    key: "investment-banking",
+    name: "Investment Banking",
+    description: "Conservative format for finance, consulting, and traditional corporate roles",
+    colors: {
+      primary: "#000000",
+      secondary: "#1a1a1a",
+      accent: "#333333",
+      background: "#ffffff",
+      text: "#000000",
     },
   },
 ];
@@ -104,7 +152,7 @@ export function PDFGenerationDialog({
   const isOnboarding = contentId && contentId.startsWith('onboarding-');
   const router = useRouter();
   
-  const [selectedStyle, setSelectedStyle] = React.useState("modern");
+  const [selectedStyle, setSelectedStyle] = React.useState("ats-chronological");
   const [editedContent, setEditedContent] = React.useState(
     cleanMarkdownFormatting(initialContent)
   );
