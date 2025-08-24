@@ -596,7 +596,7 @@ export function PDFGenerationDialog({
   React.useEffect(() => {
     if (initialContent) {
       // Check if this is from onboarding with structured data
-      const onboardingDataMatch = initialContent.match(/\[ONBOARDING_RESUME_DATA\](.*?)\[\/ONBOARDING_RESUME_DATA\]/s);
+      const onboardingDataMatch = initialContent.match(/\[ONBOARDING_RESUME_DATA\]([\s\S]*?)\[\/ONBOARDING_RESUME_DATA\]/);
       
       if (onboardingDataMatch) {
         try {
