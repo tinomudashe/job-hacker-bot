@@ -20,24 +20,41 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Add onboarding_completed and onboarding_completed_at columns to users table."""
-    # Add onboarding_completed column
-    op.add_column('users', 
-        sa.Column('onboarding_completed', sa.Boolean(), nullable=False, server_default='false')
-    )
+    # Check if columns already exist
+    conn = op.get_bind()
+    result = conn.execute(sa.text("""
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'users' 
+        AND column_name IN ('onboarding_completed', 'onboarding_completed_at')
+    """))
+    existing_columns = [row[0] for row in result]
     
-    # Add onboarding_completed_at column
-    op.add_column('users',
-        sa.Column('onboarding_completed_at', sa.DateTime(timezone=True), nullable=True)
-    )
+    # Add onboarding_completed column if it doesn't exist
+    if 'onboarding_completed' not in existing_columns:
+        op.add_column('users', 
+            sa.Column('onboarding_completed', sa.Boolean(), nullable=False, server_default='false')
+        )
+    
+    # Add onboarding_completed_at column if it doesn't exist
+    if 'onboarding_completed_at' not in existing_columns:
+        op.add_column('users',
+            sa.Column('onboarding_completed_at', sa.DateTime(timezone=True), nullable=True)
+        )
     
     # Update existing users who have onboarding completed in preferences
-    op.execute("""
-        UPDATE users 
-        SET onboarding_completed = TRUE,
-            onboarding_completed_at = NOW()
-        WHERE preferences LIKE '%"onboarding_completed": true%'
-           OR preferences LIKE '%"onboarding_completed":true%'
-    """)
+    # Only if we added at least one column
+    if len(existing_columns) < 2:
+        op.execute(sa.text("""
+            UPDATE users 
+            SET onboarding_completed = TRUE,
+                onboarding_completed_at = NOW()
+            WHERE CAST(preferences AS TEXT) LIKE :pattern1
+               OR CAST(preferences AS TEXT) LIKE :pattern2
+        """).bindparams(
+            pattern1='%"onboarding_completed": true%',
+            pattern2='%"onboarding_completed":true%'
+        ))
 
 
 def downgrade() -> None:
