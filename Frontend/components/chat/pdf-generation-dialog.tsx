@@ -693,7 +693,7 @@ export function PDFGenerationDialog({
           }
           
           // Clean the content to remove the marker
-          const cleanContent = initialContent.replace(/\[ONBOARDING_RESUME_DATA\].*?\[\/ONBOARDING_RESUME_DATA\]\n\n/s, "");
+          const cleanContent = initialContent.replace(/\[ONBOARDING_RESUME_DATA\][\s\S]*?\[\/ONBOARDING_RESUME_DATA\]\n\n/, "");
           setEditedContent(cleanMarkdownFormatting(cleanContent));
         } catch (error) {
           console.error("Error parsing onboarding data:", error);
