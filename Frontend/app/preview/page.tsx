@@ -164,13 +164,20 @@ const PrintStyles = () => (
   <style jsx global>{`
     @media print {
       @page {
-        /* FIX: Use A3 page size as it works better with default browser margins. */
+        /* Use A3 size as it works better for the user's setup */
         size: A3;
+        margin: 0;
       }
 
       * {
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
+      }
+
+      body {
+        background: white !important;
+        margin: 0;
+        padding: 0;
       }
 
       body * {
@@ -189,8 +196,13 @@ const PrintStyles = () => (
         width: 100%;
         margin: 0;
         padding: 0;
-        box-shadow: none;
-        border: none;
+        box-shadow: none !important;
+        border: none !important;
+        background: white !important;
+      }
+
+      .resume-light-mode {
+        background: white !important;
       }
 
       /* Page break control - these are still good practice */
@@ -405,9 +417,18 @@ export default function PreviewPage() {
         setError("Authentication token not available.");
         return;
       }
+      // Add timestamp to prevent caching
+      const timestamp = Date.now();
       const response = await fetch(
-        getApiUrl("/api/documents/cover-letters/latest"),
-        { headers: { Authorization: `Bearer ${token}` } }
+        getApiUrl(`/api/documents/cover-letters/latest?t=${timestamp}`),
+        { 
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+          },
+          cache: 'no-store',
+        }
       );
       if (!response.ok) {
         if (response.status === 404) {
@@ -439,9 +460,18 @@ export default function PreviewPage() {
         setError("Authentication token not available.");
         return;
       }
+      // Add timestamp to prevent caching
+      const timestamp = Date.now();
       const response = await fetch(
-        getApiUrl(`/api/documents/cover-letters/${contentId}`),
-        { headers: { Authorization: `Bearer ${token}` } }
+        getApiUrl(`/api/documents/cover-letters/${contentId}?t=${timestamp}`),
+        { 
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+          },
+          cache: 'no-store',
+        }
       );
       if (!response.ok) {
         if (response.status === 404) {
@@ -634,7 +664,7 @@ export default function PreviewPage() {
     coverLetterTemplates[currentStyle] || coverLetterTemplates.modern;
 
   return (
-    <div className="flex flex-col min-h-screen bg-background print:bg-white">
+    <div className="flex flex-col min-h-screen bg-background print:!bg-white">
       <PrintStyles />
       <div className="fixed top-0 left-0 right-0 z-50 bg-transparent p-2 sm:p-4 md:p-6 print:hidden">
         <div className="max-w-4xl mx-auto">
@@ -801,10 +831,10 @@ export default function PreviewPage() {
               </Badge>
               <Button
                 onClick={handleDownload}
-                className="h-9 lg:h-10 px-3 lg:px-4 rounded-xl bg-blue-600 hover:bg-blue-700 transition-all duration-200 hover:scale-105"
+                className="h-9 lg:h-10 px-3 lg:px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105"
               >
-                <Download className="h-4 w-4 lg:mr-2" />
-                <span className="hidden lg:inline">Download PDF</span>
+                <Download className="h-4 w-4 lg:mr-2 text-white" />
+                <span className="hidden lg:inline text-white">Download PDF</span>
               </Button>
               <div className="h-6 w-px bg-border/50 mx-1" />
               <ThemeToggle />
@@ -825,10 +855,10 @@ export default function PreviewPage() {
               <Button
                 onClick={handleDownload}
                 size="sm"
-                className="h-5 px-3 sm:h-5 sm:px-2 rounded-lg sm:rounded-xl bg-blue-600 hover:bg-blue-700"
+                className="h-5 px-3 sm:h-5 sm:px-2 rounded-lg sm:rounded-xl bg-blue-600 hover:bg-blue-700 text-white"
               >
-                <Download className="h-4 w-4 mr-1" />
-                <span className="text-xs">PDF</span>
+                <Download className="h-4 w-4 mr-1 text-white" />
+                <span className="text-xs text-white">PDF</span>
               </Button>
               <ThemeToggle />
               <SignedIn>
@@ -846,21 +876,24 @@ export default function PreviewPage() {
             className={cn(
               "rounded-2xl sm:rounded-3xl overflow-hidden",
               "bg-white/95 text-foreground border border-slate-200/70 shadow-lg shadow-slate-900/8",
-              "dark:bg-black/90 dark:border-gray-600/50 dark:shadow-black/15"
+              "dark:bg-black/90 dark:border-gray-600/50 dark:shadow-black/15",
+              "print:!bg-transparent print:!border-none print:!shadow-none print:rounded-none"
             )}
           >
-            {previewData.content_type === "cover_letter" ? (
-              <SelectedCoverLetterTemplate
-                data={previewData}
-                hasMounted={hasMounted}
-              />
-            ) : previewData.content_type === "resume" ? (
-              <SelectedResumeTemplate data={previewData} />
-            ) : (
-              <div className="p-8">
-                <p>Unsupported document type.</p>
-              </div>
-            )}
+            <div className="resume-light-mode !bg-white dark:!bg-white print:!bg-white print:!border-none [&_*]:!text-gray-900 dark:[&_*]:!text-gray-900 [&_h1]:!text-gray-900 dark:[&_h1]:!text-gray-900 [&_h2]:!text-gray-600 dark:[&_h2]:!text-gray-600 [&_h3]:!text-gray-800 dark:[&_h3]:!text-gray-800 [&_h4]:!text-gray-800 dark:[&_h4]:!text-gray-800 [&_h5]:!text-gray-700 dark:[&_h5]:!text-gray-700 [&_h6]:!text-gray-700 dark:[&_h6]:!text-gray-700 [&_p]:!text-gray-700 dark:[&_p]:!text-gray-700 [&_span]:!text-gray-700 dark:[&_span]:!text-gray-700 [&_li]:!text-gray-600 dark:[&_li]:!text-gray-600 [&_a]:!text-blue-500 dark:[&_a]:!text-blue-500 hover:[&_a]:!text-blue-600 dark:hover:[&_a]:!text-blue-600 [&_hr]:!border-gray-300 dark:[&_hr]:!border-gray-300 [&_.border-gray-300]:!border-gray-300 dark:[&_.border-gray-300]:!border-gray-300 [&_.border-gray-600]:!border-gray-300 dark:[&_.border-gray-600]:!border-gray-300 [&_.border-gray-700]:!border-gray-300 dark:[&_.border-gray-700]:!border-gray-300 [&_.bg-gray-800]:!bg-gray-100 dark:[&_.bg-gray-800]:!bg-gray-100 [&_.bg-gray-100]:!bg-gray-100 dark:[&_.bg-gray-100]:!bg-gray-100 [&_.text-gray-400]:!text-gray-500 dark:[&_.text-gray-400]:!text-gray-500 [&_.text-gray-500]:!text-gray-500 dark:[&_.text-gray-500]:!text-gray-500 [&_.text-gray-600]:!text-gray-600 dark:[&_.text-gray-600]:!text-gray-600 [&_.text-gray-300]:!text-gray-700 dark:[&_.text-gray-300]:!text-gray-700 [&_.text-gray-100]:!text-gray-900 dark:[&_.text-gray-100]:!text-gray-900 [&_.text-gray-200]:!text-gray-800 dark:[&_.text-gray-200]:!text-gray-800 [&_.text-white]:!text-gray-900 dark:[&_.text-white]:!text-gray-900 [&_.text-blue-400]:!text-blue-500 dark:[&_.text-blue-400]:!text-blue-500 [&_.text-blue-600]:!text-blue-500 dark:[&_.text-blue-600]:!text-blue-500 [&_.text-blue-700]:!text-blue-600 dark:[&_.text-blue-700]:!text-blue-600 [&_.bg-blue-600]:!bg-blue-100 dark:[&_.bg-blue-600]:!bg-blue-100 [&_.bg-blue-700]:!bg-blue-100 dark:[&_.bg-blue-700]:!bg-blue-100">
+              {previewData.content_type === "cover_letter" ? (
+                <SelectedCoverLetterTemplate
+                  data={previewData}
+                  hasMounted={hasMounted}
+                />
+              ) : previewData.content_type === "resume" ? (
+                <SelectedResumeTemplate data={previewData} />
+              ) : (
+                <div className="p-8">
+                  <p>Unsupported document type.</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </main>
