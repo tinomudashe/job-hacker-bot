@@ -42,13 +42,15 @@ export default clerkMiddleware((auth, req) => {
   const cookies = req.headers.get('cookie') || ''
   const hasTemporaryOnboardingFlag = cookies.includes('onboarding_completed_temp=true')
 
-  // Log for debugging
+  // Enhanced debugging
   console.log('Middleware check:', {
     pathname,
     userId,
     onboardingCompleted,
     publicMetadata,
-    hasTemporaryOnboardingFlag
+    hasTemporaryOnboardingFlag,
+    sessionClaims: JSON.stringify(sessionClaims?.publicMetadata),
+    rawMetadata: sessionClaims?.publicMetadata
   })
 
   // Special handling for root path - redirect to onboarding if not completed

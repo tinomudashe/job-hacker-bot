@@ -175,6 +175,39 @@ async def get_primary_email_address(user_id: str) -> Optional[str]:
         return None
 
 
+async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Gets a user's information from Clerk.
+    
+    Args:
+        user_id: The Clerk user ID
+        
+    Returns:
+        User info dict if successful, None otherwise
+    """
+    if not CLERK_SECRET_KEY or not CLERK_API_URL:
+        logger.error("Clerk Secret Key or API URL is not configured. Cannot get user info.")
+        return None
+        
+    headers = {
+        "Authorization": f"Bearer {CLERK_SECRET_KEY}",
+        "Content-Type": "application/json"
+    }
+    url = f"{CLERK_API_URL}/v1/users/{user_id}"
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Failed to get user info for {user_id}: {e.response.status_code} - {e.response.text}")
+        return None
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while getting user info: {e}", exc_info=True)
+        return None
+
+
 async def update_user_metadata(user_id: str, public_metadata: Dict[str, Any]) -> bool:
     """
     Updates a user's public metadata in Clerk.

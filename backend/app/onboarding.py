@@ -66,13 +66,23 @@ async def complete_onboarding(
         # Try to update Clerk metadata, but don't fail if it doesn't work
         clerk_metadata_updated = False
         try:
+            # Get existing metadata first to preserve other fields
+            from app.clerk import get_user_info
+            existing_user = await get_user_info(current_user.external_id)
+            existing_metadata = existing_user.get("public_metadata", {}) if existing_user else {}
+            
+            # Merge with new metadata
+            updated_metadata = {
+                **existing_metadata,
+                "onboardingCompleted": request.completed,
+                "cvUploaded": request.cv_uploaded,
+                "onboardingCompletedAt": datetime.utcnow().isoformat()
+            }
+            
             # Use external_id (Clerk user ID) instead of internal database ID
             clerk_metadata_updated = await update_user_metadata(
                 current_user.external_id,
-                {
-                    "onboardingCompleted": request.completed,
-                    "cvUploaded": request.cv_uploaded
-                }
+                updated_metadata
             )
             if clerk_metadata_updated:
                 logger.info(f"Clerk metadata updated successfully for user {current_user.id}")
@@ -117,6 +127,27 @@ async def get_onboarding_status(
         
         onboarding_completed = preferences.get("onboarding_completed", False)
         cv_uploaded = preferences.get("cv_uploaded_at") is not None
+        
+        # Also check Clerk metadata as fallback
+        if not onboarding_completed:
+            try:
+                from app.clerk import get_user_info
+                clerk_user = await get_user_info(current_user.external_id)
+                if clerk_user and clerk_user.get("public_metadata"):
+                    clerk_onboarding = clerk_user["public_metadata"].get("onboardingCompleted", False)
+                    if clerk_onboarding:
+                        onboarding_completed = True
+                        # Update local database to sync
+                        preferences["onboarding_completed"] = True
+                        await db.execute(
+                            update(User)
+                            .where(User.id == current_user.id)
+                            .values(preferences=json.dumps(preferences))
+                        )
+                        await db.commit()
+                        logger.info(f"Synced onboarding status from Clerk for user {current_user.id}")
+            except Exception as e:
+                logger.warning(f"Could not check Clerk metadata: {e}")
         
         return {
             "onboarding_completed": onboarding_completed,
