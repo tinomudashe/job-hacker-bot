@@ -53,11 +53,15 @@ async def complete_onboarding(
         if request.additional_data:
             preferences.update(request.additional_data)
         
-        # Save to database - ensure preferences is JSON serialized
+        # Save to database - update both preferences and onboarding_completed field
         await db.execute(
             update(User)
             .where(User.id == current_user.id)
-            .values(preferences=json.dumps(preferences))
+            .values(
+                preferences=json.dumps(preferences),
+                onboarding_completed=request.completed,
+                onboarding_completed_at=datetime.utcnow() if request.completed else None
+            )
         )
         await db.commit()
         
@@ -116,16 +120,24 @@ async def get_onboarding_status(
     """
     try:
         import json
-        # Parse preferences if it's a string
-        if current_user.preferences:
-            if isinstance(current_user.preferences, str):
-                preferences = json.loads(current_user.preferences)
+        
+        # First check the database field
+        onboarding_completed = current_user.onboarding_completed
+        
+        # Fallback to preferences if database field is False
+        if not onboarding_completed:
+            # Parse preferences if it's a string
+            if current_user.preferences:
+                if isinstance(current_user.preferences, str):
+                    preferences = json.loads(current_user.preferences)
+                else:
+                    preferences = current_user.preferences
             else:
-                preferences = current_user.preferences
+                preferences = {}
+            
+            onboarding_completed = preferences.get("onboarding_completed", False)
         else:
             preferences = {}
-        
-        onboarding_completed = preferences.get("onboarding_completed", False)
         cv_uploaded = preferences.get("cv_uploaded_at") is not None
         
         # Also check Clerk metadata as fallback

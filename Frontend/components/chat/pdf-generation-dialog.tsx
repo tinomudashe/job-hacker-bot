@@ -1148,8 +1148,9 @@ export function PDFGenerationDialog({
                           
                           // Set a flag in localStorage to bypass onboarding check temporarily
                           localStorage.setItem('onboarding_just_completed', 'true');
-                          // Also set a cookie that middleware can check
+                          // Set cookies that middleware can check
                           document.cookie = "onboarding_completed_temp=true; path=/; max-age=60";
+                          document.cookie = "onboarding_verified=true; path=/; max-age=3600";
                           
                           // Force token refresh to get updated metadata immediately
                           // This is the 2025 way to ensure Clerk metadata is available
@@ -1280,8 +1281,9 @@ export function PDFGenerationDialog({
                             
                             // Set a flag in localStorage to bypass onboarding check temporarily
                             localStorage.setItem('onboarding_just_completed', 'true');
-                            // Also set a cookie that middleware can check
+                            // Set cookies that middleware can check
                             document.cookie = "onboarding_completed_temp=true; path=/; max-age=60";
+                            document.cookie = "onboarding_verified=true; path=/; max-age=3600";
                             
                             // Force token refresh to get updated metadata immediately
                             // This is the 2025 way to ensure Clerk metadata is available

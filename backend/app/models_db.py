@@ -64,6 +64,8 @@ class User(Base):
     preferences = Column(Text)
     faiss_index_path = Column(String, nullable=True)
     subscribed_to_marketing = Column(Boolean, default=True, nullable=False)
+    onboarding_completed = Column(Boolean, default=False, nullable=False)
+    onboarding_completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     applications = relationship("Application", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
