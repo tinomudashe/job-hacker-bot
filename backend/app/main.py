@@ -34,18 +34,25 @@ from app.marketing import router as marketing_router
 from app.admin import router as admin_router
 from app.email_api import router as email_router
 from app.onboarding import router as onboarding_router
+from app.chrome_extension_api import router as chrome_extension_router
+from app.extension_tokens import router as extension_tokens_router
 
 app = FastAPI()
 
 app_url = os.getenv("APP_URL", "https://jobhackerbot.com")
 # Configure CORS
 origins = [
-    app_url
+    app_url,
+    "https://www.jobhackerbot.com",  # Production with www
+    "https://jobhackerbot.com",      # Production without www  
+    "http://localhost:3000",         # Local development
+    "chrome-extension://*",          # Chrome extensions
 ]
 
+# For Chrome extensions, we need to allow all origins since the extension ID varies
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],  # Allow all origins for Chrome extension compatibility
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -80,6 +87,8 @@ app.include_router(marketing_router, tags=["marketing"])
 app.include_router(admin_router, tags=["admin"])
 app.include_router(email_router, tags=["email"])
 app.include_router(onboarding_router, prefix="/api", tags=["onboarding"])
+app.include_router(chrome_extension_router, tags=["chrome-extension"])
+app.include_router(extension_tokens_router, tags=["extension-tokens"])
 
 # Add validation error handler to see what's failing
 @app.exception_handler(RequestValidationError)
