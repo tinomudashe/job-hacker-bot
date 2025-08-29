@@ -198,12 +198,17 @@ export const useWebSocket = (
             console.log("📥 Receiving message during loading state:", aiMessageContent.substring(0, 50) + "...");
             setMessages((prev) => {
               const lastMessage = prev[prev.length - 1];
-              // Prevent duplicates by checking if the last message is identical.
+              // Prevent duplicates by checking if the last message is identical or if this content already exists
               const isDuplicate =
                 lastMessage &&
                 !lastMessage.isUser &&
                 lastMessage.content === aiMessageContent;
-              if (isDuplicate) {
+              
+              // Also check if this content exists anywhere in recent messages (edit case)
+              const isEditDuplicate = prev.some(msg => 
+                !msg.isUser && msg.content === aiMessageContent
+              );
+              if (isDuplicate || isEditDuplicate) {
                 console.log("🔁 Duplicate message detected, skipping");
                 return prev;
               }
@@ -529,7 +534,7 @@ export const useWebSocket = (
       const editedMessage = { ...messages[messageIndex], content: newContent };
       const subsequentCount = originalMessages.length - messageIndex - 1;
 
-      // Show preview immediately - ensure original message is replaced
+      // Show preview immediately
       const previewMessages = [...messagesToKeep, editedMessage];
       setMessages(previewMessages);
 
@@ -589,8 +594,10 @@ export const useWebSocket = (
           socketRef.current.readyState === WebSocket.OPEN
         ) {
           const messageData = {
+            type: "regenerate",
             content: newContent,
             page_id: currentPageIdRef.current,
+            message_id: id
           };
 
           console.log(

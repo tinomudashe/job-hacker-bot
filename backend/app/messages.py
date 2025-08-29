@@ -247,7 +247,10 @@ async def update_message(
     Update a specific message.
     """
     result = await db.execute(
-        select(ChatMessage).where(ChatMessage.id == message_id)
+        select(ChatMessage).where(
+            ChatMessage.id == message_id,
+            ChatMessage.deleted_at.is_(None)
+        )
     )
     message = result.scalar_one_or_none()
     
