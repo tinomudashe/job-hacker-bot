@@ -280,7 +280,7 @@ export function ExtensionTokensManager() {
 
       {/* Create Token Dialog */}
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent>
+        <DialogContent className="w-80 max-w-80">
           <DialogHeader>
             <DialogTitle>Generate New Access Token</DialogTitle>
             <DialogDescription>
