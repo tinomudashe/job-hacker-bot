@@ -529,7 +529,7 @@ export const useWebSocket = (
       const editedMessage = { ...messages[messageIndex], content: newContent };
       const subsequentCount = originalMessages.length - messageIndex - 1;
 
-      // Show preview immediately
+      // Show preview immediately - ensure original message is replaced
       const previewMessages = [...messagesToKeep, editedMessage];
       setMessages(previewMessages);
 

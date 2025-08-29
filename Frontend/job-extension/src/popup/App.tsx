@@ -989,8 +989,8 @@ Read the text I provided above and extract the job details directly. Do not use 
       <div className="sticky bottom-0 z-20 mt-auto p-3">
         <div className="bg-white/85 backdrop-blur-2xl backdrop-saturate-150 rounded-xl shadow-lg shadow-gray-900/10 border border-gray-200/20 px-4 py-2.5">
           <p className="text-xs text-center text-gray-500 font-medium">
-            Ensure Job Hacker Bot is running at{' '}
-            <span className="text-blue-600">localhost:3000</span>
+            Please ensure you're signed in to your{' '}
+            <span className="text-blue-600">Job Hacker Bot account</span>
           </p>
         </div>
       </div>

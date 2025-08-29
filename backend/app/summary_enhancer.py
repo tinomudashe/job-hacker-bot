@@ -18,8 +18,8 @@ class SummaryEnhancer:
     def __init__(self):
         self.llm = ChatAnthropic(
             model="claude-3-7-sonnet-20250219",
-            temperature=0.7,
-            max_tokens=500
+            temperature=0.2,
+            max_tokens=150  # Reduced to force concise summaries
         )
     
     async def enhance_summary(
@@ -79,31 +79,31 @@ class SummaryEnhancer:
             - Company: {company_name}
             
             INSTRUCTIONS:
-            Create a powerful 3-4 sentence professional summary that:
+            Create a factual 3-4 sentence professional summary based ONLY on provided information:
             
-            1. **Opening Statement**: Start with a strong professional identity
-               - Example: "Results-driven [role] with X+ years..."
-               - Use active, confident language
+            1. **Opening Statement**: Start with their actual professional identity
+               - Example: "[Role] with X+ years of experience in [actual field]"
+               - Use only verifiable information from their background
             
-            2. **Core Expertise**: Highlight 2-3 areas of expertise
-               - Focus on skills most relevant to the target role
-               - Use industry-specific keywords
+            2. **Core Expertise**: List 2-3 areas they have actually worked in
+               - Only mention skills/areas from their real experience
+               - Use keywords that appear in their work history
             
-            3. **Value Proposition**: State what you bring to the table
-               - Quantify achievements where possible
-               - Show impact and results
+            3. **Professional Background**: Summarize their actual experience
+               - Reference their real education if relevant
+               - Mention industries they've actually worked in
+               - State capabilities demonstrated in past roles
             
-            4. **Career Goal** (if targeting specific role): 
-               - Mention interest in the specific role/company
-               - Show alignment with company needs
-            
-            REQUIREMENTS:
-            - Keep it between 60-100 words
-            - Use strong action words
-            - No generic phrases like "hardworking" or "team player"
-            - Include relevant keywords for ATS optimization
-            - Make every word count
-            - Write in third person without using pronouns
+            STRICT REQUIREMENTS:
+            - MAXIMUM 80 words - anything longer will be rejected
+            - Keep it exactly 2-3 sentences, no more
+            - Base EVERYTHING on their actual experience and education
+            - Do not invent achievements or capabilities
+            - Do not add metrics unless already provided
+            - Write in third person without pronouns
+            - Keep it universally applicable, not company-specific
+            - Focus on factual background, not aspirations
+            - If information is limited, keep the summary shorter rather than inventing details
             
             Generate ONLY the summary text, no additional commentary:"""
         )

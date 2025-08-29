@@ -167,6 +167,7 @@ class ResumeData(BaseModel):
     certifications: List[Certification] = Field(default_factory=list)
     languages: List[Language] = Field(default_factory=list)
     interests: List[str] = Field(default_factory=list)
+    job_title: Optional[str] = None  # Professional title for the resume
 
 # EDIT: This is the new, comprehensive request model for the save endpoint.
 class FullResumeUpdateRequest(BaseModel):
@@ -177,6 +178,7 @@ class FullResumeUpdateRequest(BaseModel):
     projects: Optional[List[Project]] = None
     certifications: Optional[List[Certification]] = None
     languages: Optional[List[Language]] = None
+    job_title: Optional[str] = None  # Professional title for the resume
 
 # --- API Endpoints ---
 
@@ -342,6 +344,10 @@ async def get_resume_data(
                 # Keep 'language' field for backend compatibility but also provide 'name'
                 # This ensures both frontend and backend can work with the data
 
+    # Include job_title from resume data if it exists
+    if resume and resume.data and 'job_title' in resume.data:
+        final_data['job_title'] = resume.data['job_title']
+    
     # Ensure the final object matches the ResumeData model structure
     return ResumeData(**final_data)
 

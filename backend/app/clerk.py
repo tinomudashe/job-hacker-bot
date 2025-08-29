@@ -145,6 +145,67 @@ async def get_clerk_user(user_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+async def verify_session_token(session_id: str) -> Optional[ClerkUser]:
+    """
+    Verifies a Clerk session ID and returns the user information.
+    Used when the extension passes a session ID from the main app.
+    """
+    if not CLERK_SECRET_KEY or not CLERK_API_URL:
+        logger.error("Clerk Secret Key or API URL is not configured.")
+        return None
+    
+    headers = {"Authorization": f"Bearer {CLERK_SECRET_KEY}"}
+    url = f"{CLERK_API_URL}/v1/sessions/{session_id}"
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            # Get session details
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            session_data = response.json()
+            
+            # Check if session is active
+            if session_data.get("status") != "active":
+                logger.warning(f"Session {session_id} is not active")
+                return None
+            
+            # Get the user ID from session
+            user_id = session_data.get("user_id")
+            if not user_id:
+                logger.error(f"No user_id found in session {session_id}")
+                return None
+            
+            # Get user details
+            user_data = await get_clerk_user(user_id)
+            if not user_data:
+                return None
+            
+            # Extract primary email
+            email = None
+            if user_data.get("email_addresses"):
+                for email_addr in user_data["email_addresses"]:
+                    if email_addr.get("id") == user_data.get("primary_email_address_id"):
+                        email = email_addr.get("email_address")
+                        break
+            
+            # Create ClerkUser object
+            return ClerkUser(
+                sub=user_id,
+                email=email,
+                first_name=user_data.get("first_name"),
+                last_name=user_data.get("last_name"),
+                picture=user_data.get("profile_image_url"),
+                public_metadata=user_data.get("public_metadata", {})
+            )
+            
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Failed to verify session {session_id}: {e.response.status_code} - {e.response.text}")
+        return None
+    except Exception as e:
+        logger.error(f"Error verifying session {session_id}: {e}", exc_info=True)
+        return None
+
+
 async def get_primary_email_address(user_id: str) -> Optional[str]:
     """
     Fetches a user's primary email address directly from the Clerk API.

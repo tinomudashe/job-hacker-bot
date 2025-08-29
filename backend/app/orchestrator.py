@@ -32,7 +32,6 @@ from langchain_core.messages import HumanMessage, AIMessage, BaseMessage, ToolMe
 # Existing imports
 from app.db import get_db, async_session_maker
 from app.models_db import User, ChatMessage, Resume, Document, Page
-from app.dependencies import get_current_active_user_ws
 from app.resume import ResumeData, PersonalInfo, fix_resume_data_structure
 from app.orchestrator_tools import create_all_tools
 from langchain_core.runnables import RunnablePassthrough
@@ -536,14 +535,184 @@ async def create_websocket_langgraph_app(user: User, db: AsyncSession):
 @router.websocket("/ws/orchestrator")
 async def orchestrator_websocket(
     websocket: WebSocket,
-    user: User = Depends(get_current_active_user_ws),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Enhanced WebSocket handler using LangGraph instead of AgentExecutor
     Preserves all existing functionality while adding reliability
+    Updated to 2025 best practices: Accept first, then authenticate
     """
+    log.info(f"WebSocket connection attempt from {websocket.client}")
+    
+    # Accept the WebSocket connection first (2025 pattern)
     await websocket.accept()
+    log.info("WebSocket connection accepted")
+    
+    # Now manually authenticate after accepting
+    try:
+        # Get token from query parameters
+        token = websocket.query_params.get("token")
+        
+        if not token:
+            await websocket.send_json({
+                "type": "error",
+                "message": "Authentication required - no token provided"
+            })
+            await websocket.close(code=1008)  # Policy violation
+            return
+        
+        # Import authentication functions
+        from app.dependencies import get_current_active_user_ws
+        from fastapi import Query
+        
+        # Manually validate the token (simulating what Depends would do)
+        try:
+            # Check if it's an extension token
+            if token.startswith("jhb_"):
+                from app.extension_tokens import hash_token, ExtensionToken
+                
+                token_hash = hash_token(token)
+                result = await db.execute(
+                    select(ExtensionToken).where(
+                        ExtensionToken.token_hash == token_hash,
+                        ExtensionToken.is_active == True
+                    )
+                )
+                ext_token = result.scalar_one_or_none()
+                
+                if not ext_token:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Invalid extension token"
+                    })
+                    await websocket.close(code=1008)
+                    return
+                
+                # Check expiration
+                if ext_token.expires_at and ext_token.expires_at < datetime.utcnow():
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Extension token has expired"
+                    })
+                    await websocket.close(code=1008)
+                    return
+                
+                # Update last used
+                ext_token.last_used = datetime.utcnow()
+                await db.commit()
+                
+                # Get the user
+                from app.models_db import User
+                result = await db.execute(select(User).where(User.external_id == ext_token.user_id))
+                user = result.scalar_one_or_none()
+                
+                if not user:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "User not found for extension token"
+                    })
+                    await websocket.close(code=1008)
+                    return
+            elif token.startswith("clerk_"):
+                # Handle Clerk session ID from extension
+                from app.clerk import verify_session_token, ClerkUser
+                
+                # Extract session ID from token
+                session_id = token.replace("clerk_", "")
+                
+                # Verify the session with Clerk
+                clerk_user: ClerkUser = await verify_session_token(session_id)
+                if not clerk_user:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Invalid or expired session"
+                    })
+                    await websocket.close(code=1008)
+                    return
+            else:
+                # First check if it's a session bridge token (created by our extension API)
+                try:
+                    import jwt as pyjwt
+                    import os
+                    
+                    # Try to decode as session bridge token
+                    decoded = pyjwt.decode(
+                        token,
+                        os.getenv("CLERK_SECRET_KEY", "fallback-secret"),
+                        algorithms=["HS256"]
+                    )
+                    
+                    # Check if it's a session bridge token
+                    if decoded.get("type") == "session_bridge":
+                        from app.clerk import ClerkUser
+                        clerk_user = ClerkUser(
+                            sub=decoded["userId"],
+                            email=decoded.get("email"),
+                            first_name=decoded.get("firstName"),
+                            last_name=decoded.get("lastName"),
+                            picture=decoded.get("imageUrl")
+                        )
+                        log.info(f"Authenticated with session bridge token for user {clerk_user.sub}")
+                    else:
+                        # Not a session bridge token, try regular Clerk token
+                        raise ValueError("Not a session bridge token")
+                        
+                except (pyjwt.InvalidTokenError, ValueError, KeyError) as e:
+                    # Not a valid session bridge token, try regular Clerk token
+                    from app.clerk import verify_token, ClerkUser
+                    
+                    clerk_user: ClerkUser = await verify_token(token)
+                    if not clerk_user:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "Invalid authentication token"
+                        })
+                        await websocket.close(code=1008)
+                        return
+                
+                # Get or create user
+                from app.models_db import User
+                result = await db.execute(select(User).where(User.external_id == clerk_user.sub))
+                user = result.scalar_one_or_none()
+                
+                if user is None:
+                    log.info(f"WS Auth: User with external_id {clerk_user.sub} not found. Creating new user.")
+                    user = User(
+                        external_id=clerk_user.sub,
+                        email=clerk_user.email,
+                        name=f"{clerk_user.first_name or ''} {clerk_user.last_name or ''}".strip() or "New User",
+                        first_name=clerk_user.first_name,
+                        last_name=clerk_user.last_name,
+                        picture=clerk_user.picture,
+                        active=True
+                    )
+                    db.add(user)
+                    await db.commit()
+                    await db.refresh(user)
+            
+            # Check if user is active
+            if not user.active:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "User account is inactive"
+                })
+                await websocket.close(code=1008)
+                return
+            
+            log.info(f"WS Auth: Successfully authenticated user: {user.id}")
+            
+        except Exception as auth_error:
+            log.error(f"WebSocket authentication error: {auth_error}")
+            await websocket.send_json({
+                "type": "error",
+                "message": "Authentication failed"
+            })
+            await websocket.close(code=1008)
+            return
+    except Exception as e:
+        log.error(f"WebSocket connection error: {e}")
+        await websocket.close(code=1011)  # Server error
+        return
     
     try:
         # Initialize LangGraph app (replaces AgentExecutor creation)
@@ -566,9 +735,10 @@ async def orchestrator_websocket(
         
         # Main message loop (preserve existing structure)
         while True:
-            data = await websocket.receive_text()
-            
             try:
+                log.info(f"Waiting for message from user: {user.id}")
+                data = await websocket.receive_text()
+                log.info(f"Received data from user {user.id}: {data[:200] if data else 'Empty'}")
                 # Parse message (existing logic)
                 if data.startswith('{'):
                     message_data = json.loads(data)
@@ -603,6 +773,11 @@ async def orchestrator_websocket(
                     # Clear context by creating new session config
                     session_config["configurable"]["thread_id"] = f"user_{user.id}_{datetime.now().isoformat()}"
                     log.info("Chat context cleared")
+                    
+                elif message_type == "extract_screenshot":
+                    await handle_screenshot_extraction(
+                        message_data, websocket, user, db
+                    )
                     
                 else:
                     log.warning(f"Unknown message type: {message_type}")
@@ -722,7 +897,10 @@ async def handle_message_langgraph(
     is_processing = True
     
     try:
-        # Handle new page creation (existing logic)
+        # Check if this is an extension temporary page
+        is_extension_page = page_id and page_id.startswith("extension_temp_")
+        
+        # Handle new page creation (existing logic) - skip for extension pages
         if not page_id:
             title = content[:50].strip() or "New Conversation"
             page_id = await create_new_page(user.id, title, db)
@@ -734,20 +912,26 @@ async def handle_message_langgraph(
                 "title": title
             })
         
-        # Save the user's message immediately to prevent loss
-        user_message = ChatMessage(
-            id=str(uuid.uuid4()),
-            user_id=user.id,
-            page_id=page_id,
-            message=content,
-            is_user_message=True
-        )
-        db.add(user_message)
-        await db.commit()
-        log.info(f"Saved user message immediately for page {page_id}")
+        # Save the user's message immediately to prevent loss (skip for extension pages)
+        if not is_extension_page:
+            user_message = ChatMessage(
+                id=str(uuid.uuid4()),
+                user_id=user.id,
+                page_id=page_id,
+                message=content,
+                is_user_message=True
+            )
+            db.add(user_message)
+            await db.commit()
+            log.info(f"Saved user message immediately for page {page_id}")
+        else:
+            log.info(f"Skipping message save for extension page {page_id}")
         
-        # Load chat history for context
-        chat_history = await load_chat_history(user.id, page_id, db, limit=20)
+        # Load chat history for context (skip for extension pages)
+        if not is_extension_page:
+            chat_history = await load_chat_history(user.id, page_id, db, limit=20)
+        else:
+            chat_history = []  # No history for extension pages
         
         # Add current message to history (it should now be in the loaded history)
         # But add it anyway in case the load didn't include it yet
@@ -834,8 +1018,16 @@ async def handle_message_langgraph(
                         await websocket.send_json(frontend_response)
                         log.info(f"Response sent to user {user.id}")
                         
-                        # Save the final assistant response to the database
-                        if frontend_response.get("type") == "message" and frontend_response.get("message"):
+                        # Send complete message for extension pages to signal end of generation
+                        if is_extension_page:
+                            await websocket.send_json({
+                                "type": "complete",
+                                "message": "Generation complete"
+                            })
+                            log.info(f"Sent complete signal for extension page {page_id}")
+                        
+                        # Save the final assistant response to the database (skip for extension pages)
+                        if frontend_response.get("type") == "message" and frontend_response.get("message") and not is_extension_page:
                             try:
                                 # Check if this exact message already exists to avoid duplicates
                                 existing = await db.execute(
@@ -1021,8 +1213,9 @@ async def handle_regenerate_langgraph(
                     frontend_response = node_output["frontend_response"]
                     await websocket.send_json(frontend_response)
                     
-                    # Save the regenerated assistant response to the database
-                    if frontend_response.get("type") == "message" and frontend_response.get("message"):
+                    # Save the regenerated assistant response to the database (skip for extension pages)
+                    is_extension_page = page_id and page_id.startswith("extension_temp_")
+                    if frontend_response.get("type") == "message" and frontend_response.get("message") and not is_extension_page:
                         try:
                             assistant_message = ChatMessage(
                                 id=str(uuid.uuid4()),

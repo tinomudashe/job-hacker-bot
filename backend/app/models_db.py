@@ -78,6 +78,7 @@ class User(Base):
     pages = relationship("Page", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
     user_preferences = relationship("UserPreference", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
     user_behaviors = relationship("UserBehavior", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
+    saved_responses = relationship("SavedApplicationResponse", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
 
 class Document(Base):
     __tablename__ = "documents"
@@ -197,6 +198,27 @@ class UserBehavior(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User", back_populates="user_behaviors")
+
+class SavedApplicationResponse(Base):
+    __tablename__ = "saved_application_responses"
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    field_category = Column(String, nullable=False, index=True)  # e.g., "personal.firstName", "legal.workAuth"
+    field_label = Column(String, nullable=False)  # Human-readable label
+    field_value = Column(Text, nullable=False)  # The saved value
+    is_default = Column(Boolean, default=False)  # If this should be the default value for this field
+    usage_count = Column(Integer, default=0)  # Track how often this is used
+    last_used = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+    
+    user = relationship("User", back_populates="saved_responses")
+    
+    # Composite index for efficient lookups
+    __table_args__ = (
+        Index('ix_saved_responses_user_category', 'user_id', 'field_category'),
+        Index('ix_saved_responses_user_default', 'user_id', 'is_default'),
+    )
 
 class MarketingEmailTemplate(Base):
     __tablename__ = 'marketing_email_templates'

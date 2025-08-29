@@ -1199,7 +1199,39 @@ export function SettingsDialog({
                     role="tabpanel"
                     aria-labelledby="extensions"
                   >
-                    <ExtensionTokensManager />
+                    {/* Chrome Extension Coming Soon Notice */}
+                    <Card className="border-blue-200 bg-blue-50/50">
+                      <CardHeader className="pb-3">
+                        <div className="flex items-center gap-2">
+                          <Chrome className="w-5 h-5 text-blue-600" />
+                          <CardTitle className="text-lg">Chrome Extension</CardTitle>
+                          <Badge variant="secondary" className="bg-blue-100 text-blue-700 border-blue-300">
+                            Coming Soon
+                          </Badge>
+                        </div>
+                        <CardDescription>
+                          Extract job details directly from any job posting and generate tailored documents instantly
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-3">
+                          <p className="text-sm text-gray-600">
+                            Our Chrome extension will allow you to extract job posting details from LinkedIn, Indeed, 
+                            Glassdoor, and any job site with one click, then instantly generate tailored resumes and 
+                            cover letters through your Job Hacker Bot account.
+                          </p>
+                          <div className="bg-blue-100/50 border border-blue-200 rounded-lg p-3">
+                            <p className="text-xs text-blue-800 font-medium">
+                              The Chrome extension is currently under review by Google and will be available soon. 
+                              Stay tuned for updates!
+                            </p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    {/* Chrome Extension Token Management - Hidden until extension is approved */}
+                    {/* <ExtensionTokensManager /> */}
                   </div>
                 )}
               </div>

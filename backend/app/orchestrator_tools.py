@@ -284,64 +284,67 @@ class ResumeToolsLangGraph:
                 parser = PydanticOutputParser(pydantic_object=ResumeData)
                 
                 prompt = ChatPromptTemplate.from_template(
-                    """You are an expert career coach and resume writer. Your task is to enhance and refine the user's ACTUAL resume for maximum impact.
+                    """You are a professional resume editor focused on FACTUAL enhancement. Your task is to refine the user's resume while maintaining 100% truthfulness.
                     
-                    USER'S CURRENT RESUME DATA (this is their real background):
+                    USER'S CURRENT RESUME DATA (preserve all facts):
                     {context}
 
                     TARGET ROLE: {target_role}
                     COMPANY: {company_name}
                     JOB DESCRIPTION: {job_description}
 
-                    **YOUR MISSION - ENHANCE THEIR REAL EXPERIENCE:**
+                    **REFINEMENT GUIDELINES - FACTUAL ONLY:**
                     
-                    1. **ENHANCE Experience Descriptions** (based on their actual roles): 
-                       - Rewrite the user's EXISTING job descriptions to be more impactful
-                       - Add reasonable estimated metrics based on their actual role
-                       - Use strong action verbs that fit their real responsibilities
-                       - Highlight aspects of their REAL work that align with the target role
-                       - Expand on their ACTUAL responsibilities (don't invent new ones)
+                    1. **REWRITE Professional Summary** (3-4 sentences):
+                       - Create a new summary based on their ACTUAL experience and education
+                       - Highlight their genuine strengths and career trajectory
+                       - Include years of experience and core competencies
+                       - Make it relevant to {target_role} but universally applicable
+                       - DO NOT mention specific companies or use forward-looking statements
                     
-                    2. **OPTIMIZE the Professional Summary**:
-                       - Create a compelling 3-4 line summary that immediately shows fit for the role
-                       - Include years of experience, key expertise areas, and unique value proposition
-                       - Mention specific technologies, methodologies, or domain expertise
-                       - Tailor it specifically for {company_name} and the {target_role} position
+                    2. **UPDATE Job Title** (if needed):
+                       - Adjust the most recent job title to align with {target_role} naming conventions
+                       - Example: "Developer" → "Software Engineer" if targeting Software Engineer role
+                       - Keep it reasonable and within the same level/scope
                     
-                    3. **ENHANCE Skills Section** (based on user's experience):
-                       - Keep ALL of the user's existing skills
-                       - Add 3-5 related skills that someone with their background would have
-                       - For example: if they know Python, they might know pip, virtualenv
-                       - Reorganize to put most relevant skills for {target_role} first
-                       - Only add skills that are reasonable based on their work history
-                       - DO NOT add advanced skills they clearly don't have
+                    3. **ENHANCE Education Points**:
+                       - Add 2-3 bullet points of skills logically derived from their degree
+                       - Example: Marketing degree → "Marketing Analysis, Consumer Behavior, Market Research"
+                       - Include relevant coursework that would be standard for their program
+                       - These are skills they WOULD have learned, not fictional achievements
                     
-                    4. **IMPROVE Project Descriptions**:
-                       - Expand project descriptions to highlight impact and technical complexity
-                       - Specify technologies used, problems solved, and outcomes achieved
-                       - Add metrics where possible (users served, performance improvements, etc.)
-                       - Make them relevant to the target role requirements
+                    4. **REFINE Skills Section**:
+                       - Keep ALL existing skills
+                       - Add only skills that are logical extensions of their current skills
+                       - Example: If they know React, they likely know JavaScript, HTML, CSS
+                       - Example: If they studied Finance, they likely know Excel, Financial Analysis
+                       - Organize with most relevant skills for {target_role} first
                     
-                    5. **POLISH Other Sections**:
-                       - Enhance education details with relevant coursework or achievements
-                       - Add relevant certifications that would strengthen the application
-                       - Include languages with proficiency levels if applicable
+                    5. **IMPROVE Work Experience Descriptions**:
+                       - Refine existing bullet points for clarity and impact
+                       - Use stronger action verbs (managed→orchestrated, worked→collaborated)
+                       - Add context about team size, project scope where reasonable
+                       - Improve grammar and professional language
+                       - Keep ALL facts unchanged - only improve how they're expressed
+                       - DO NOT add new responsibilities or achievements
+                       - DO NOT add specific metrics unless already present
                     
-                    **IMPORTANT RULES:**
-                    - Work ONLY with the user's actual experience and education
-                    - Make descriptions more impactful but keep them truthful
-                    - Add relevant keywords from the job description where they genuinely apply
-                    - You can estimate reasonable metrics (e.g., "improved efficiency by 20%")
-                    - You can add related skills that someone with their experience would have
-                    - DO NOT invent new jobs, education, certifications, or projects
-                    - The goal is to present their REAL experience in the best light
-                    - Return ONLY a valid JSON object matching the provided schema
+                    **STRICT RULES - FACTUAL ACCURACY:**
+                    - NEVER invent new jobs, projects, or responsibilities
+                    - NEVER add specific numbers/metrics unless already in the original
+                    - ONLY add skills that are logical implications of their education/experience
+                    - Keep all dates, companies, and positions exactly as provided
+                    - Focus on better PRESENTATION of existing facts, not creating new ones
+                    - Projects section: only refine language, don't add new features or outcomes
+                    - The goal is professional polish, not fiction
+                    
+                    Return ONLY a valid JSON object matching the provided schema.
 
                     {format_instructions}
                     """
                 )
                 
-                llm = ChatAnthropic(model="claude-3-7-sonnet-20250219", temperature=0.7, max_tokens=4096)
+                llm = ChatAnthropic(model="claude-3-7-sonnet-20250219", temperature=0.3, max_tokens=4096)
                 chain = prompt | llm | parser
                 
                 # Generate refined resume with retry logic
@@ -515,11 +518,13 @@ class ResumeToolsLangGraph:
             **ENHANCEMENT INSTRUCTIONS:**
             
             1. **Professional Summary (3-4 impactful lines):**
-               - Start with "{job_title} with X+ years of experience"
-               - Highlight 2-3 key achievements or areas of expertise
-               - Include specific technologies/methodologies mastered
-               - End with value proposition for {company_name}
-               - Make it compelling and results-oriented
+               - Start with "Experienced {job_title} with X+ years" OR "Senior professional with expertise in..."
+               - Highlight 2-3 key achievements or areas of expertise from existing experience
+               - Include specific technologies/methodologies already in the resume
+               - Keep it generic and universally applicable - DO NOT mention {company_name} or this specific role
+               - Make it factual based on actual experience - no forward-looking statements
+               - NEVER use phrases like "eager to", "looking to", "seeking to", or "excited to"
+               - Focus on proven track record and accomplished skills only
             
             2. **Experience Section (TRANSFORM each role):**
                - Start each bullet with a strong action verb
@@ -551,7 +556,9 @@ class ResumeToolsLangGraph:
             - Make every section 2-3x more detailed and impactful than the original
             - Use keywords from the job description throughout for ATS optimization
             - Create a premium resume that commands attention
-            - Ensure all content is relevant to {job_title} at {company_name}
+            - Ensure all content is relevant to {job_title} role but keep it generic (no company names)
+            - The professional summary MUST be universally applicable to any {job_title} position
+            - NEVER mention {company_name} or use phrases like "for your organization" in any section
             - Output MUST be a complete, valid JSON object matching the schema
             
             {format_instructions}
@@ -3300,12 +3307,155 @@ class WebToolsLangGraph:
         tool_results[tool_name] = {"success": success, "timestamp": datetime.now().isoformat(), "metadata": metadata or {}}
         state["tool_results"] = tool_results
 
+    async def extract_job_from_screenshot_with_state(
+        self, 
+        screenshot_data: str, 
+        url: str = "",
+        state: Annotated[WebSocketState, InjectedState] = None
+    ) -> str:
+        """Extract job information from a screenshot using AI vision"""
+        try:
+            log.info(f"🖼️ Extracting job data from screenshot with LangGraph state")
+            
+            # Initialize Claude with vision capabilities (same model as main orchestrator)
+            llm = ChatAnthropic(
+                model="claude-3-7-sonnet-20250219", 
+                temperature=0.7,
+                max_tokens=4096,
+                timeout=60
+            )
+            
+            # Create the vision message
+            import base64
+            
+            # If screenshot_data is already base64, use it; otherwise encode it
+            if screenshot_data.startswith('data:image'):
+                # Extract base64 part from data URL
+                screenshot_b64 = screenshot_data.split(',')[1]
+            else:
+                screenshot_b64 = screenshot_data
+            
+            from langchain_core.messages import HumanMessage, SystemMessage
+            
+            messages = [
+                SystemMessage(content="""You are an AI assistant that extracts job information from screenshots of job posting pages.
+
+Extract the following information from the job posting screenshot and return it as JSON:
+- title: The job title/position name
+- company: The company name  
+- location: The job location (city, state, remote status, etc.)
+- description: The full job description text
+- salary: Any salary/compensation information if visible
+- type: Employment type (full-time, part-time, contract, remote, etc.)
+- requirements: Any key requirements or qualifications listed (as an array)
+
+Return ONLY a valid JSON object with these fields. If any field is not found, use an empty string or empty array for requirements.
+Example format:
+{
+  "title": "Software Engineer",
+  "company": "Tech Corp", 
+  "location": "San Francisco, CA",
+  "description": "We are looking for...",
+  "salary": "$80K - $120K",
+  "type": "Full-time",
+  "requirements": ["Bachelor's degree", "3+ years experience"]
+}"""),
+                HumanMessage(content=[
+                    {
+                        "type": "text",
+                        "text": f"Extract job information from this screenshot of a job posting page. URL: {url}"
+                    },
+                    {
+                        "type": "image",
+                        "image": {
+                            "type": "base64",
+                            "media_type": "image/png", 
+                            "data": screenshot_b64
+                        }
+                    }
+                ])
+            ]
+            
+            # Get the AI response
+            response = await llm.ainvoke(messages)
+            
+            # Parse the JSON response
+            try:
+                job_data = json.loads(response.content)
+            except json.JSONDecodeError:
+                # Try to extract JSON from the response if it has extra text
+                import re
+                json_match = re.search(r'\{.*\}', response.content, re.DOTALL)
+                if json_match:
+                    job_data = json.loads(json_match.group())
+                else:
+                    raise ValueError("Could not parse AI response as JSON")
+            
+            # Validate that we have at least a title
+            if not job_data.get("title"):
+                raise ValueError("No job title found in the screenshot")
+            
+            # Update LangGraph state
+            self.update_state_with_tool_execution(
+                state, 
+                "extract_job_from_screenshot", 
+                success=True,
+                metadata={
+                    "extracted_fields": list(job_data.keys()),
+                    "has_description": bool(job_data.get("description")),
+                    "has_salary": bool(job_data.get("salary")),
+                    "url": url
+                }
+            )
+            
+            log.info(f"✅ Successfully extracted job data: {job_data.get('title')} at {job_data.get('company')}")
+            
+            # Format the response for the user
+            result = f"✅ Successfully extracted job information from screenshot!\n\n"
+            result += f"**Job Title:** {job_data.get('title', 'N/A')}\n"
+            result += f"**Company:** {job_data.get('company', 'N/A')}\n"
+            result += f"**Location:** {job_data.get('location', 'N/A')}\n"
+            if job_data.get('salary'):
+                result += f"**Salary:** {job_data.get('salary')}\n"
+            if job_data.get('type'):
+                result += f"**Type:** {job_data.get('type')}\n"
+            result += f"\n**Description:** {job_data.get('description', 'N/A')[:300]}{'...' if len(job_data.get('description', '')) > 300 else ''}\n"
+            
+            if job_data.get('requirements'):
+                result += f"\n**Key Requirements:**\n"
+                for req in job_data.get('requirements', [])[:5]:  # Show first 5 requirements
+                    result += f"• {req}\n"
+            
+            # Store the extracted data in state for other tools to use
+            if state:
+                state["extracted_job_data"] = job_data
+            
+            return result
+            
+        except Exception as e:
+            log.error(f"Error extracting job data from screenshot: {e}")
+            
+            # Update LangGraph state with error
+            self.update_state_with_tool_execution(
+                state, 
+                "extract_job_from_screenshot", 
+                success=False,
+                metadata={"error": str(e), "url": url}
+            )
+            
+            return f"❌ Sorry, I couldn't extract job information from the screenshot. Error: {str(e)}"
+
     def get_tools(self) -> List[StructuredTool]:
         return [
             StructuredTool.from_function(
                 coroutine=self.search_web_for_advice_with_state,
                 name="search_web_for_advice",
                 description="Search the web for up-to-date information, advice, and guidance with LangGraph state management.",
+            ),
+            StructuredTool.from_function(
+                coroutine=self.extract_job_from_screenshot_with_state,
+                name="extract_job_from_screenshot",
+                description="🖼️ EXTRACT JOB FROM SCREENSHOT - Extract job information from a screenshot image using AI vision. Use this tool when the user provides screenshot data or asks to extract job information from a screenshot. Takes screenshot_data (base64) and url parameters.",
             )
         ]
 
