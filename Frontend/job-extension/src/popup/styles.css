@@ -1,0 +1,137 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-gray-200/50;
+  }
+  
+  body {
+    @apply bg-gradient-to-br from-gray-50 via-white to-gray-50 text-gray-900;
+    min-width: 420px;
+    min-height: 500px;
+  }
+}
+
+@layer components {
+  /* Glassmorphic Primary Button */
+  .btn-primary {
+    @apply relative overflow-hidden;
+    @apply bg-blue-600;
+    @apply text-white px-5 py-3 rounded-xl font-semibold;
+    @apply shadow-lg shadow-gray-900/25;
+    @apply hover:shadow-xl hover:shadow-gray-900/30 hover:scale-[1.02];
+    @apply transition-all duration-300;
+    @apply flex items-center justify-center gap-2;
+    @apply disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100;
+    @apply backdrop-blur-xl;
+    @apply border border-blue-600/20;
+  }
+  
+  /* Removed gradient shimmer effect */
+  
+  /* Glassmorphic Secondary Button */
+  .btn-secondary {
+    @apply bg-white/80 backdrop-blur-xl backdrop-saturate-150;
+    @apply border border-gray-200/60;
+    @apply text-gray-700 px-5 py-3 rounded-xl font-semibold;
+    @apply shadow-lg shadow-gray-900/20 hover:shadow-xl hover:shadow-gray-900/25;
+    @apply hover:bg-white/90 hover:scale-[1.02];
+    @apply transition-all duration-300;
+    @apply flex items-center justify-center gap-2;
+    @apply disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100;
+  }
+  
+  /* Glassmorphic Card */
+  .card {
+    @apply bg-white/80 backdrop-blur-xl backdrop-saturate-150;
+    @apply rounded-2xl p-5;
+    @apply border border-white/60;
+    @apply shadow-xl shadow-gray-900/15;
+    @apply transition-all duration-300;
+    @apply hover:shadow-2xl hover:shadow-gray-900/20 hover:bg-white/85;
+  }
+  
+  /* Glassmorphic Input */
+  .input {
+    @apply w-full px-4 py-3;
+    @apply bg-white/60 backdrop-blur-xl;
+    @apply border border-gray-200/50;
+    @apply rounded-xl;
+    @apply focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50;
+    @apply focus:bg-white/80;
+    @apply transition-all duration-300;
+    @apply placeholder-gray-500/70;
+  }
+  
+  /* Settings Button Style */
+  .settings-btn {
+    @apply p-2 rounded-xl;
+    @apply bg-white/60 backdrop-blur-xl;
+    @apply border border-white/50;
+    @apply hover:bg-white/80 hover:scale-105;
+    @apply transition-all duration-300;
+    @apply shadow-lg shadow-gray-900/20 hover:shadow-xl hover:shadow-gray-900/25;
+  }
+  
+  /* Header Glassmorphic Style - Floating Effect */
+  .header-glass {
+    @apply bg-white/85 backdrop-blur-2xl backdrop-saturate-150;
+    @apply shadow-xl shadow-gray-900/10;
+    @apply rounded-2xl;
+    @apply border border-gray-200/20;
+    @apply mx-3 mt-3 mb-2;
+  }
+  
+  /* Badge Styles */
+  .badge {
+    @apply px-3 py-1.5 rounded-full;
+    /* Removed gradient */
+    @apply text-xs font-semibold;
+    @apply shadow-md;
+    @apply border;
+  }
+  
+  .badge-blue {
+    @apply bg-blue-50;
+    @apply text-blue-700;
+    @apply border-blue-200/50;
+  }
+  
+  .badge-green {
+    @apply bg-green-50;
+    @apply text-green-700;
+    @apply border-green-200/50;
+  }
+  
+  /* Loading Animation */
+  @keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+  
+  .animate-shimmer {
+    animation: shimmer 2s infinite;
+  }
+  
+  /* Scrollbar Styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-300/50 rounded-full;
+    @apply hover:bg-gray-400/50;
+  }
+  
+  /* Smooth Animations */
+  .transition-smooth {
+    @apply transition-all duration-500 ease-in-out;
+  }
+}

@@ -9,6 +9,8 @@ import "./globals.css";
 import { GoogleAnalytics } from "@/components/google-analytics";
 import { TikTokPixel } from "@/components/tiktok-pixel";
 import { UserbackWidget } from "@/components/userback-widget";
+import { ChromeExtensionBridge } from "@/components/chrome-extension-bridge";
+import { ExtensionIntegration } from "@/components/extension-integration";
 
 // This is the only new import being added.
 const CookieConsentBanner = dynamic(
@@ -127,6 +129,7 @@ export default function RootLayout({
             disableTransitionOnChange
           >
             {children}
+            <ChromeExtensionBridge />
             <UserbackWidget />
             <Toaster
               closeButton={true}
@@ -168,6 +171,7 @@ export default function RootLayout({
             <DismissAllToasts />
             {/* This is the only new line of code being added. */}
             <CookieConsentBanner />
+            <ExtensionIntegration />
           </ThemeProvider>
         </body>
       </html>

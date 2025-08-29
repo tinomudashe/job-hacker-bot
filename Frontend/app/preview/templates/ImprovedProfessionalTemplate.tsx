@@ -54,14 +54,23 @@ export const ImprovedProfessionalTemplate: React.FC<{ data: PreviewData }> = ({
         <h1 className="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white">
           {personalInfo?.name}
         </h1>
-        <div className="mt-2 flex flex-wrap gap-3 text-sm text-gray-600 dark:text-gray-400">
-          {personalInfo?.email && <span>✉ {personalInfo.email}</span>}
-          {personalInfo?.phone && <span>☎ {personalInfo.phone}</span>}
-          {personalInfo?.location && <span>📍 {personalInfo.location}</span>}
+        <div className="mt-2 text-sm text-gray-600 dark:text-gray-400 space-y-1">
+          {personalInfo?.email && <div>✉ {personalInfo.email}</div>}
+          {personalInfo?.phone && <div>☎ {personalInfo.phone}</div>}
+          {personalInfo?.location && <div>📍 {personalInfo.location}</div>}
           {personalInfo?.linkedin && (
-            <a href={personalInfo.linkedin} className="text-blue-600 dark:text-blue-400 hover:underline">
-              🔗 LinkedIn
-            </a>
+            <div>
+              🔗 <a href={personalInfo.linkedin} className="text-blue-600 dark:text-blue-400 hover:underline">
+                {personalInfo.linkedin}
+              </a>
+            </div>
+          )}
+          {personalInfo?.website && (
+            <div>
+              🌐 <a href={personalInfo.website} className="text-blue-600 dark:text-blue-400 hover:underline">
+                {personalInfo.website}
+              </a>
+            </div>
           )}
         </div>
       </header>

@@ -26,17 +26,19 @@ import {
   Sparkles,
   Check,
   X,
+  Loader2,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import * as React from "react";
+import html2canvas from 'html2canvas-pro';
+import jsPDF from 'jspdf';
 // EDIT: Import the new cover letter templates alongside the resume templates.
 import { cn } from "@/lib/utils";
-import { CreativeCoverLetterTemplate } from "./templates/CreativeCoverLetterTemplate";
-import { CreativeResumeTemplate } from "./templates/CreativeResumeTemplate";
 import { ModernCoverLetterTemplate } from "./templates/ModernCoverLetterTemplate";
 import { ModernResumeTemplate } from "./templates/ModernResumeTemplate";
 import { ProfessionalCoverLetterTemplate } from "./templates/ProfessionalCoverLetterTemplate";
 import { ProfessionalResumeTemplate } from "./templates/ProfessionalResumeTemplate";
+import { ProfessionalATSTemplate } from "./templates/ProfessionalATSTemplate";
 import { ImprovedProfessionalTemplate } from "./templates/ImprovedProfessionalTemplate";
 import { PreviewData } from "./types";
 import { PreviewLoader } from "@/components/preview-loader";
@@ -86,10 +88,10 @@ const PDF_STYLES = [
     useTheme: true,
   },
   {
-    key: "creative",
-    name: "Creative",
-    description: "Bold design with vibrant colors and unique layout",
-    color: "bg-purple-500",
+    key: "ats",
+    name: "Professional ATS",
+    description: "ATS-optimized format for applicant tracking systems",
+    color: "bg-indigo-600",
     useTheme: true,
   },
 ];
@@ -159,13 +161,13 @@ const CoverLetterTemplate: React.FC<{
   );
 };
 
-// EDIT: Updated PrintStyles to use A3 page size and removed manual margin overrides.
+// Updated PrintStyles to use A4 page size and removed borders
 const PrintStyles = () => (
   <style jsx global>{`
     @media print {
       @page {
-        /* Use A3 size as it works better for the user's setup */
-        size: A3;
+        /* Use A4 size for standard printing */
+        size: A4;
         margin: 0;
       }
 
@@ -235,7 +237,7 @@ const PrintStyles = () => (
 const resumeTemplates: { [key: string]: React.FC<{ data: PreviewData }> } = {
   modern: ModernResumeTemplate,
   professional: ProfessionalResumeTemplate,
-  creative: CreativeResumeTemplate,
+  ats: ProfessionalATSTemplate,
   enhanced: ImprovedProfessionalTemplate,
 };
 
@@ -244,7 +246,7 @@ const coverLetterTemplates: {
 } = {
   modern: ModernCoverLetterTemplate,
   professional: ProfessionalCoverLetterTemplate,
-  creative: CreativeCoverLetterTemplate,
+  ats: CoverLetterTemplate, // Using default template for ATS cover letters
 };
 
 export default function PreviewPage() {
@@ -339,7 +341,8 @@ export default function PreviewPage() {
         style: style,
         content: "",
         company_name: "",
-        job_title: "",
+        job_title: resumeData.job_title || resumeData.personalInfo?.professionalTitle || "",
+        section_order: resumeData.section_order,
         personalInfo: resumeData.personalInfo,
         work_experience: resumeData.experience,
         education: resumeData.education,
@@ -520,8 +523,167 @@ export default function PreviewPage() {
     else window.location.href = "https://jobhackerbot.com";
   };
 
-  const handleDownload = () => {
-    window.print();
+  // Create a ref for the PDF content
+  const targetRef = React.useRef<HTMLDivElement>(null);
+  const [isGeneratingPDF, setIsGeneratingPDF] = React.useState(false);
+
+  const handleDownload = async () => {
+    if (!targetRef.current) {
+      console.error('No element reference found');
+      return;
+    }
+    
+    try {
+      setIsGeneratingPDF(true);
+      
+      // Get the inner content div (the actual resume/cover letter)
+      const innerContent = targetRef.current.querySelector('.resume-light-mode') || targetRef.current.firstElementChild;
+      const elementToCapture = innerContent || targetRef.current;
+      
+      // Clone the element to modify without affecting the display
+      const clonedElement = elementToCapture.cloneNode(true) as HTMLElement;
+      
+      // Create a temporary container
+      const tempContainer = document.createElement('div');
+      tempContainer.style.position = 'absolute';
+      tempContainer.style.top = '-9999px';
+      tempContainer.style.left = '-9999px';
+      tempContainer.style.background = 'white';
+      tempContainer.style.width = '210mm'; // A4 width
+      tempContainer.style.padding = '0';
+      tempContainer.style.margin = '0';
+      
+      // Clean up the cloned element
+      clonedElement.style.border = 'none';
+      clonedElement.style.boxShadow = 'none';
+      clonedElement.style.borderRadius = '0';
+      clonedElement.style.background = 'white';
+      clonedElement.style.margin = '0';
+      clonedElement.style.padding = '20px';
+      
+      // Remove dark mode classes and ensure white background
+      clonedElement.classList.remove('dark', 'dark:bg-black/90', 'dark:border-gray-600/50');
+      clonedElement.classList.add('!bg-white');
+      
+      // Append to document temporarily
+      tempContainer.appendChild(clonedElement);
+      document.body.appendChild(tempContainer);
+      
+      // Small delay to ensure rendering
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Use html2canvas-pro with optimized settings
+      const canvas = await html2canvas(clonedElement, {
+        useCORS: true,
+        scale: 3, // High quality
+        logging: false,
+        backgroundColor: '#ffffff',
+        width: clonedElement.scrollWidth,
+        height: clonedElement.scrollHeight,
+        windowWidth: clonedElement.scrollWidth,
+        windowHeight: clonedElement.scrollHeight,
+      });
+      
+      // Remove temporary container
+      document.body.removeChild(tempContainer);
+      
+      // Check if canvas is valid
+      if (!canvas || canvas.width === 0 || canvas.height === 0) {
+        throw new Error('Failed to capture content - canvas is empty');
+      }
+      
+      // Calculate PDF dimensions for A4 size
+      const pdfWidth = 210; // A4 width in mm
+      const pdfHeight = 297; // A4 height in mm
+      const imgWidth = pdfWidth;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      
+      // Create PDF with A4 size
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+      });
+      
+      // Convert canvas to high-quality image
+      const imgData = canvas.toDataURL('image/png', 1.0);
+      
+      // Add image to PDF with intelligent page breaks
+      if (imgHeight <= pdfHeight) {
+        // Single page - no vertical centering, start from top
+        pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+      } else {
+        // Multiple pages with proper content height calculation
+        const pageMargin = 10; // 10mm margin between page breaks
+        
+        // First page gets full height, subsequent pages get reduced height
+        const firstPageHeight = pdfHeight - pageMargin; // Leave margin at bottom of first page
+        const subsequentPageHeight = pdfHeight - (pageMargin * 2); // Margin top and bottom
+        
+        // Track position in the original image
+        let currentSourceY = 0;
+        let remainingHeight = imgHeight;
+        let pageIndex = 0;
+        
+        while (remainingHeight > 0) {
+          if (pageIndex > 0) {
+            pdf.addPage();
+          }
+          
+          // Determine how much content fits on this page
+          const availableHeight = pageIndex === 0 ? firstPageHeight : subsequentPageHeight;
+          const contentHeight = Math.min(availableHeight, remainingHeight);
+          
+          // Calculate the pixel coordinates for this slice
+          const pixelY = (currentSourceY / imgHeight) * canvas.height;
+          const pixelHeight = (contentHeight / imgHeight) * canvas.height;
+          
+          // Create a canvas for this page's content
+          const sliceCanvas = document.createElement('canvas');
+          const sliceCtx = sliceCanvas.getContext('2d');
+          
+          if (sliceCtx) {
+            sliceCanvas.width = canvas.width;
+            sliceCanvas.height = pixelHeight;
+            
+            // Draw the slice from the original canvas
+            sliceCtx.drawImage(
+              canvas,
+              0, pixelY, // Source x, y
+              canvas.width, pixelHeight, // Source width, height
+              0, 0, // Dest x, y
+              canvas.width, pixelHeight // Dest width, height
+            );
+            
+            // Convert slice to image
+            const sliceData = sliceCanvas.toDataURL('image/png', 1.0);
+            
+            // Position on page: first page starts at 0, others start with margin
+            const yPosition = pageIndex === 0 ? 0 : pageMargin;
+            
+            // Add to PDF
+            pdf.addImage(sliceData, 'PNG', 0, yPosition, imgWidth, contentHeight);
+          }
+          
+          // Update counters
+          currentSourceY += contentHeight;
+          remainingHeight -= contentHeight;
+          pageIndex++;
+        }
+      }
+      
+      // Generate filename
+      const filename = `${previewData?.content_type || 'document'}_${new Date().toISOString().split('T')[0]}.pdf`;
+      
+      // Save the PDF
+      pdf.save(filename);
+      
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      alert(`Failed to generate PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsGeneratingPDF(false);
+    }
   };
 
   if (!isClient) {
@@ -688,15 +850,15 @@ export default function PreviewPage() {
               </div>
             </div>
 
-            <div className="lg:hidden relative style-selector-container">
+            <div className="md:hidden relative style-selector-container">
               <Button
                 onClick={() => setShowStyleSelector(!showStyleSelector)}
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6 lg:h-10 lg:w-10 rounded-xl hover:bg-white/10 transition-all duration-200 hover:scale-105"
+                className="h-8 w-8 rounded-xl hover:bg-white/10 transition-all duration-200 hover:scale-105"
                 title="Change Style"
               >
-                <Palette className="h-4 w-4 lg:h-5 lg:w-5" />
+                <Palette className="h-4 w-4" />
               </Button>
               {showStyleSelector && (
                 <div className="absolute right-0 left-1/2 top-full mt-4 w-80 bg-background/98 backdrop-blur-2xl border border-border/40 rounded-2xl shadow-2xl z-20 p-4">
@@ -730,7 +892,7 @@ export default function PreviewPage() {
                         <div className={`w-12 h-12 rounded-lg flex-shrink-0 ${style.color} flex items-center justify-center shadow-md`}>
                           {style.key === 'modern' && <Layout className="h-6 w-6 text-white" />}
                           {style.key === 'professional' && <Briefcase className="h-6 w-6 text-white" />}
-                          {style.key === 'creative' && <Sparkles className="h-6 w-6 text-white" />}
+                          {style.key === 'ats' && <FileText className="h-6 w-6 text-white" />}
                         </div>
                         <div className="text-left flex-1">
                           <div className="flex items-center gap-2">
@@ -805,7 +967,7 @@ export default function PreviewPage() {
                           <div className={`w-10 h-10 rounded-lg flex-shrink-0 ${style.color} flex items-center justify-center shadow-sm`}>
                             {style.key === 'modern' && <Layout className="h-5 w-5 text-white" />}
                             {style.key === 'professional' && <Briefcase className="h-5 w-5 text-white" />}
-                            {style.key === 'creative' && <Sparkles className="h-5 w-5 text-white" />}
+                            {style.key === 'ats' && <FileText className="h-5 w-5 text-white" />}
                           </div>
                           <div className="text-left flex-1">
                             <div className="flex items-center gap-2">
@@ -831,10 +993,20 @@ export default function PreviewPage() {
               </Badge>
               <Button
                 onClick={handleDownload}
-                className="h-9 lg:h-10 px-3 lg:px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105"
+                disabled={isGeneratingPDF}
+                className="h-9 lg:h-10 px-3 lg:px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Download className="h-4 w-4 lg:mr-2 text-white" />
-                <span className="hidden lg:inline text-white">Download PDF</span>
+                {isGeneratingPDF ? (
+                  <>
+                    <Loader2 className="h-4 w-4 lg:mr-2 text-white animate-spin" />
+                    <span className="hidden lg:inline text-white">Generating...</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-4 w-4 lg:mr-2 text-white" />
+                    <span className="hidden lg:inline text-white">Download PDF</span>
+                  </>
+                )}
               </Button>
               <div className="h-6 w-px bg-border/50 mx-1" />
               <ThemeToggle />
@@ -855,10 +1027,17 @@ export default function PreviewPage() {
               <Button
                 onClick={handleDownload}
                 size="sm"
-                className="h-5 px-3 sm:h-5 sm:px-2 rounded-lg sm:rounded-xl bg-blue-600 hover:bg-blue-700 text-white"
+                disabled={isGeneratingPDF}
+                className="h-5 px-3 sm:h-5 sm:px-2 rounded-lg sm:rounded-xl bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Download className="h-4 w-4 mr-1 text-white" />
-                <span className="text-xs text-white">PDF</span>
+                {isGeneratingPDF ? (
+                  <Loader2 className="h-4 w-4 text-white animate-spin" />
+                ) : (
+                  <>
+                    <Download className="h-4 w-4 mr-1 text-white" />
+                    <span className="text-xs text-white">PDF</span>
+                  </>
+                )}
               </Button>
               <ThemeToggle />
               <SignedIn>
@@ -872,6 +1051,7 @@ export default function PreviewPage() {
       <main className="flex-1 pt-24 sm:pt-28 md:pt-32 print:pt-0">
         <div className="max-w-4xl mx-auto p-4 sm:p-6 print:p-0">
           <div
+            ref={targetRef}
             id="pdf-preview-content"
             className={cn(
               "rounded-2xl sm:rounded-3xl overflow-hidden",

@@ -23,20 +23,35 @@ export const ProfessionalResumeTemplate: React.FC<{ data: PreviewData }> = ({
         <h1 className="text-4xl font-bold tracking-wider text-gray-900 dark:text-white">
           {personalInfo?.name}
         </h1>
-        <p className="mt-2 text-sm text-gray-500 dark:text-gray-400 tracking-widest">
-          {personalInfo?.email} • {personalInfo?.phone} •{" "}
-          {personalInfo?.location}
-        </p>
-        {personalInfo?.linkedin && (
-          <a
-            href={personalInfo.linkedin}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm text-blue-700 hover:underline dark:text-blue-400"
-          >
-            {personalInfo.linkedin}
-          </a>
-        )}
+        <div className="mt-2 text-sm text-gray-500 dark:text-gray-400 tracking-widest">
+          {personalInfo?.email && <div>{personalInfo.email}</div>}
+          {personalInfo?.phone && <div>{personalInfo.phone}</div>}
+          {personalInfo?.location && <div>{personalInfo.location}</div>}
+          {personalInfo?.linkedin && (
+            <div>
+              <a
+                href={personalInfo.linkedin}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-blue-700 hover:underline dark:text-blue-400"
+              >
+                {personalInfo.linkedin}
+              </a>
+            </div>
+          )}
+          {personalInfo?.website && (
+            <div>
+              <a
+                href={personalInfo.website}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-blue-700 hover:underline dark:text-blue-400"
+              >
+                {personalInfo.website}
+              </a>
+            </div>
+          )}
+        </div>
       </header>
 
       <hr className="my-6 border-gray-300 dark:border-gray-700" />

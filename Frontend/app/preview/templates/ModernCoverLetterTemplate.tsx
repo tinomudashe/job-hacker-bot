@@ -26,15 +26,30 @@ export const ModernCoverLetterTemplate: React.FC<{
           <p className="text-gray-600 dark:text-gray-400">
             {personalInfo?.email} | {personalInfo?.phone}
           </p>
-          {personalInfo?.linkedin && (
-            <a
-              href={personalInfo.linkedin}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-600 hover:underline dark:text-blue-400"
-            >
-              LinkedIn Profile
-            </a>
+          {(personalInfo?.linkedin || personalInfo?.website) && (
+            <div className="mt-1">
+              {personalInfo?.linkedin && (
+                <a
+                  href={personalInfo.linkedin}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  {personalInfo.linkedin}
+                </a>
+              )}
+              {personalInfo?.linkedin && personalInfo?.website && <span className="mx-1">•</span>}
+              {personalInfo?.website && (
+                <a
+                  href={personalInfo.website}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  {personalInfo.website}
+                </a>
+              )}
+            </div>
           )}
         </div>
 

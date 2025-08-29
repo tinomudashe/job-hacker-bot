@@ -26,6 +26,27 @@ import {
   X,
 } from "lucide-react";
 import * as React from "react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import {
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { SortableItem } from "./sortable-item";
+import { GripVertical } from "lucide-react";
 
 interface PDFGenerationDialogProps {
   open: boolean;
@@ -168,6 +189,7 @@ export function PDFGenerationDialog({
   // Additional form fields for structured input
   const [personalInfo, setPersonalInfo] = React.useState({
     fullName: "",
+    professionalTitle: "",
     email: "",
     phone: "",
     address: "",
@@ -197,7 +219,7 @@ export function PDFGenerationDialog({
   const [additionalSections, setAdditionalSections] = React.useState("");
 
   const [projects, setProjects] = React.useState([
-    { name: "", description: "", technologies: "", url: "" },
+    { id: crypto.randomUUID(), name: "", description: "", technologies: "", url: "" },
   ]);
   const [certifications, setCertifications] = React.useState([
     { name: "", issuing_organization: "", date_issued: "" },
@@ -208,15 +230,15 @@ export function PDFGenerationDialog({
 
   // Collapsible sections state
   const [expandedSections, setExpandedSections] = React.useState({
-    personalInfo: true,
-    workExperience: false,
+    personalInfo: contentType === "resume",
+    workExperience: contentType === "cover_letter", // Personal Info for cover letters
     education: false,
     skills: false,
     projects: false,
     certifications: false,
     languages: false,
     additionalSections: false,
-    content: contentType === "cover_letter",
+    content: false,
   });
 
   const toggleSection = (section: keyof typeof expandedSections) => {
@@ -232,6 +254,126 @@ export function PDFGenerationDialog({
       content: false,
       [section]: true,
     });
+  };
+
+  // Drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  // Helper function to build resume payload
+  const buildOrderedResumePayload = () => {
+    const basePayload: any = {
+      personalInfo: {
+        name: personalInfo.fullName,
+        professionalTitle: personalInfo.professionalTitle,
+        email: personalInfo.email,
+        phone: personalInfo.phone,
+        linkedin: personalInfo.linkedin,
+        location: personalInfo.address,
+        summary: personalInfo.summary,
+        website: personalInfo.website,
+      },
+      job_title: personalInfo.professionalTitle,
+      experience: workExperience
+        .filter((exp) => exp.title || exp.company)
+        .map((exp) => ({
+          id: exp.id,
+          jobTitle: exp.title,
+          company: exp.company,
+          dates: {
+            start: exp.startYear,
+            end: exp.endYear,
+          },
+          description: exp.description,
+        })),
+      education: education
+        .filter((edu) => edu.degree || edu.school)
+        .map((edu) => ({
+          id: edu.id,
+          degree: edu.degree,
+          institution: edu.school,
+          dates: {
+            end: edu.year,
+          },
+          description: edu.description,
+        })),
+      skills: skillsArray.length > 0 ? skillsArray : skills.split(",").map((s) => s.trim()).filter((s) => s.length > 0),
+      projects: projects
+        .filter((proj) => proj.name)
+        .map((proj) => ({
+          name: proj.name,
+          description: proj.description,
+          technologies: proj.technologies
+            ? proj.technologies.split(",").map((t) => t.trim())
+            : [],
+          url: proj.url || "",
+        })),
+      certifications: certifications
+        .filter((cert) => cert.name)
+        .map((cert) => ({
+          name: cert.name,
+          issuing_organization: cert.issuing_organization,
+          date_issued: cert.date_issued,
+        })),
+      languages: languages
+        .filter((lang) => lang.name)
+        .map((lang) => ({
+          name: lang.name,
+          proficiency: lang.proficiency,
+        })),
+    };
+
+    return basePayload;
+  };
+
+  // Drag and drop handlers for work experience
+  const handleDragEndWorkExperience = (event: DragEndEvent) => {
+    const { active, over } = event;
+    
+    if (over && active.id !== over.id) {
+      const oldIndex = workExperience.findIndex((item) => item.id === active.id);
+      const newIndex = workExperience.findIndex((item) => item.id === over.id);
+      
+      if (oldIndex !== -1 && newIndex !== -1) {
+        setWorkExperience(arrayMove(workExperience, oldIndex, newIndex));
+      }
+    }
+  };
+
+  // Drag and drop handlers for education
+  const handleDragEndEducation = (event: DragEndEvent) => {
+    const { active, over } = event;
+    
+    if (over && active.id !== over.id) {
+      const oldIndex = education.findIndex((item) => item.id === active.id);
+      const newIndex = education.findIndex((item) => item.id === over.id);
+      
+      if (oldIndex !== -1 && newIndex !== -1) {
+        setEducation(arrayMove(education, oldIndex, newIndex));
+      }
+    }
+  };
+
+  // Drag and drop handlers for projects
+  const handleDragEndProjects = (event: DragEndEvent) => {
+    const { active, over } = event;
+    
+    if (over && active.id !== over.id) {
+      const oldIndex = projects.findIndex((item) => item.id === active.id);
+      const newIndex = projects.findIndex((item) => item.id === over.id);
+      
+      if (oldIndex !== -1 && newIndex !== -1) {
+        setProjects(arrayMove(projects, oldIndex, newIndex));
+      }
+    }
   };
 
   // Skills management functions
@@ -329,6 +471,10 @@ export function PDFGenerationDialog({
               }`.trim() ||
               profileData?.name ||
               "",
+            professionalTitle:
+              parsedCoverLetterData?.personal_info?.professionalTitle ||
+              profileData?.professional_title ||
+              "",
             email:
               parsedCoverLetterData?.personal_info?.email ||
               profileData?.email ||
@@ -415,6 +561,10 @@ export function PDFGenerationDialog({
                 profileData?.last_name || ""
               }`.trim() ||
               profileData?.name ||
+              "",
+            professionalTitle:
+              resumeData?.personalInfo?.professionalTitle ||
+              profileData?.professional_title ||
               "",
             email:
               resumeData?.personalInfo?.email || profileData?.email || "",
@@ -608,6 +758,7 @@ export function PDFGenerationDialog({
             const info = parsedData.personal_info;
             setPersonalInfo({
               fullName: info.full_name || "",
+              professionalTitle: info.professional_title || "",
               email: info.email || "",
               phone: info.phone || "",
               address: info.address || "",
@@ -716,6 +867,7 @@ export function PDFGenerationDialog({
       if (hasBeenOpened) {
         setPersonalInfo({
           fullName: "",
+          professionalTitle: "",
           email: "",
           phone: "",
           address: "",
@@ -739,7 +891,7 @@ export function PDFGenerationDialog({
         setSkillsArray([]);
         setSkills("");
         setAdditionalSections("");
-        setProjects([{ name: "", description: "", technologies: "", url: "" }]);
+        setProjects([{ id: crypto.randomUUID(), name: "", description: "", technologies: "", url: "" }]);
         setCertifications([
           { name: "", issuing_organization: "", date_issued: "" },
         ]);
@@ -931,47 +1083,7 @@ export function PDFGenerationDialog({
         return false;
       }
 
-      const resumePayload = {
-        personalInfo: {
-          name: personalInfo.fullName,
-          email: personalInfo.email,
-          phone: personalInfo.phone,
-          linkedin: personalInfo.linkedin,
-          location: personalInfo.address,
-          summary: personalInfo.summary,
-        },
-        experience: workExperience
-          .filter((exp) => exp.title || exp.company)
-          .map((exp) => ({
-            id: exp.id || crypto.randomUUID(),
-            jobTitle: exp.title,
-            company: exp.company,
-            dates: { start: exp.startYear, end: exp.endYear },
-            description: exp.description,
-          })),
-        education: education
-          .filter((edu) => edu.degree || edu.school)
-          .map((edu) => ({
-            id: edu.id || crypto.randomUUID(),
-            degree: edu.degree,
-            institution: edu.school,
-            dates: { end: edu.year },  // Fixed: dates should be an object with 'end' property
-            description: edu.description,
-          })),
-        skills: skillsArray.filter((s) => s.trim()),
-        projects: projects
-          .filter((p) => p.name)
-          .map((p) => ({
-            title: p.name,
-            description: p.description,
-            technologies: p.technologies 
-              ? p.technologies.split(",").map((t: string) => t.trim()).filter((t: string) => t)
-              : [],
-            url: p.url,
-          })),
-        certifications: certifications.filter((c) => c.name),
-        languages: languages.filter((l) => l.name),
-      };
+      const resumePayload = buildOrderedResumePayload();
 
       console.log("Saving resume payload:", resumePayload);
 
@@ -1053,7 +1165,7 @@ export function PDFGenerationDialog({
   const addProject = () => {
     setProjects([
       ...projects,
-      { name: "", description: "", technologies: "", url: "" },
+      { id: crypto.randomUUID(), name: "", description: "", technologies: "", url: "" },
     ]);
   };
 
@@ -1659,26 +1771,23 @@ export function PDFGenerationDialog({
           </div>
 
           {/* Desktop Navigation - Tabs */}
-          <div className="hidden sm:block px-5 sm:px-6">
-            <div className="flex overflow-x-auto scrollbar-hide -mb-px gap-1">
-              {/* Cover Letter Job Details */}
+          <div className="hidden sm:block px-5 sm:px-6 overflow-x-auto">
+            <div className="flex -mb-px gap-1 min-w-max pb-1">
+              {/* Cover Letter Sections */}
               {contentType === "cover_letter" && (
-                <button
-                  onClick={() => toggleSection("personalInfo")}
-                  className={`flex items-center gap-2 px-5 py-3 border-b-3 font-semibold text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-xl hover:scale-105 ${
-                    expandedSections.personalInfo
-                      ? "border-blue-500 text-blue-600 bg-blue-50 shadow-lg dark:border-blue-400 dark:text-blue-400 dark:bg-blue-500/20"
-                      : "border-transparent text-gray-600 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50/50 hover:shadow-lg dark:text-gray-400 dark:hover:text-blue-400 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
-                  }`}
-                >
-                  <Briefcase className="h-4 w-4 flex-shrink-0" />
-                  <span>Job Details</span>
-                </button>
-              )}
-
-              {/* Resume Sections */}
-              {contentType === "resume" && (
                 <>
+                  <button
+                    onClick={() => toggleSection("workExperience")}
+                    className={`flex items-center gap-2 px-5 py-3 border-b-3 font-semibold text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-xl hover:scale-105 ${
+                      expandedSections.workExperience
+                        ? "border-blue-500 text-blue-600 bg-blue-50 shadow-lg dark:border-blue-400 dark:text-blue-400 dark:bg-blue-500/20"
+                        : "border-transparent text-gray-600 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50/50 hover:shadow-lg dark:text-gray-400 dark:hover:text-blue-400 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
+                    }`}
+                  >
+                    <User className="h-4 w-4 flex-shrink-0" />
+                    <span>Personal Info</span>
+                  </button>
+                  
                   <button
                     onClick={() => toggleSection("personalInfo")}
                     className={`flex items-center gap-2 px-5 py-3 border-b-3 font-semibold text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-xl hover:scale-105 ${
@@ -1687,77 +1796,94 @@ export function PDFGenerationDialog({
                         : "border-transparent text-gray-600 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50/50 hover:shadow-lg dark:text-gray-400 dark:hover:text-blue-400 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
                     }`}
                   >
-                    <User className="h-4 w-4 flex-shrink-0" />
+                    <Briefcase className="h-4 w-4 flex-shrink-0" />
+                    <span>Job Details</span>
+                  </button>
+                </>
+              )}
+
+              {/* Resume Sections */}
+              {contentType === "resume" && (
+                <>
+                  <button
+                    onClick={() => toggleSection("personalInfo")}
+                    className={`flex items-center gap-1.5 px-3 lg:px-5 py-3 border-b-3 font-semibold text-xs lg:text-sm whitespace-nowrap transition-all duration-300 rounded-t-xl hover:scale-105 ${
+                      expandedSections.personalInfo
+                        ? "border-blue-500 text-blue-600 bg-blue-50 shadow-lg dark:border-blue-400 dark:text-blue-400 dark:bg-blue-500/20"
+                        : "border-transparent text-gray-600 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50/50 hover:shadow-lg dark:text-gray-400 dark:hover:text-blue-400 dark:hover:border-blue-500/50 dark:hover:bg-blue-500/10"
+                    }`}
+                  >
+                    <User className="h-3.5 w-3.5 lg:h-4 lg:w-4 flex-shrink-0" />
                     <span>Personal</span>
                   </button>
 
                   <button
                     onClick={() => toggleSection("workExperience")}
-                    className={`flex items-center gap-2 px-5 py-3 border-b-3 font-semibold text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-xl hover:scale-105 ${
+                    className={`flex items-center gap-1.5 px-3 lg:px-5 py-3 border-b-3 font-semibold text-xs lg:text-sm whitespace-nowrap transition-all duration-300 rounded-t-xl hover:scale-105 ${
                       expandedSections.workExperience
                         ? "border-green-500 text-green-700 bg-green-50 shadow-lg dark:bg-green-900/30 dark:text-green-300 dark:border-green-400"
                         : "border-transparent text-muted-foreground hover:text-green-700 hover:border-green-500 hover:bg-green-50 hover:shadow-lg dark:hover:text-green-300 dark:hover:bg-green-900/30 dark:hover:border-green-400"
                     }`}
                   >
-                    <Briefcase className="h-4 w-4 flex-shrink-0" />
+                    <Briefcase className="h-3.5 w-3.5 lg:h-4 lg:w-4 flex-shrink-0" />
                     <span>Work</span>
                   </button>
 
                   <button
                     onClick={() => toggleSection("education")}
-                    className={`flex items-center gap-2 px-5 py-3 border-b-3 font-semibold text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-xl hover:scale-105 ${
+                    className={`flex items-center gap-1.5 px-3 lg:px-5 py-3 border-b-3 font-semibold text-xs lg:text-sm whitespace-nowrap transition-all duration-300 rounded-t-xl hover:scale-105 ${
                       expandedSections.education
                         ? "border-purple-500 text-purple-700 bg-purple-50 shadow-lg dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-400"
                         : "border-transparent text-muted-foreground hover:text-purple-700 hover:border-purple-500 hover:bg-purple-50 hover:shadow-lg dark:hover:text-purple-300 dark:hover:bg-purple-900/30 dark:hover:border-purple-400"
                     }`}
                   >
-                    <GraduationCap className="h-4 w-4 flex-shrink-0" />
+                    <GraduationCap className="h-3.5 w-3.5 lg:h-4 lg:w-4 flex-shrink-0" />
                     <span>Education</span>
                   </button>
 
                   <button
                     onClick={() => toggleSection("skills")}
-                    className={`flex items-center gap-2 px-5 py-3 border-b-3 font-semibold text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-xl hover:scale-105 ${
+                    className={`flex items-center gap-1.5 px-3 lg:px-5 py-3 border-b-3 font-semibold text-xs lg:text-sm whitespace-nowrap transition-all duration-300 rounded-t-xl hover:scale-105 ${
                       expandedSections.skills
                         ? "border-orange-500 text-orange-700 bg-orange-50 shadow-lg dark:bg-orange-900/30 dark:text-orange-300 dark:border-orange-400"
                         : "border-transparent text-muted-foreground hover:text-orange-700 hover:border-orange-500 hover:bg-orange-50 hover:shadow-lg dark:hover:text-orange-300 dark:hover:bg-orange-900/30 dark:hover:border-orange-400"
                     }`}
                   >
-                    <Sparkles className="h-4 w-4 flex-shrink-0" />
+                    <Sparkles className="h-3.5 w-3.5 lg:h-4 lg:w-4 flex-shrink-0" />
                     <span>Skills</span>
                   </button>
 
                   <button
                     onClick={() => toggleSection("projects")}
-                    className={`flex items-center gap-2 px-5 py-3 border-b-3 font-semibold text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-xl hover:scale-105 ${
+                    className={`flex items-center gap-1.5 px-3 lg:px-5 py-3 border-b-3 font-semibold text-xs lg:text-sm whitespace-nowrap transition-all duration-300 rounded-t-xl hover:scale-105 ${
                       expandedSections.projects
                         ? "border-yellow-500 text-yellow-700 bg-yellow-50 shadow-lg dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-400"
                         : "border-transparent text-muted-foreground hover:text-yellow-700 hover:border-yellow-500 hover:bg-yellow-50 hover:shadow-lg dark:hover:text-yellow-300 dark:hover:bg-yellow-900/30 dark:hover:border-yellow-400"
                     }`}
                   >
-                    <Lightbulb className="h-4 w-4 flex-shrink-0" />
+                    <Lightbulb className="h-3.5 w-3.5 lg:h-4 lg:w-4 flex-shrink-0" />
                     <span>Projects</span>
                   </button>
                   <button
                     onClick={() => toggleSection("certifications")}
-                    className={`flex items-center gap-2 px-5 py-3 border-b-3 font-semibold text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-xl hover:scale-105 ${
+                    className={`flex items-center gap-1.5 px-3 lg:px-5 py-3 border-b-3 font-semibold text-xs lg:text-sm whitespace-nowrap transition-all duration-300 rounded-t-xl hover:scale-105 ${
                       expandedSections.certifications
                         ? "border-blue-500 text-blue-700 bg-blue-50 shadow-lg dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-400"
                         : "border-transparent text-muted-foreground hover:text-blue-700 hover:border-blue-500 hover:bg-blue-50 hover:shadow-lg dark:hover:text-blue-300 dark:hover:bg-blue-900/30 dark:hover:border-blue-400"
                     }`}
                   >
-                    <Award className="h-4 w-4 flex-shrink-0" />
+                    <Award className="h-3.5 w-3.5 lg:h-4 lg:w-4 flex-shrink-0" />
                     <span>Certifications</span>
                   </button>
                   <button
                     onClick={() => toggleSection("languages")}
-                    className={`flex items-center gap-2 px-5 py-3 border-b-3 font-semibold text-sm whitespace-nowrap transition-all duration-300 min-w-0 rounded-t-xl hover:scale-105 ${
+                    className={`flex items-center gap-1.5 px-3 lg:px-5 py-3 border-b-3 font-semibold text-xs lg:text-sm whitespace-nowrap transition-all duration-300 rounded-t-xl hover:scale-105 ${
                       expandedSections.languages
                         ? "border-pink-500 text-pink-700 bg-pink-50 shadow-lg dark:bg-pink-900/30 dark:text-pink-300 dark:border-pink-400"
                         : "border-transparent text-muted-foreground hover:text-pink-700 hover:border-pink-500 hover:bg-pink-50 hover:shadow-lg dark:hover:text-pink-300 dark:hover:bg-pink-900/30 dark:hover:border-pink-400"
                     }`}
                   >
-                    <Globe className="h-4 w-4 flex-shrink-0" />
+                    <Globe className="h-3.5 w-3.5 lg:h-4 lg:w-4 flex-shrink-0" />
                     <span>Languages</span>
                   </button>
                 </>
@@ -1794,15 +1920,15 @@ export function PDFGenerationDialog({
                 {contentType === "cover_letter" &&
                   expandedSections.personalInfo && (
                     <div className="!bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 rounded-xl p-4 sm:p-6 shadow-lg !border !border-gray-200 dark:!border-white/8">
-                      <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
-                        <Briefcase className="h-4 w-4 sm:h-5 sm:w-5 text-foreground flex-shrink-0" />
+                      <h2 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3 sm:mb-4 flex items-center gap-2">
+                        <Briefcase className="h-4 w-4 text-foreground flex-shrink-0" />
                         <span className="truncate">
                           Job Application Details
                         </span>
                       </h2>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                         <div>
-                          <Label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+                          <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">
                             Company Name
                           </Label>
                           <Input
@@ -1811,47 +1937,177 @@ export function PDFGenerationDialog({
                             onChange={(e) =>
                               setEditedCompanyName(e.target.value)
                             }
-                            className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
+                            className="w-full h-9 sm:h-10 text-sm px-3"
                           />
                         </div>
                         <div>
-                          <Label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+                          <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">
                             Job Title
                           </Label>
                           <Input
                             placeholder="e.g., Software Engineer"
                             value={editedJobTitle}
                             onChange={(e) => setEditedJobTitle(e.target.value)}
-                            className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
+                            className="w-full h-9 sm:h-10 text-sm px-3"
                           />
                         </div>
                         <div>
-                          <Label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+                          <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">
                             Recipient Name (Optional)
                           </Label>
                           <Input
                             placeholder="e.g., Jane Doe"
                             value={recipientName}
                             onChange={(e) => setRecipientName(e.target.value)}
-                            className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
+                            className="w-full h-9 sm:h-10 text-sm px-3"
                           />
                         </div>
                         <div>
-                          <Label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
+                          <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">
                             Recipient Title (Optional)
                           </Label>
                           <Input
                             placeholder="e.g., Hiring Manager"
                             value={recipientTitle}
                             onChange={(e) => setRecipientTitle(e.target.value)}
-                            className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
+                            className="w-full h-9 sm:h-10 text-sm px-3"
                           />
                         </div>
                       </div>
                     </div>
                   )}
 
-                {/* Personal Information Section */}
+                {/* Personal Information Section for Cover Letter */}
+                {contentType === "cover_letter" && expandedSections.workExperience && (
+                  <div className="!bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 rounded-xl p-4 sm:p-6 shadow-lg !border !border-gray-200 dark:!border-white/8">
+                    <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
+                      <User className="h-4 w-4 sm:h-5 sm:w-5 text-foreground flex-shrink-0" />
+                      <span className="truncate">Personal Information</span>
+                    </h2>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                      <div className="space-y-3 sm:space-y-4">
+                        <div>
+                          <Label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 sm:mb-2 block">
+                            Full Name
+                          </Label>
+                          <Input
+                            placeholder="John Doe"
+                            value={personalInfo.fullName}
+                            onChange={(e) =>
+                              setPersonalInfo({
+                                ...personalInfo,
+                                fullName: e.target.value,
+                              })
+                            }
+                            className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 sm:mb-2 block">
+                            Professional Title
+                          </Label>
+                          <Input
+                            placeholder="e.g., Senior Software Engineer"
+                            value={personalInfo.professionalTitle}
+                            onChange={(e) =>
+                              setPersonalInfo({
+                                ...personalInfo,
+                                professionalTitle: e.target.value,
+                              })
+                            }
+                            className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 sm:mb-2 block">
+                            Email Address
+                          </Label>
+                          <Input
+                            placeholder="john.doe@email.com"
+                            type="email"
+                            value={personalInfo.email}
+                            onChange={(e) =>
+                              setPersonalInfo({
+                                ...personalInfo,
+                                email: e.target.value,
+                              })
+                            }
+                            className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 sm:mb-2 block">
+                            Phone Number
+                          </Label>
+                          <Input
+                            placeholder="+1 (555) 123-4567"
+                            value={personalInfo.phone}
+                            onChange={(e) =>
+                              setPersonalInfo({
+                                ...personalInfo,
+                                phone: e.target.value,
+                              })
+                            }
+                            className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-3 sm:space-y-4">
+                        <div>
+                          <Label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 sm:mb-2 block">
+                            Address
+                          </Label>
+                          <Input
+                            placeholder="City, State, Country"
+                            value={personalInfo.address}
+                            onChange={(e) =>
+                              setPersonalInfo({
+                                ...personalInfo,
+                                address: e.target.value,
+                              })
+                            }
+                            className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 sm:mb-2 block">
+                            LinkedIn Profile
+                          </Label>
+                          <Input
+                            placeholder="linkedin.com/in/johndoe"
+                            value={personalInfo.linkedin}
+                            onChange={(e) =>
+                              setPersonalInfo({
+                                ...personalInfo,
+                                linkedin: e.target.value,
+                              })
+                            }
+                            className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 sm:mb-2 block">
+                            Website/Portfolio
+                          </Label>
+                          <Input
+                            placeholder="johndoe.com"
+                            value={personalInfo.website}
+                            onChange={(e) =>
+                              setPersonalInfo({
+                                ...personalInfo,
+                                website: e.target.value,
+                              })
+                            }
+                            className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+
+                {/* Personal Information Section for Resume */}
                 {contentType === "resume" && expandedSections.personalInfo && (
                   <div className="!bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 rounded-xl p-4 sm:p-6 shadow-lg !border !border-gray-200 dark:!border-white/8">
                     <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
@@ -1877,6 +2133,22 @@ export function PDFGenerationDialog({
                               setPersonalInfo({
                                 ...personalInfo,
                                 fullName: e.target.value,
+                              })
+                            }
+                            className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 sm:mb-2 block">
+                            Professional Title
+                          </Label>
+                          <Input
+                            placeholder="e.g., Senior Software Engineer"
+                            value={personalInfo.professionalTitle}
+                            onChange={(e) =>
+                              setPersonalInfo({
+                                ...personalInfo,
+                                professionalTitle: e.target.value,
                               })
                             }
                             className="w-full h-10 sm:h-11 text-sm sm:text-base px-3 sm:px-4"
@@ -1995,12 +2267,19 @@ export function PDFGenerationDialog({
                         <Briefcase className="h-4 w-4 sm:h-5 sm:w-5 text-green-600 flex-shrink-0" />
                         <span className="truncate">Work Experience</span>
                       </h2>
-                      <div className="space-y-4 sm:space-y-6">
-                        {workExperience.map((job, index) => (
-                          <div
-                            key={job.id || index}
-                            className="relative !border !border-gray-200 dark:!border-white/20 rounded-xl p-4 sm:p-6 !bg-gray-50 dark:!bg-background/70 backdrop-blur-md shadow-lg hover:shadow-xl transition-all duration-200 group"
-                          >
+                      <DndContext
+                        sensors={sensors}
+                        collisionDetection={closestCenter}
+                        onDragEnd={handleDragEndWorkExperience}
+                      >
+                        <SortableContext
+                          items={workExperience.map(item => item.id)}
+                          strategy={verticalListSortingStrategy}
+                        >
+                          <div className="space-y-4 sm:space-y-6">
+                            {workExperience.map((job, index) => (
+                              <SortableItem key={job.id} id={job.id}>
+                                <div className="relative !border !border-gray-200 dark:!border-white/20 rounded-xl p-4 sm:p-6 !bg-gray-50 dark:!bg-background/70 backdrop-blur-md shadow-lg hover:shadow-xl transition-all duration-200 group">
                             {/* Header with improved styling */}
                             <div className="flex items-center justify-between mb-4">
                               <div className="flex items-center gap-3">
@@ -2129,11 +2408,15 @@ export function PDFGenerationDialog({
                                 }}
                               />
                             </div>
+                                </div>
+                              </SortableItem>
+                            ))}
                           </div>
-                        ))}
-                        <Button
-                          onClick={() =>
-                            setWorkExperience([
+                        </SortableContext>
+                      </DndContext>
+                      <Button
+                        onClick={() =>
+                          setWorkExperience([
                               ...workExperience,
                               {
                                 id: crypto.randomUUID(),
@@ -2146,7 +2429,7 @@ export function PDFGenerationDialog({
                             ])
                           }
                           variant="outline"
-                          className="w-full border-dashed border-2 h-11 sm:h-12 text-gray-600 hover:text-foreground hover:border-gray-400 text-sm sm:text-base font-medium touch-manipulation"
+                          className="w-full mt-4 border-dashed border-2 h-11 sm:h-12 text-gray-600 hover:text-foreground hover:border-gray-400 text-sm sm:text-base font-medium touch-manipulation"
                         >
                           <Plus className="h-4 w-4 mr-2 flex-shrink-0" />
                           <span className="hidden sm:inline">
@@ -2154,7 +2437,6 @@ export function PDFGenerationDialog({
                           </span>
                           <span className="sm:hidden">Add Job</span>
                         </Button>
-                      </div>
                     </div>
                   )}
 
@@ -2165,12 +2447,19 @@ export function PDFGenerationDialog({
                       <GraduationCap className="h-4 w-4 sm:h-5 sm:w-5 text-purple-600 flex-shrink-0" />
                       <span className="truncate">Education</span>
                     </h2>
-                    <div className="space-y-6">
-                      {education.map((edu, index) => (
-                        <div
-                          key={edu.id || index}
-                          className="!border !border-gray-200 dark:!border-white/20 rounded-xl p-4 sm:p-6 !bg-gray-50 dark:!bg-background/70 backdrop-blur-md shadow-lg hover:shadow-xl transition-all duration-200 group"
-                        >
+                    <DndContext
+                      sensors={sensors}
+                      collisionDetection={closestCenter}
+                      onDragEnd={handleDragEndEducation}
+                    >
+                      <SortableContext
+                        items={education.map(item => item.id)}
+                        strategy={verticalListSortingStrategy}
+                      >
+                        <div className="space-y-6">
+                          {education.map((edu, index) => (
+                            <SortableItem key={edu.id} id={edu.id}>
+                              <div className="!border !border-gray-200 dark:!border-white/20 rounded-xl p-4 sm:p-6 !bg-gray-50 dark:!bg-background/70 backdrop-blur-md shadow-lg hover:shadow-xl transition-all duration-200 group">
                           <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center gap-3">
                               <div className="w-8 h-8 rounded-full bg-purple-500 flex items-center justify-center shadow-lg">
@@ -2178,9 +2467,16 @@ export function PDFGenerationDialog({
                                   {index + 1}
                                 </span>
                               </div>
-                              <h4 className="text-sm font-medium text-gray-900 dark:text-white">
-                                Education #{index + 1}
-                              </h4>
+                              <div className="flex-1">
+                                <h4 className="text-sm font-medium text-gray-900 dark:text-white">
+                                  {edu.degree || `Education #${index + 1}`}
+                                </h4>
+                                {edu.school && (
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    {edu.school}
+                                  </p>
+                                )}
+                              </div>
                             </div>
                             {education.length > 1 && (
                               <Button
@@ -2264,11 +2560,15 @@ export function PDFGenerationDialog({
                               }}
                             />
                           </div>
+                              </div>
+                            </SortableItem>
+                          ))}
                         </div>
-                      ))}
-                      <Button
-                        onClick={() =>
-                          setEducation([
+                      </SortableContext>
+                    </DndContext>
+                    <Button
+                      onClick={() =>
+                        setEducation([
                             ...education,
                             {
                               id: crypto.randomUUID(),
@@ -2285,7 +2585,6 @@ export function PDFGenerationDialog({
                         <Plus className="h-4 w-4 mr-2" />
                         Add Another Education
                       </Button>
-                    </div>
                   </div>
                 )}
 

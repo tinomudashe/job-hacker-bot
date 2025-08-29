@@ -3,6 +3,7 @@
 import {
   Building,
   Calendar,
+  Globe,
   Linkedin,
   Mail,
   MapPin,
@@ -40,15 +41,30 @@ export const CreativeCoverLetterTemplate: React.FC<{
               {personalInfo?.phone}
             </p>
             {personalInfo?.linkedin && (
-              <a
-                href={personalInfo.linkedin}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-end gap-2 text-primary hover:underline"
-              >
-                <Linkedin className="w-4 h-4" />
-                /in/{personalInfo.linkedin.split("/").pop()}
-              </a>
+              <p className="flex items-center justify-end gap-2">
+                <Linkedin className="w-4 h-4 text-primary/70" />
+                <a
+                  href={personalInfo.linkedin}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline break-all"
+                >
+                  {personalInfo.linkedin}
+                </a>
+              </p>
+            )}
+            {personalInfo?.website && (
+              <p className="flex items-center justify-end gap-2">
+                <Globe className="w-4 h-4 text-primary/70" />
+                <a
+                  href={personalInfo.website}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline break-all"
+                >
+                  {personalInfo.website}
+                </a>
+              </p>
             )}
             <p className="flex items-center justify-end gap-2">
               <MapPin className="w-4 h-4 text-primary/70" />{" "}

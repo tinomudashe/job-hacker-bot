@@ -91,17 +91,8 @@ export function CoverLetterDialog({
   });
 
   // Collapsible sections state
-  const [expandedSections, setExpandedSections] = React.useState({
-    personalInfo: true,
-    content: true,
-  });
+  const [activeTab, setActiveTab] = React.useState<'jobDetails' | 'personalInfo' | 'content'>('jobDetails');
 
-  const toggleSection = (section: keyof typeof expandedSections) => {
-    setExpandedSections((prev) => ({
-      ...prev,
-      [section]: !prev[section],
-    }));
-  };
 
   const { getToken } = useAuth();
 
@@ -116,6 +107,40 @@ export function CoverLetterDialog({
 
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
+
+  // Fetch user profile when dialog opens
+  React.useEffect(() => {
+    if (open) {
+      fetchUserProfile();
+    }
+  }, [open]);
+
+  const fetchUserProfile = async () => {
+    try {
+      const token = await getToken();
+      if (!token) return;
+
+      const response = await fetch("/api/user/profile", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        const userData = await response.json();
+        setPersonalInfo({
+          fullName: userData.name || "",
+          email: userData.email || "",
+          phone: userData.phone || "",
+          address: userData.location || "",
+          linkedin: userData.linkedin || "",
+          website: userData.website || "",
+        });
+      }
+    } catch (error) {
+      console.error("Failed to fetch user profile:", error);
+    }
+  };
 
   // Improved modal scroll lock
   React.useEffect(() => {
@@ -517,10 +542,24 @@ export function CoverLetterDialog({
           <div className="px-4 sm:px-6">
             <div className="flex overflow-x-auto scrollbar-hide -mb-px">
               <button
-                onClick={() => toggleSection("personalInfo")}
+                type="button"
+                onClick={() => setActiveTab('jobDetails')}
                 className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition-colors min-w-0 ${
-                  expandedSections.personalInfo
-                    ? "border-foreground text-foreground bg-muted"
+                  activeTab === 'jobDetails'
+                    ? "border-blue-500 text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-400"
+                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300"
+                }`}
+              >
+                <Briefcase className="h-4 w-4 flex-shrink-0" />
+                <span>Job Details</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('personalInfo')}
+                className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition-colors min-w-0 ${
+                  activeTab === 'personalInfo'
+                    ? "border-purple-500 text-purple-600 bg-purple-50 dark:bg-purple-900/20 dark:text-purple-400"
                     : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300"
                 }`}
               >
@@ -529,9 +568,10 @@ export function CoverLetterDialog({
               </button>
 
               <button
-                onClick={() => toggleSection("content")}
+                type="button"
+                onClick={() => setActiveTab('content')}
                 className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition-colors min-w-0 ${
-                  expandedSections.content
+                  activeTab === 'content'
                     ? "border-teal-500 text-teal-600 bg-teal-50 dark:bg-teal-900/20 dark:text-teal-400"
                     : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300"
                 }`}
@@ -553,13 +593,13 @@ export function CoverLetterDialog({
             <div className="flex-1 p-3 sm:p-6">
               <div className="max-w-4xl mx-auto space-y-4 sm:space-y-6">
                 {/* Job Details Section */}
-                {expandedSections.personalInfo && (
+                {activeTab === 'jobDetails' && (
                   <div className="!bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 rounded-xl p-4 sm:p-6 shadow-lg !border !border-gray-200 dark:!border-white/8">
                     <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
-                      <Briefcase className="h-4 w-4 sm:h-5 sm:w-5 text-foreground flex-shrink-0" />
+                      <Briefcase className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 flex-shrink-0" />
                       <span className="truncate">Job Application Details</span>
                     </h2>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                       <div>
                         <Label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
                           Company Name
@@ -583,11 +623,16 @@ export function CoverLetterDialog({
                         />
                       </div>
                     </div>
+                  </div>
+                )}
 
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-                      <User className="h-4 w-4 text-foreground flex-shrink-0" />
-                      <span>Personal Information</span>
-                    </h3>
+                {/* Personal Information Section */}
+                {activeTab === 'personalInfo' && (
+                  <div className="!bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 rounded-xl p-4 sm:p-6 shadow-lg !border !border-gray-200 dark:!border-white/8">
+                    <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
+                      <User className="h-4 w-4 sm:h-5 sm:w-5 text-purple-600 flex-shrink-0" />
+                      <span className="truncate">Personal Information</span>
+                    </h2>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                       <div className="space-y-3 sm:space-y-4">
                         <div>
@@ -695,7 +740,7 @@ export function CoverLetterDialog({
                 )}
 
                 {/* Content Editor Section */}
-                {expandedSections.content && (
+                {activeTab === 'content' && (
                   <div className="!bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 rounded-xl p-4 sm:p-6 shadow-lg !border !border-gray-200 dark:!border-white/8">
                     <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
                       <Edit3 className="h-4 w-4 sm:h-5 sm:w-5 text-teal-600 flex-shrink-0" />

@@ -8,6 +8,7 @@ import {
   Lightbulb,
   Linkedin,
   Mail,
+  MapPin,
   Phone,
   Star,
   User,
@@ -66,15 +67,36 @@ export const CreativeResumeTemplate: React.FC<{ data: PreviewData }> = ({
             <p className="flex items-center justify-end gap-2 print:gap-1">
               <Phone className="w-4 h-4 text-gray-400 print:w-3 print:h-3" /> {personalInfo?.phone}
             </p>
+            {personalInfo?.location && (
+              <p className="flex items-center justify-end gap-2 print:gap-1">
+                <MapPin className="w-4 h-4 text-gray-400 print:w-3 print:h-3" /> {personalInfo.location}
+              </p>
+            )}
             {personalInfo?.linkedin && (
-              <a
-                href={personalInfo.linkedin}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-end gap-2 text-blue-600 hover:underline print:gap-1"
-              >
-                <Linkedin className="w-4 h-4 print:w-3 print:h-3" /> LinkedIn Profile
-              </a>
+              <div className="flex items-center justify-end gap-2 print:gap-1">
+                <Linkedin className="w-4 h-4 text-gray-400 print:w-3 print:h-3" />
+                <a
+                  href={personalInfo.linkedin}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:underline text-xs break-all"
+                >
+                  {personalInfo.linkedin}
+                </a>
+              </div>
+            )}
+            {personalInfo?.website && (
+              <div className="flex items-center justify-end gap-2 print:gap-1">
+                <Globe className="w-4 h-4 text-gray-400 print:w-3 print:h-3" />
+                <a
+                  href={personalInfo.website}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:underline text-xs break-all"
+                >
+                  {personalInfo.website}
+                </a>
+              </div>
             )}
           </div>
         </div>

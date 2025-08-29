@@ -6,6 +6,7 @@ export interface PreviewData {
   company_name: string;
   job_title: string;
   content_type: "cover_letter" | "resume";
+  section_order?: Array<{ id: string; visible: boolean }>;
   personalInfo?: {
     name: string;
     email: string;

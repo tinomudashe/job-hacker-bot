@@ -1,0 +1,29 @@
+/* Content script styles */
+#job-hacker-indicator {
+  position: fixed !important;
+  bottom: 20px !important;
+  right: 20px !important;
+  background: #3B82F6 !important;
+  color: white !important;
+  padding: 8px 12px !important;
+  border-radius: 8px !important;
+  font-size: 12px !important;
+  font-family: 'Inter', system-ui, sans-serif !important;
+  z-index: 999999 !important;
+  display: none;
+  align-items: center !important;
+  gap: 6px !important;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1) !important;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}

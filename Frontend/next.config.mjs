@@ -3,7 +3,14 @@ const nextConfig = {
   // Safari compatibility optimizations
   experimental: {
     optimizeServerReact: false, // Better Safari compatibility
-    serverComponentsHmrCache: false, // Prevents Safari caching issues
+  },
+  
+  // Exclude extension folder from build
+  typescript: {
+    ignoreBuildErrors: false,
+  },
+  eslint: {
+    dirs: ['app', 'components', 'lib'], // Only lint these directories, not job-extension
   },
 
   // Compiler optimizations for Safari
@@ -17,6 +24,11 @@ const nextConfig = {
 
   // Webpack optimizations for Safari
   webpack: (config, { dev, isServer }) => {
+    // Handle WebSocket native modules
+    if (isServer) {
+      config.externals = [...(config.externals || []), 'bufferutil', 'utf-8-validate'];
+    }
+    
     // Safari-specific optimizations
     if (!dev && !isServer) {
       // Optimize for Safari's JavaScript engine

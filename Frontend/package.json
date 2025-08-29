@@ -10,6 +10,9 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^5.2.2",
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@eslint/eslintrc": "^3",
     "@hookform/resolvers": "^3.9.0",
     "@radix-ui/react-alert-dialog": "^1.1.1",
@@ -32,10 +35,12 @@
     "@tiptap/pm": "^2.5.7",
     "@tiptap/react": "^2.5.7",
     "@tiptap/starter-kit": "^2.5.7",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.18.1",
     "autoprefixer": "^10.4.21",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
@@ -45,7 +50,10 @@
     "eslint": "^9",
     "eslint-config-next": "15.3.3",
     "framer-motion": "^11.3.8",
+    "html2canvas-pro": "^1.5.11",
     "html2pdf.js": "^0.9.0",
+    "jsonwebtoken": "^9.0.2",
+    "jspdf": "^3.0.2",
     "lucide-react": "^0.408.0",
     "next": "14.2.4",
     "next-themes": "^0.3.0",
@@ -62,6 +70,7 @@
     "tw-animate-css": "^1.3.4",
     "typescript": "^5",
     "uuid": "^10.0.0",
+    "ws": "^8.18.3",
     "zustand": "^5.0.6"
   },
   "devDependencies": {
@@ -80,5 +89,9 @@
     "tailwindcss-animate": "^1.0.7",
     "tw-animate-css": "^1.3.4",
     "typescript": "^5"
+  },
+  "optionalDependencies": {
+    "bufferutil": "^4.0.9",
+    "utf-8-validate": "^6.0.5"
   }
 }

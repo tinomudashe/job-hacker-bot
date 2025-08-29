@@ -35,14 +35,28 @@ export const ProfessionalCoverLetterTemplate: React.FC<{
             {personalInfo?.phone}
           </p>
           {personalInfo?.linkedin && (
-            <a
-              href={personalInfo.linkedin}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-700 hover:underline dark:text-blue-400"
-            >
-              {personalInfo.linkedin}
-            </a>
+            <p>
+              <a
+                href={personalInfo.linkedin}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-700 hover:underline dark:text-blue-400"
+              >
+                {personalInfo.linkedin}
+              </a>
+            </p>
+          )}
+          {personalInfo?.website && (
+            <p>
+              <a
+                href={personalInfo.website}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-700 hover:underline dark:text-blue-400"
+              >
+                {personalInfo.website}
+              </a>
+            </p>
           )}
         </div>
 

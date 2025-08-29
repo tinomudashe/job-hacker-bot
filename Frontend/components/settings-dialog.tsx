@@ -23,6 +23,7 @@ import {
   AlertCircle,
   AlertTriangle,
   CheckCircle,
+  Chrome,
   CreditCard,
   Crown,
   Database,
@@ -36,6 +37,7 @@ import {
 } from "lucide-react";
 import * as React from "react";
 import { toast } from "sonner";
+import { ExtensionTokensManager } from "./extension-tokens-manager";
 
 // Types
 interface UserProfile {
@@ -500,6 +502,19 @@ export function SettingsDialog({
                 <Database className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
                 <span>Privacy</span>
               </button>
+              <button
+                onClick={() => setActiveTab("extensions")}
+                className={`relative flex flex-1 justify-center items-center gap-2 px-3 sm:px-5 py-3 sm:py-3.5 font-medium text-xs sm:text-sm whitespace-nowrap transition-all duration-200 min-w-0 rounded-lg touch-manipulation ${
+                  activeTab === "extensions"
+                    ? "text-blue-600 bg-white shadow-md ring-1 ring-blue-500/20 dark:text-blue-400 dark:bg-blue-500/10 dark:ring-blue-400/30"
+                    : "text-gray-500 hover:text-gray-700 hover:bg-gray-100/50 dark:text-gray-400 dark:hover:text-gray-300 dark:hover:bg-white/5"
+                }`}
+                role="tab"
+                aria-controls="extensions-tab"
+              >
+                <Chrome className="h-3.5 w-3.5 sm:h-4 sm:w-4 flex-shrink-0" />
+                <span>Add-ons</span>
+              </button>
             </div>
           </div>
         </div>
@@ -510,9 +525,9 @@ export function SettingsDialog({
           data-scrollable="true"
         >
           {/* Editor View */}
-          <div className="h-full flex flex-col">
+          <div className="flex flex-col">
             {/* Content Editor */}
-            <div className="flex-1 p-3 sm:p-6 !bg-gray-50 dark:!bg-transparent">
+            <div className="p-3 sm:p-6 !bg-gray-50 dark:!bg-transparent">
               <div className="max-w-4xl mx-auto space-y-3 sm:space-y-6">
                 {/* Personal Info Tab */}
                 {activeTab === "personal" && (
@@ -522,7 +537,7 @@ export function SettingsDialog({
                     role="tabpanel"
                   >
                     {/* Profile Overview Card */}
-                    <div className="!bg-gradient-to-br from-blue-500 to-purple-600 dark:from-blue-600 dark:to-purple-700 rounded-2xl p-6 sm:p-8 text-white shadow-xl">
+                    <div className="!bg-blue-600 dark:!bg-blue-700 rounded-2xl p-6 sm:p-8 text-white shadow-xl">
                       <div className="flex items-center justify-between">
                         <div>
                           <h2 className="text-2xl sm:text-3xl font-bold mb-2">Welcome back!</h2>
@@ -982,7 +997,7 @@ export function SettingsDialog({
                     role="tabpanel"
                   >
                     {/* Privacy Header Card */}
-                    <div className="!bg-gradient-to-br from-green-500 to-teal-600 dark:from-green-600 dark:to-teal-700 rounded-2xl p-6 sm:p-8 text-white shadow-xl">
+                    <div className="!bg-green-600 dark:!bg-green-700 rounded-2xl p-6 sm:p-8 text-white shadow-xl">
                       <div className="flex items-center justify-between">
                         <div>
                           <h2 className="text-2xl sm:text-3xl font-bold mb-2">Privacy & Security</h2>
@@ -1173,6 +1188,18 @@ export function SettingsDialog({
                         </div>
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {/* Extensions Tab Content */}
+                {activeTab === "extensions" && (
+                  <div
+                    className="space-y-6"
+                    id="extensions-tab"
+                    role="tabpanel"
+                    aria-labelledby="extensions"
+                  >
+                    <ExtensionTokensManager />
                   </div>
                 )}
               </div>

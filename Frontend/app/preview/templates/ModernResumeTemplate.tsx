@@ -24,19 +24,33 @@ export const ModernResumeTemplate: React.FC<{ data: PreviewData }> = ({
         <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
           {personalInfo?.name}
         </h1>
-        <div className="flex justify-center flex-wrap gap-x-6 gap-y-2 mt-4 text-sm text-gray-500 dark:text-gray-400">
-          <span>{personalInfo?.email}</span>
-          {personalInfo?.phone && <span>| {personalInfo.phone}</span>}
-          {personalInfo?.location && <span>| {personalInfo.location}</span>}
+        <div className="mt-4 text-sm text-gray-500 dark:text-gray-400 text-center">
+          {personalInfo?.email && <div>{personalInfo.email}</div>}
+          {personalInfo?.phone && <div>{personalInfo.phone}</div>}
+          {personalInfo?.location && <div>{personalInfo.location}</div>}
           {personalInfo?.linkedin && (
-            <a
-              href={personalInfo.linkedin}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-600 hover:underline dark:text-blue-400"
-            >
-              | LinkedIn
-            </a>
+            <div>
+              <a
+                href={personalInfo.linkedin}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 hover:underline dark:text-blue-400"
+              >
+                {personalInfo.linkedin}
+              </a>
+            </div>
+          )}
+          {personalInfo?.website && (
+            <div>
+              <a
+                href={personalInfo.website}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 hover:underline dark:text-blue-400"
+              >
+                {personalInfo.website}
+              </a>
+            </div>
           )}
         </div>
       </header>
@@ -47,7 +61,7 @@ export const ModernResumeTemplate: React.FC<{ data: PreviewData }> = ({
             <h2 className="text-lg uppercase font-bold tracking-widest text-gray-700 dark:text-gray-300 mb-4">
               Summary
             </h2>
-            <p className="text-gray-600 dark:text-gray-400 whitespace-pre-line">
+            <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-line">
               {personalInfo.summary}
             </p>
           </section>
@@ -154,7 +168,7 @@ export const ModernResumeTemplate: React.FC<{ data: PreviewData }> = ({
               </h2>
               <ul className="space-y-1">
                 {skills.map((skill, index) => (
-                  <li key={index} className="text-gray-600 dark:text-gray-400">
+                  <li key={index} className="text-sm text-gray-600 dark:text-gray-400">
                     {skill}
                   </li>
                 ))}
@@ -167,10 +181,10 @@ export const ModernResumeTemplate: React.FC<{ data: PreviewData }> = ({
               <h2 className="text-lg uppercase font-bold tracking-widest text-gray-700 dark:text-gray-300 mb-4">
                 Certifications
               </h2>
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {certifications.map((cert, index) => (
-                  <div key={index} className="bg-gray-50 dark:bg-gray-800/50 p-2 rounded">
-                    <p className="font-semibold text-sm text-gray-800 dark:text-gray-200">
+                  <div key={index} className="bg-gray-50 dark:bg-gray-800/50 p-1.5 rounded">
+                    <p className="font-semibold text-xs text-gray-800 dark:text-gray-200">
                       {cert.name}
                     </p>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
