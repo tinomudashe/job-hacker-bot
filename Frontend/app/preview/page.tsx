@@ -605,13 +605,13 @@ export default function PreviewPage() {
         format: 'a4',
       });
       
-      // Convert canvas to high-quality image
-      const imgData = canvas.toDataURL('image/png', 1.0);
+      // Convert canvas to optimized image with compression
+      const imgData = canvas.toDataURL('image/jpeg', 0.85); // Use JPEG with 85% quality for smaller size
       
       // Add image to PDF with intelligent page breaks
       if (imgHeight <= pdfHeight) {
         // Single page - no vertical centering, start from top
-        pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+        pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight);
       } else {
         // Multiple pages with proper content height calculation
         const pageMargin = 10; // 10mm margin between page breaks
@@ -655,14 +655,14 @@ export default function PreviewPage() {
               canvas.width, pixelHeight // Dest width, height
             );
             
-            // Convert slice to image
-            const sliceData = sliceCanvas.toDataURL('image/png', 1.0);
+            // Convert slice to compressed image
+            const sliceData = sliceCanvas.toDataURL('image/jpeg', 0.85);
             
             // Position on page: first page starts at 0, others start with margin
             const yPosition = pageIndex === 0 ? 0 : pageMargin;
             
             // Add to PDF
-            pdf.addImage(sliceData, 'PNG', 0, yPosition, imgWidth, contentHeight);
+            pdf.addImage(sliceData, 'JPEG', 0, yPosition, imgWidth, contentHeight);
           }
           
           // Update counters
