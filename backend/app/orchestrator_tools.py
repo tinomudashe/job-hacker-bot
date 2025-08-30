@@ -25,7 +25,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import attributes
 
 # Your existing imports (preserved)
-from app.models_db import User, Resume, Document, GeneratedCoverLetter
+from app.models_db import User, Resume, Document, GeneratedCoverLetter, TailoredResume
 from app.resume import ResumeData, PersonalInfo, Experience, Education, Dates, fix_resume_data_structure
 from app.db import async_session_maker
 from app.utils.retry_helper import retry_with_backoff
@@ -780,11 +780,14 @@ class ResumeToolsLangGraph:
                        - Make it 3-4 sentences using ONLY information from the user's resume
                     
                     2. **ENHANCE all Experience Descriptions** (using user's actual work):
+                       - Format ALL experience descriptions as clear bullet points (3-5 per job)
+                       - Start each bullet with a strong action verb (Architected, Engineered, Implemented, etc.)
                        - Rewrite the user's EXISTING experience descriptions to be more impactful
                        - Add estimated metrics based on the user's actual role (e.g., if they led a team, estimate team size)
                        - Emphasize aspects of their REAL experience that relate to {job_title}
-                       - Use action verbs and keywords from job posting where they apply to user's actual work
+                       - Use keywords from job posting where they apply to user's actual work
                        - DO NOT invent new roles or experiences - only enhance what's already there
+                       - ALWAYS format as: "• [Action verb] [accomplishment/responsibility]"
                     
                     3. **REORGANIZE and EXPAND the Skills Section** (based on user's background):
                        - Keep ALL of the user's existing skills (they actually have these)

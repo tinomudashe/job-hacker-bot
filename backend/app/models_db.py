@@ -75,6 +75,7 @@ class User(Base):
     generated_cvs = relationship("GeneratedCV", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
     generated_cover_letters = relationship("GeneratedCoverLetter", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
     resume = relationship("Resume", back_populates="user", uselist=False, cascade="all, delete-orphan", passive_deletes=True)
+    tailored_resumes = relationship("TailoredResume", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
     pages = relationship("Page", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
     user_preferences = relationship("UserPreference", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
     user_behaviors = relationship("UserBehavior", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
@@ -175,6 +176,23 @@ class Resume(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
 
     user = relationship("User", back_populates="resume")
+
+class TailoredResume(Base):
+    __tablename__ = "tailored_resumes"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    base_resume_id = Column(String, ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False)
+    job_title = Column(String, nullable=True)
+    company_name = Column(String, nullable=True)
+    job_description = Column(Text, nullable=True)
+    tailored_data = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+    
+    # Relationships
+    user = relationship("User", back_populates="tailored_resumes")
+    base_resume = relationship("Resume")
 
 class UserPreference(Base):
     __tablename__ = 'user_preferences'

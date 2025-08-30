@@ -76,7 +76,7 @@ class SummaryEnhancer:
             
             TARGET POSITION (if specified):
             - Role: {target_role}
-            - Company: {company_name}
+            - Company: [COMPANY NAME REMOVED FOR UNIVERSAL APPLICABILITY]
             
             INSTRUCTIONS:
             Create a factual 3-4 sentence professional summary based ONLY on provided information:
@@ -101,8 +101,10 @@ class SummaryEnhancer:
             - Do not invent achievements or capabilities
             - Do not add metrics unless already provided
             - Write in third person without pronouns
-            - Keep it universally applicable, not company-specific
-            - Focus on factual background, not aspirations
+            - NEVER mention specific company names in the summary (remove any reference to target company)
+            - NEVER include phrases like "seeking the [position] at [company]" or "position at [company]"
+            - Keep it universally applicable to any similar role
+            - Focus on factual background, not aspirations or job targeting
             - If information is limited, keep the summary shorter rather than inventing details
             
             Generate ONLY the summary text, no additional commentary:"""

@@ -36,6 +36,7 @@ from app.email_api import router as email_router
 from app.onboarding import router as onboarding_router
 from app.chrome_extension_api import router as chrome_extension_router
 from app.extension_tokens import router as extension_tokens_router
+from app.tailored_resumes import router as tailored_resumes_router
 
 app = FastAPI()
 
@@ -73,6 +74,7 @@ app.include_router(orchestrator_router, prefix="/api", tags=["orchestrator"])
 app.include_router(billing_router, prefix="/api/billing", tags=["billing"])
 app.include_router(cover_letter_router, prefix="/api", tags=["cover-letters"])
 app.include_router(resume_router, prefix="/api", tags=["resume"])
+app.include_router(tailored_resumes_router, prefix="/api", tags=["tailored-resumes"])
 app.include_router(resume_generator_router, prefix="/api", tags=["resume-generator"])
 app.include_router(job_search_router, prefix="/api", tags=["job-search"])
 app.include_router(test_regenerate_router, prefix="/api", tags=["test-regenerate"])
