@@ -309,7 +309,7 @@ export function PDFGenerationDialog({
       projects: projects
         .filter((proj) => proj.name)
         .map((proj) => ({
-          name: proj.name,
+          title: proj.name,  // Backend expects 'title' field
           description: proj.description,
           technologies: proj.technologies
             ? proj.technologies.split(",").map((t) => t.trim())
