@@ -37,16 +37,24 @@ def fix_resume_data_structure(data: Dict) -> Dict:
         info_data = data['personalInfo']
         data['personalInfo'] = {k: v for k, v in info_data.items() if k in allowed_keys}
 
-    # Fix lists of objects: add IDs, fix project titles and technologies
+    # Fix lists of objects: add IDs, fix project titles and technologies  
     for section in ['experience', 'education', 'projects', 'languages']:
         if section in data and isinstance(data.get(section), list):
+            # Filter out invalid items for projects
+            if section == 'projects':
+                data[section] = [
+                    item for item in data[section] 
+                    if isinstance(item, dict) and (item.get('name') or item.get('title'))
+                ]
+            
             for item in data[section]:
                 if isinstance(item, dict):
                     if 'id' not in item:
                         item['id'] = str(uuid.uuid4())
-                    # Rename 'name' to 'title' in projects for compatibility
-                    if section == 'projects' and 'name' in item and 'title' not in item:
-                        item['title'] = item.pop('name')
+                    # Ensure projects have 'title' field (support both 'name' and 'title')
+                    if section == 'projects':
+                        if 'name' in item and 'title' not in item:
+                            item['title'] = item.pop('name')
                     # Convert technologies string to array if needed
                     if section == 'projects' and 'technologies' in item:
                         tech = item['technologies']
