@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { PreviewData } from "../types"; // Assuming types are defined in a shared file
+import { PreviewData } from "../types";
+import { parseJobDescription } from "@/lib/utils/markdown"; // Assuming types are defined in a shared file
 
 // EDIT: This is the existing ResumeTemplate component, moved into its own file.
 // It will serve as our "Modern" style.
@@ -86,14 +87,10 @@ export const ModernResumeTemplate: React.FC<{ data: PreviewData }> = ({
                   {job.company}
                 </p>
                 <ul className="text-gray-600 dark:text-gray-400 mt-2 space-y-1">
-                  {job.description
-                    .replace(/\n(?![•▪\-])/g, ' ') // Replace single newlines with spaces
-                    .split(/[•▪]|\n\s*[-•▪]/) // Split on bullets or newlines followed by bullets
-                    .filter(p => p.trim())
-                    .map((point, idx) => (
+                  {parseJobDescription(job.description).map((point, idx) => (
                     <li key={idx} className="flex text-sm">
                       <span className="mr-2 text-blue-500">▪</span>
-                      <span>{point.trim()}</span>
+                      <span>{point}</span>
                     </li>
                   ))}
                 </ul>

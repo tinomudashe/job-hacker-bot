@@ -1,6 +1,7 @@
 import React from "react";
 import { PreviewData } from "../types";
 import { SectionRenderer } from "../helpers/section-renderer";
+import { parseJobDescription } from "@/lib/utils/markdown";
 
 interface ProfessionalATSTemplateProps {
   data: PreviewData;
@@ -91,14 +92,11 @@ export const ProfessionalATSTemplate: React.FC<ProfessionalATSTemplateProps> = (
                     </div>
                     {job.description && (
                       <ul className="mt-1 space-y-0.5 ml-4">
-                        {job.description
-                          .split(/[•▪]|\n/)
-                          .filter(p => p.trim())
-                          .map((point, idx) => (
-                            <li key={idx} className="text-sm text-black list-disc">
-                              {point.trim()}
-                            </li>
-                          ))}
+                        {parseJobDescription(job.description).map((point, idx) => (
+                          <li key={idx} className="text-sm text-black list-disc">
+                            {point}
+                          </li>
+                        ))}
                       </ul>
                     )}
                   </div>

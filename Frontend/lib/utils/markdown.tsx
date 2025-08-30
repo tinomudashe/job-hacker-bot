@@ -43,3 +43,33 @@ export function renderMarkdownLine(text: string): React.ReactNode {
     return part;
   });
 }
+
+/**
+ * Parse job description into bullet points for consistent rendering
+ * Handles various bullet formats and ensures proper spacing
+ */
+export function parseJobDescription(description: string): string[] {
+  if (!description) return [];
+  
+  // Normalize the text first
+  const normalized = description
+    .replace(/\r\n/g, '\n') // Normalize line endings
+    .replace(/\r/g, '\n')   // Handle Mac line endings
+    .trim();
+  
+  // Split on various bullet point indicators
+  const points = normalized
+    .split(/(?:\n|^)\s*[•▪\-\*]\s*/) // Split on newline + bullet chars
+    .filter(point => point.trim().length > 0) // Remove empty points
+    .map(point => point.trim().replace(/\n+/g, ' ')); // Clean up each point
+  
+  // If no bullet points found, split on double newlines (paragraphs)
+  if (points.length <= 1) {
+    return normalized
+      .split(/\n\s*\n/)
+      .filter(para => para.trim().length > 0)
+      .map(para => para.trim().replace(/\n/g, ' '));
+  }
+  
+  return points;
+}

@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import * as React from "react";
 import { PreviewData } from "../types";
+import { parseJobDescription } from "@/lib/utils/markdown";
 
 // EDIT: This is a brand new template component for the "Creative" style.
 export const CreativeResumeTemplate: React.FC<{ data: PreviewData }> = ({
@@ -124,14 +125,10 @@ export const CreativeResumeTemplate: React.FC<{ data: PreviewData }> = ({
                     {job.dates?.start} - {job.dates?.end || "Present"}
                   </p>
                   <ul className="text-sm leading-relaxed space-y-1 print:text-xs print:leading-normal print:space-y-0.5">
-                    {job.description
-                      .replace(/\n(?![•▪\-])/g, ' ') // Replace single newlines with spaces
-                      .split(/[•▪]|\n\s*[-•▪]/) // Split on bullets or newlines followed by bullets
-                      .filter(p => p.trim())
-                      .map((point, idx) => (
+                    {parseJobDescription(job.description).map((point, idx) => (
                       <li key={idx} className="flex">
                         <span className="mr-2 text-blue-500">•</span>
-                        <span>{point.trim()}</span>
+                        <span>{point}</span>
                       </li>
                     ))}
                   </ul>

@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { PreviewData } from "../types";
+import { parseJobDescription } from "@/lib/utils/markdown";
 
 // EDIT: This is a brand new template component for the "Professional" style.
 export const ProfessionalResumeTemplate: React.FC<{ data: PreviewData }> = ({
@@ -131,14 +132,10 @@ export const ProfessionalResumeTemplate: React.FC<{ data: PreviewData }> = ({
                     {job.dates?.start} - {job.dates?.end || "Present"}
                   </p>
                   <ul className="text-sm text-gray-600 dark:text-gray-400 mt-2 space-y-1">
-                    {job.description
-                      .replace(/\n(?![•▪\-])/g, ' ') // Replace single newlines with spaces
-                      .split(/[•▪]|\n\s*[-•▪]/) // Split on bullets or newlines followed by bullets
-                      .filter(point => point.trim())
-                      .map((point, idx) => (
+                    {parseJobDescription(job.description).map((point, idx) => (
                       <li key={idx} className="flex">
                         <span className="mr-2">•</span>
-                        <span>{point.trim()}</span>
+                        <span>{point}</span>
                       </li>
                     ))}
                   </ul>
