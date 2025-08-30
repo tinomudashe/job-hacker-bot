@@ -138,7 +138,7 @@ export const ImprovedProfessionalTemplate: React.FC<{ data: PreviewData }> = ({
                 {projects.map((project, index) => (
                   <div key={index} className="border-l-2 border-gray-300 dark:border-gray-600 pl-3">
                     <h3 className="font-semibold text-gray-900 dark:text-gray-100">
-                      {project.name}
+                      {project.title || project.name}
                       {project.url && (
                         <a href={project.url} className="ml-2 text-xs text-blue-600 dark:text-blue-400">
                           [View]

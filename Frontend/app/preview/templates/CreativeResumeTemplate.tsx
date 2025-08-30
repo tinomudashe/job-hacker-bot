@@ -144,7 +144,7 @@ export const CreativeResumeTemplate: React.FC<{ data: PreviewData }> = ({
               {projects.map((project, index) => (
                 <div key={index}>
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 print:text-sm print:font-medium">
-                    {project.name}
+                    {project.title || project.name}
                   </h3>
                   <p className="text-sm leading-relaxed whitespace-pre-line print:text-xs print:leading-normal">
                     {project.description}

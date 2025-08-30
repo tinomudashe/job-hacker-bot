@@ -107,7 +107,7 @@ export const ModernResumeTemplate: React.FC<{ data: PreviewData }> = ({
             {projects.map((project, index) => (
               <div key={index} className="mb-6">
                 <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-                  {project.name}
+                  {project.title || project.name}
                 </h3>
                 {project.url && (
                   <a

@@ -150,7 +150,7 @@ export const ProfessionalATSTemplate: React.FC<ProfessionalATSTemplateProps> = (
               <div className="space-y-2">
                 {projects.map((project, idx) => (
                   <div key={idx} className="mb-2">
-                    <h4 className="font-semibold text-black text-sm mb-1">{project.name}</h4>
+                    <h4 className="font-semibold text-black text-sm mb-1">{project.title || project.name}</h4>
                     {project.description && (
                       <ul className="ml-4 space-y-0.5">
                         {project.description

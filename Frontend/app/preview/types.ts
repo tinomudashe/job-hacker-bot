@@ -32,7 +32,8 @@ export interface PreviewData {
   }>;
   skills?: string[];
   projects?: Array<{
-    name: string;
+    title: string;  // Backend uses 'title' field
+    name?: string;  // Keep 'name' for backward compatibility
     description: string;
     technologies: string[];
     url: string;

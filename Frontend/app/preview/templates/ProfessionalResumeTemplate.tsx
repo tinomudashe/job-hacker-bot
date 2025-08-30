@@ -155,7 +155,7 @@ export const ProfessionalResumeTemplate: React.FC<{ data: PreviewData }> = ({
                   className="mb-6 relative pl-6 before:absolute before:left-0 before:top-1.5 before:w-2 before:h-2 before:bg-gray-500 before:rounded-full"
                 >
                   <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100">
-                    {project.name}
+                    {project.title || project.name}
                   </h3>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                     {project.description}
