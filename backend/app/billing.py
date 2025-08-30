@@ -57,6 +57,11 @@ async def get_subscription_status(
     logger.info(f"Fetching subscription status for user: {db_user.id}")
     subscription_db = await get_subscription(db, str(db_user.id))
 
+    # Admin users get premium access without Stripe subscription
+    if getattr(db_user, 'is_admin', False):
+        logger.info(f"Admin user {db_user.id} granted premium access")
+        return {"plan": "premium", "status": "active", "is_active": True, "admin_access": True}
+    
     if not subscription_db or not subscription_db.stripe_subscription_id:
         logger.info(f"No active subscription found in DB for user {db_user.id}.")
         return {"plan": "free", "status": "inactive", "is_active": False}

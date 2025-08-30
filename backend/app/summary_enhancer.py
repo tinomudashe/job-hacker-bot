@@ -27,7 +27,6 @@ class SummaryEnhancer:
         current_summary: str,
         user_data: Dict[str, Any],
         target_role: Optional[str] = None,
-        company_name: Optional[str] = None,
         job_description: Optional[str] = None
     ) -> str:
         """
@@ -37,7 +36,6 @@ class SummaryEnhancer:
             current_summary: The existing summary (if any)
             user_data: User's resume data including experience and skills
             target_role: Target job role (optional)
-            company_name: Target company (optional)
             job_description: Job description to tailor to (optional)
             
         Returns:
@@ -57,8 +55,7 @@ class SummaryEnhancer:
             top_skills,
             recent_role,
             key_achievements,
-            target_role,
-            company_name
+            target_role
         )
         
         # Create enhancement prompt
@@ -120,11 +117,14 @@ class SummaryEnhancer:
                 "top_skills": ", ".join(top_skills[:5]),
                 "key_achievements": "\n".join(key_achievements[:3]),
                 "target_role": target_role or "Not specified",
-                "company_name": company_name or "Not specified"
+                "company_name": "NOT_PROVIDED"
             })
             
             # Clean and validate the summary
             enhanced_summary = self._clean_summary(enhanced_summary)
+            
+            # Aggressively remove any company name references that slipped through
+            enhanced_summary = self._remove_company_references(enhanced_summary)
             
             # Ensure it's not too long
             if len(enhanced_summary.split()) > 100:
@@ -226,8 +226,7 @@ class SummaryEnhancer:
         top_skills: list,
         recent_role: str,
         key_achievements: list,
-        target_role: Optional[str],
-        company_name: Optional[str]
+        target_role: Optional[str]
     ) -> Dict[str, Any]:
         """Build context for summary enhancement"""
         return {
@@ -236,8 +235,7 @@ class SummaryEnhancer:
             "top_skills": top_skills,
             "recent_role": recent_role,
             "key_achievements": key_achievements,
-            "target_role": target_role,
-            "company_name": company_name
+            "target_role": target_role
         }
     
     def _clean_summary(self, summary: str) -> str:

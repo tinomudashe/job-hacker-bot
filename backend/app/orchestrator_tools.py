@@ -290,7 +290,6 @@ class ResumeToolsLangGraph:
                     {context}
 
                     TARGET ROLE: {target_role}
-                    COMPANY: {company_name}
                     JOB DESCRIPTION: {job_description}
 
                     **REFINEMENT GUIDELINES - FACTUAL ONLY:**
@@ -509,7 +508,6 @@ class ResumeToolsLangGraph:
 
             **Target Position:**
             - Job Title: {job_title}
-            - Company: {company_name}
             - Job Description: {job_description}
 
             **User's Key Skills to Highlight:**
@@ -566,7 +564,7 @@ class ResumeToolsLangGraph:
 
             prompt = PromptTemplate(
                 template=prompt_template,
-                input_variables=["base_resume", "job_title", "company_name", "job_description", "user_skills"],
+                input_variables=["base_resume", "job_title", "job_description", "user_skills"],
                 partial_variables={"format_instructions": parser.get_format_instructions()},
             )
 
@@ -577,7 +575,6 @@ class ResumeToolsLangGraph:
             tailored_resume = await chain.ainvoke({
                 "base_resume": json.dumps(base_resume_data.dict(), indent=2),
                 "job_title": job_title,
-                "company_name": company_name,
                 "job_description": job_description,
                 "user_skills": user_skills,
             })
@@ -593,7 +590,7 @@ class ResumeToolsLangGraph:
                         "education": tailored_resume.education
                     },
                     target_role=job_title,
-                    company_name=company_name,
+                    company_name=None,  # Never pass company name
                     job_description=job_description[:500] if job_description else None
                 )
                 tailored_resume.personalInfo.summary = enhanced_summary
@@ -767,7 +764,6 @@ class ResumeToolsLangGraph:
                     TARGET JOB INFORMATION:
                     - URL: {job_url}
                     - Position: {job_title}
-                    - Company: {company_name}
                     - Job Details: {job_description}
 
                     **CRITICAL REQUIREMENTS - YOU MUST:**

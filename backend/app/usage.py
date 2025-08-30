@@ -36,6 +36,10 @@ class UsageManager:
         self.feature = feature
 
     async def __call__(self, db: AsyncSession = Depends(get_db), db_user: User = Depends(get_current_active_user)):
+        # Admin users get premium access automatically
+        if getattr(db_user, 'is_admin', False):
+            return  # Admins bypass all usage limits
+            
         sub_result = await db.execute(select(Subscription).where(Subscription.user_id == db_user.id))
         subscription = sub_result.scalar_one_or_none()
         
