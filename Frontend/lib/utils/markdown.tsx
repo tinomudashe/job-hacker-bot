@@ -63,8 +63,20 @@ export function parseJobDescription(description: string): string[] {
     .filter(point => point.trim().length > 0) // Remove empty points
     .map(point => point.trim().replace(/\n+/g, ' ')); // Clean up each point
   
-  // If no bullet points found, split on double newlines (paragraphs)
+  // If no bullet points found, intelligently split long paragraphs into sentences
   if (points.length <= 1) {
+    const singleParagraph = normalized.replace(/\n/g, ' ').trim();
+    
+    // If it's a very long paragraph (>200 chars), split into sentences
+    if (singleParagraph.length > 200) {
+      return singleParagraph
+        .split(/\.\s+(?=[A-Z])/) // Split on periods followed by capital letters
+        .filter(sentence => sentence.trim().length > 20) // Filter out short fragments
+        .map(sentence => sentence.trim() + (sentence.endsWith('.') ? '' : '.')) // Ensure proper punctuation
+        .slice(0, 6); // Limit to 6 bullet points max
+    }
+    
+    // Otherwise split on double newlines (paragraphs)
     return normalized
       .split(/\n\s*\n/)
       .filter(para => para.trim().length > 0)

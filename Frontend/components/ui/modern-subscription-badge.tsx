@@ -14,6 +14,7 @@ interface Subscription {
   trial_days_remaining?: number;
   expires_at?: string;
   features_unlocked?: number;
+  admin_access?: boolean;
 }
 
 interface ModernSubscriptionBadgeProps {
@@ -39,6 +40,7 @@ export function ModernSubscriptionBadge({
 
   const isPro = subscription.plan === "pro";
   const isTrial = subscription.plan === "trial";
+  const isAdmin = subscription.admin_access;
 
   // Minimal variant - clean and simple
   if (variant === "minimal") {
@@ -50,7 +52,11 @@ export function ModernSubscriptionBadge({
         onMouseLeave={() => setIsHovered(false)}
         className={cn(
           "relative inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md transition-all duration-200 border",
-          isPro ? [
+          isAdmin ? [
+            "border-purple-500 dark:border-purple-400",
+            "text-purple-600 dark:text-purple-400",
+            "hover:border-purple-600 dark:hover:border-purple-300",
+          ] : isPro ? [
             "border-blue-500 dark:border-blue-400",
             "text-blue-600 dark:text-blue-400",
             "hover:border-blue-600 dark:hover:border-blue-300",
@@ -62,8 +68,8 @@ export function ModernSubscriptionBadge({
           className
         )}
       >
-        {isPro ? <Crown className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
-        <span className="font-semibold">{isPro ? "Pro" : "Trial"}</span>
+        {isAdmin ? <Crown className="h-3.5 w-3.5" /> : isPro ? <Crown className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
+        <span className="font-semibold">{isAdmin ? "Admin" : isPro ? "Pro" : "Trial"}</span>
       </button>
     );
   }
@@ -153,7 +159,10 @@ export function ModernSubscriptionBadge({
           "relative inline-flex items-center gap-2 px-3 py-1.5 rounded-xl cursor-pointer transition-all duration-300",
           "backdrop-blur-sm",
           "border",
-          isPro ? [
+          isAdmin ? [
+            "border-purple-500/50 hover:border-purple-500",
+            "text-purple-600 dark:text-purple-400",
+          ] : isPro ? [
             "border-blue-500/50 hover:border-blue-500",
             "text-blue-600 dark:text-blue-400",
           ] : [
@@ -164,14 +173,16 @@ export function ModernSubscriptionBadge({
         )}
       >        
         <div className="flex items-center gap-2">
-          {isPro ? (
+          {isAdmin ? (
+            <Crown className="h-4 w-4" />
+          ) : isPro ? (
             <Crown className="h-4 w-4" />
           ) : (
             <Sparkles className="h-4 w-4" />
           )}
           
           <span className="text-xs font-semibold">
-            {isPro ? "Pro" : "Trial"}
+            {isAdmin ? "Admin" : isPro ? "Pro" : "Trial"}
           </span>
           {!isPro && subscription.trial_days_remaining && isHovered && (
             <motion.span 

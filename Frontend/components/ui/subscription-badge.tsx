@@ -6,6 +6,7 @@ interface Subscription {
   plan: string;
   is_active: boolean;
   trial_days_remaining?: number;
+  admin_access?: boolean;
 }
 
 interface SubscriptionBadgeProps {
@@ -21,6 +22,26 @@ export function SubscriptionBadge({
 }: SubscriptionBadgeProps) {
   if (!subscription) {
     return null;
+  }
+
+  // Admin badge
+  if (subscription.admin_access) {
+    return (
+      <Badge 
+        variant="secondary"
+        className={cn(
+          "gap-1 px-2.5 py-1 font-medium shadow-md backdrop-blur-md",
+          "bg-gradient-to-r from-purple-500/20 to-indigo-500/20",
+          "border-purple-400/50 dark:border-purple-600/50", 
+          "hover:from-purple-500/30 hover:to-indigo-500/30",
+          "transition-all duration-200",
+          className
+        )}
+      >
+        {showIcon && <Crown className="h-3 w-3" />}
+        <span className="text-xs font-semibold">ADMIN</span>
+      </Badge>
+    );
   }
 
   if (subscription.plan === "pro" && subscription.is_active) {

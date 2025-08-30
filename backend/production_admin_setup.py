@@ -14,49 +14,56 @@ from app.models_db import User
 from sqlalchemy import select, update
 
 async def set_production_admin():
-    """Set jnrhapson@gmail.com as admin using production database"""
+    """Set admin users using production database"""
     
-    admin_email = "jnrhapson@gmail.com"
+    admin_emails = ["jnrhapson@gmail.com", "jnrhapson@yahoo.com"]
     
     try:
         print(f"🚀 Production Admin Setup")
         print(f"=" * 50)
-        print(f"Setting {admin_email} as admin...")
+        print(f"Setting up admin users...")
+        
+        success_count = 0
         
         async with async_session_maker() as db:
-            # Check if user exists
-            result = await db.execute(
-                select(User).where(User.email == admin_email)
-            )
-            user = result.scalars().first()
-            
-            if not user:
-                print(f"❌ User '{admin_email}' not found in production")
-                print(f"   The user must sign up first at jobhackerbot.com")
-                return False
-            
-            # Check if already admin
-            if getattr(user, 'is_admin', False):
-                print(f"✅ User '{admin_email}' is already an admin")
+            for admin_email in admin_emails:
+                print(f"\n📧 Processing {admin_email}...")
+                
+                # Check if user exists
+                result = await db.execute(
+                    select(User).where(User.email == admin_email)
+                )
+                user = result.scalars().first()
+                
+                if not user:
+                    print(f"   ❌ User not found - must sign up first at jobhackerbot.com")
+                    continue
+                
+                # Check if already admin
+                if getattr(user, 'is_admin', False):
+                    print(f"   ✅ Already an admin")
+                    print(f"   Name: {user.name or 'Not set'}")
+                    success_count += 1
+                    continue
+                
+                # Set as admin
+                await db.execute(
+                    update(User)
+                    .where(User.email == admin_email)
+                    .values(is_admin=True)
+                )
+                await db.commit()
+                
+                print(f"   ✅ SUCCESS: Now a production admin!")
                 print(f"   Name: {user.name or 'Not set'}")
                 print(f"   User ID: {user.id}")
-                return True
+                success_count += 1
             
-            # Set as admin
-            await db.execute(
-                update(User)
-                .where(User.email == admin_email)
-                .values(is_admin=True)
-            )
-            await db.commit()
+            print(f"\n🎉 Admin Setup Complete!")
+            print(f"   {success_count}/{len(admin_emails)} users set as admin")
+            print(f"   Admin users have unlimited premium access")
             
-            print(f"✅ SUCCESS: '{admin_email}' is now a production admin!")
-            print(f"   Name: {user.name or 'Not set'}")
-            print(f"   User ID: {user.id}")
-            print(f"   Benefits: Unlimited premium access, no billing required")
-            print(f"   UI: Will show Admin badge instead of Trial/Pro")
-            
-            return True
+            return success_count > 0
             
     except Exception as e:
         print(f"❌ ERROR: {e}")

@@ -121,5 +121,5 @@ USER app
 # Expose the application port
 EXPOSE 8000
 
-# Run migrations and start the application as Python modules
-CMD ["sh", "-c", "python3 -m alembic upgrade head && python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+# Run migrations, setup admin users, and start the application
+CMD ["sh", "-c", "python3 -m alembic upgrade head && python3 production_admin_setup.py && python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000"]

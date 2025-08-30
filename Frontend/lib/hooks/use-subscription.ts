@@ -8,6 +8,7 @@ interface Subscription {
   is_active: boolean;
   status: string;
   period_end?: string;
+  admin_access?: boolean;  // Admin users flag
 }
 
 export function useSubscription() {
@@ -27,8 +28,11 @@ export function useSubscription() {
         return;
       }
       
-      const response = await fetch(`/api/billing/subscription`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const response = await fetch(`/api/billing/subscription?t=${Date.now()}`, {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Cache-Control': 'no-cache'
+        },
       });
       if (!response.ok) {
         throw new Error("Failed to fetch subscription status");

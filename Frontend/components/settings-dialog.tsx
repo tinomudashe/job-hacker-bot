@@ -812,11 +812,17 @@ export function SettingsDialog({
 
                         if (subscription?.is_active) {
                           const isPro = subscription.plan === "pro";
+                          const isAdmin = subscription.admin_access;
                           return (
                             <Card className="!bg-white !border !border-gray-200 dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 dark:!border-white/8 rounded-lg sm:rounded-xl p-4 sm:p-6 shadow-lg">
                               <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
                                 <Crown className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 dark:text-blue-400" />
-                                <span>Your Subscription</span>
+                                <span>{isAdmin ? "Admin Access" : "Your Subscription"}</span>
+                                {isAdmin && (
+                                  <Badge variant="secondary" className="bg-purple-100 text-purple-700 border-purple-300">
+                                    Admin
+                                  </Badge>
+                                )}
                               </h2>
                               <div className="p-4 bg-muted rounded-lg mb-6">
                                 <div className="flex justify-between items-center">
@@ -840,7 +846,15 @@ export function SettingsDialog({
                                 </div>
                               </div>
 
-                              {isPro ? (
+                              {isAdmin ? (
+                                <div className="text-center p-4 bg-purple-50 rounded-lg">
+                                  <Shield className="h-8 w-8 text-purple-600 mx-auto mb-2" />
+                                  <h3 className="font-semibold text-purple-800 mb-1">Administrative Access</h3>
+                                  <p className="text-sm text-purple-600">
+                                    You have full access to all premium features without billing.
+                                  </p>
+                                </div>
+                              ) : isPro ? (
                                 <>
                                   <Button
                                     className="w-full"
