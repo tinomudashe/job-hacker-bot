@@ -1,6 +1,9 @@
 import { auth } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
 
+// Force this route to be dynamic (not statically rendered)
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
     const { userId, getToken } = auth();

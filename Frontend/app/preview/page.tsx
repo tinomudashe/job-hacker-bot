@@ -543,23 +543,28 @@ export default function PreviewPage() {
       // Clone the element to modify without affecting the display
       const clonedElement = elementToCapture.cloneNode(true) as HTMLElement;
       
-      // Create a temporary container
+      // Create a temporary container with fixed viewport size
       const tempContainer = document.createElement('div');
       tempContainer.style.position = 'absolute';
       tempContainer.style.top = '-9999px';
       tempContainer.style.left = '-9999px';
       tempContainer.style.background = 'white';
-      tempContainer.style.width = '210mm'; // A4 width
+      tempContainer.style.width = '210mm'; // A4 width (794px)
+      tempContainer.style.minHeight = '297mm'; // A4 height
       tempContainer.style.padding = '0';
       tempContainer.style.margin = '0';
+      tempContainer.style.overflow = 'visible';
       
-      // Clean up the cloned element
+      // Clean up the cloned element and force consistent sizing
       clonedElement.style.border = 'none';
       clonedElement.style.boxShadow = 'none';
       clonedElement.style.borderRadius = '0';
       clonedElement.style.background = 'white';
       clonedElement.style.margin = '0';
       clonedElement.style.padding = '20px';
+      clonedElement.style.width = '100%';
+      clonedElement.style.maxWidth = '794px'; // A4 width in pixels
+      clonedElement.style.minWidth = '794px'; // Force consistent width
       
       // Remove dark mode classes and ensure white background
       clonedElement.classList.remove('dark', 'dark:bg-black/90', 'dark:border-gray-600/50');
@@ -572,16 +577,18 @@ export default function PreviewPage() {
       // Small delay to ensure rendering
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      // Use html2canvas-pro with optimized settings
+      // Use html2canvas-pro with fixed A4 dimensions for consistent output
+      const a4WidthPx = 794; // A4 width in pixels at 96 DPI
       const canvas = await html2canvas(clonedElement, {
         useCORS: true,
-        scale: 3, // High quality
+        scale: 3,
         logging: false,
         backgroundColor: '#ffffff',
-        width: clonedElement.scrollWidth,
+        width: a4WidthPx,
         height: clonedElement.scrollHeight,
-        windowWidth: clonedElement.scrollWidth,
-        windowHeight: clonedElement.scrollHeight,
+        windowWidth: a4WidthPx,
+        windowHeight: 1122, // A4 height in pixels at 96 DPI
+        foreignObjectRendering: true,
       });
       
       // Remove temporary container
