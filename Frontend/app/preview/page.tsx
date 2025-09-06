@@ -553,17 +553,63 @@ export default function PreviewPage() {
       tempContainer.style.padding = '0';
       tempContainer.style.margin = '0';
       
-      // Clean up the cloned element
+      // Clean up the cloned element and force consistent sizing
       clonedElement.style.border = 'none';
       clonedElement.style.boxShadow = 'none';
       clonedElement.style.borderRadius = '0';
       clonedElement.style.background = 'white';
       clonedElement.style.margin = '0';
       clonedElement.style.padding = '20px';
+      clonedElement.style.color = '#1f2937';
       
-      // Remove dark mode classes and ensure white background
-      clonedElement.classList.remove('dark', 'dark:bg-black/90', 'dark:border-gray-600/50');
-      clonedElement.classList.add('!bg-white');
+      // Remove ALL complex classes that can interfere with html2canvas
+      clonedElement.className = '';
+      
+      // Find the resume-light-mode div and simplify its classes
+      const resumeLightMode = clonedElement.querySelector('.resume-light-mode');
+      if (resumeLightMode) {
+        (resumeLightMode as HTMLElement).className = 'bg-white text-gray-900';
+        (resumeLightMode as HTMLElement).style.backgroundColor = 'white';
+        (resumeLightMode as HTMLElement).style.color = '#1f2937';
+      }
+      
+      // Apply clean, simple styles to all elements to ensure visibility
+      const allElements = clonedElement.querySelectorAll('*');
+      allElements.forEach((element) => {
+        const el = element as HTMLElement;
+        // Remove all Tailwind classes that might interfere
+        el.className = el.className
+          .split(' ')
+          .filter(cls => !cls.includes('dark:') && !cls.includes('!') && !cls.includes('[&'))
+          .join(' ');
+        
+        // Apply simple, html2canvas-friendly styles while preserving blue colors
+        if (el.tagName.match(/^H[1-6]$/)) {
+          // Preserve blue colors for ATS template headers
+          if (el.className.includes('text-blue-600') || el.classList.contains('text-blue-600')) {
+            el.style.color = '#2563eb'; // blue-600
+          } else {
+            el.style.color = '#111827';
+          }
+          el.style.fontWeight = 'bold';
+        } else if (el.tagName === 'P' || el.tagName === 'DIV' || el.tagName === 'SPAN') {
+          // Preserve blue colors for other elements too
+          if (el.className.includes('text-blue-600') || el.classList.contains('text-blue-600')) {
+            el.style.color = '#2563eb'; // blue-600
+          } else {
+            el.style.color = '#374151';
+          }
+        } else if (el.tagName === 'LI') {
+          el.style.color = '#4b5563';
+        } else if (el.tagName === 'A') {
+          el.style.color = '#2563eb';
+        }
+        
+        // Ensure no transparent or complex backgrounds
+        if (el.style.backgroundColor && el.style.backgroundColor !== 'white') {
+          el.style.backgroundColor = 'transparent';
+        }
+      });
       
       // Append to document temporarily
       tempContainer.appendChild(clonedElement);
