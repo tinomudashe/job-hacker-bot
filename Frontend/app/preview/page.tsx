@@ -583,6 +583,16 @@ export default function PreviewPage() {
           .filter(cls => !cls.includes('dark:') && !cls.includes('!') && !cls.includes('[&'))
           .join(' ');
         
+        // Clean up duplicate bullets first
+        if (el.tagName === 'LI') {
+          // Remove bullet characters from list items since CSS list-style will add them
+          const text = el.textContent || '';
+          const cleanText = text.replace(/^[\s]*[•▪●◦‣⁃]\s*/, ''); // Remove leading bullet characters
+          if (cleanText !== text) {
+            el.textContent = cleanText;
+          }
+        }
+        
         // Apply simple, html2canvas-friendly styles while preserving blue colors
         if (el.tagName.match(/^H[1-6]$/)) {
           // Preserve blue colors for ATS template headers
@@ -601,6 +611,9 @@ export default function PreviewPage() {
           }
         } else if (el.tagName === 'LI') {
           el.style.color = '#4b5563';
+          // Ensure list styling is preserved
+          el.style.listStyleType = 'disc';
+          el.style.display = 'list-item';
         } else if (el.tagName === 'A') {
           el.style.color = '#2563eb';
         }
