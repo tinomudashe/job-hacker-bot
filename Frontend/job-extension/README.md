@@ -70,9 +70,9 @@ For other sites, it uses smart detection to find job details.
 
 ## Configuration
 
-The extension connects to your Job Hacker Bot app running at `http://localhost:3000` by default. 
+The extension connects to your Job Hacker Bot app at `https://jobhackerbot.com` by default. 
 
-To use with the production app, update the `appUrl` in the extension settings.
+For development, update the `appUrl` in the extension settings to `http://localhost:3000`.
 
 ## Permissions
 

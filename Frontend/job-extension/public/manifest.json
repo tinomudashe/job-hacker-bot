@@ -9,8 +9,7 @@
     "tabs",
     "scripting",
     "contextMenus",
-    "sidePanel",
-    "tabCapture"
+    "sidePanel"
   ],
   "host_permissions": [
     "<all_urls>"

@@ -543,28 +543,23 @@ export default function PreviewPage() {
       // Clone the element to modify without affecting the display
       const clonedElement = elementToCapture.cloneNode(true) as HTMLElement;
       
-      // Create a temporary container with fixed viewport size
+      // Create a temporary container
       const tempContainer = document.createElement('div');
       tempContainer.style.position = 'absolute';
       tempContainer.style.top = '-9999px';
       tempContainer.style.left = '-9999px';
       tempContainer.style.background = 'white';
-      tempContainer.style.width = '210mm'; // A4 width (794px)
-      tempContainer.style.minHeight = '297mm'; // A4 height
+      tempContainer.style.width = '210mm'; // A4 width
       tempContainer.style.padding = '0';
       tempContainer.style.margin = '0';
-      tempContainer.style.overflow = 'visible';
       
-      // Clean up the cloned element and force consistent sizing
+      // Clean up the cloned element
       clonedElement.style.border = 'none';
       clonedElement.style.boxShadow = 'none';
       clonedElement.style.borderRadius = '0';
       clonedElement.style.background = 'white';
       clonedElement.style.margin = '0';
       clonedElement.style.padding = '20px';
-      clonedElement.style.width = '100%';
-      clonedElement.style.maxWidth = '794px'; // A4 width in pixels
-      clonedElement.style.minWidth = '794px'; // Force consistent width
       
       // Remove dark mode classes and ensure white background
       clonedElement.classList.remove('dark', 'dark:bg-black/90', 'dark:border-gray-600/50');
@@ -577,18 +572,16 @@ export default function PreviewPage() {
       // Small delay to ensure rendering
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      // Use html2canvas-pro with fixed A4 dimensions for consistent output
-      const a4WidthPx = 794; // A4 width in pixels at 96 DPI
+      // Use html2canvas-pro with optimized settings
       const canvas = await html2canvas(clonedElement, {
         useCORS: true,
-        scale: 3,
+        scale: 3, // High quality
         logging: false,
         backgroundColor: '#ffffff',
-        width: a4WidthPx,
+        width: clonedElement.scrollWidth,
         height: clonedElement.scrollHeight,
-        windowWidth: a4WidthPx,
-        windowHeight: 1122, // A4 height in pixels at 96 DPI
-        foreignObjectRendering: true,
+        windowWidth: clonedElement.scrollWidth,
+        windowHeight: clonedElement.scrollHeight,
       });
       
       // Remove temporary container
@@ -739,7 +732,7 @@ export default function PreviewPage() {
       <div className="flex items-center justify-center min-h-screen bg-background p-6">
         <div className="fixed top-0 left-0 right-0 z-50 bg-transparent p-2 sm:p-4 md:p-6">
           <div className="max-w-4xl mx-auto">
-            <header className="flex items-center justify-between w-full px-3 sm:px-4 md:px-6 py-2.5 sm:py-3 md:py-4 bg-background/60 rounded-xl sm:rounded-2xl md:rounded-3xl shadow-2xl border border-white/8 backdrop-blur-xl backdrop-sate-150">
+            <header className="flex items-center justify-between w-full px-3 sm:px-4 md:px-6 py-2.5 sm:py-3 md:py-4 bg-background/60 rounded-xl sm:rounded-2xl md:rounded-3xl shadow-2xl border border-white/8 backdrop-blur-xl backdrop-saturate-150">
               <div className="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
                 <div className="p-1.5 sm:p-2 bg-red-500 rounded-lg sm:rounded-xl shadow-lg flex-shrink-0">
                   <AlertCircle className="h-4 w-4 sm:h-5 sm:w-5 text-white" />

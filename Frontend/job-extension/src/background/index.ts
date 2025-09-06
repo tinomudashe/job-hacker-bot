@@ -53,7 +53,7 @@ chrome.runtime.onInstalled.addListener(() => {
   
   // Set default settings
   chrome.storage.local.set({
-    appUrl: 'http://localhost:3000',
+    appUrl: 'https://jobhackerbot.com',
     autoExtract: false,
     enableContextMenu: true
   });
@@ -122,7 +122,7 @@ chrome.runtime.onMessage.addListener((request: MessageData, sender, sendResponse
 // Handle opening the app with data
 async function handleOpenApp(data: any) {
   const { appUrl } = await chrome.storage.local.get(['appUrl']);
-  const url = appUrl || 'http://localhost:3000';
+  const url = appUrl || 'https://jobhackerbot.com';
   
   // Create URL with params
   const params = new URLSearchParams({
@@ -171,7 +171,7 @@ async function handleOpenApp(data: any) {
 // Check if app is running with retry logic
 async function checkAppConnection(retries = 3): Promise<boolean> {
   const { appUrl } = await chrome.storage.local.get(['appUrl']);
-  const url = appUrl || 'http://localhost:3000';
+  const url = appUrl || 'https://jobhackerbot.com';
   
   for (let i = 0; i < retries; i++) {
     try {
@@ -258,7 +258,7 @@ chrome.action.onClicked.addListener((tab) => {
 // Send message to app tabs
 async function sendMessageToApp(data: any): Promise<any> {
   const { appUrl } = await chrome.storage.local.get(['appUrl']);
-  const url = appUrl || 'http://localhost:3000';
+  const url = appUrl || 'https://jobhackerbot.com';
   
   // Find all app tabs
   const appTabsArray = await chrome.tabs.query({ 
@@ -415,7 +415,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.url) {
     const { appUrl } = await chrome.storage.local.get(['appUrl']);
-    const url = appUrl || 'http://localhost:3000';
+    const url = appUrl || 'https://jobhackerbot.com';
     
     // Check if tab navigated to/from app
     if (tab.url?.startsWith(url)) {
