@@ -130,12 +130,52 @@ export function useSubscription() {
     }
   };
 
+  const cancelSubscription = useCallback(async () => {
+    const confirmed = window.confirm(
+      "Are you sure you want to cancel your subscription? You'll continue to have access until the end of your current billing period."
+    );
+    
+    if (!confirmed) return;
+    
+    setLoading(true);
+    try {
+      const token = await getToken();
+      if (!token) {
+        toast.error("Please sign in to cancel your subscription.");
+        return;
+      }
+      
+      const response = await fetch("/api/billing/cancel-subscription", {
+        method: "POST",
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        toast.success(data.message || "Subscription canceled successfully");
+        await fetchSubscription(); // Refresh subscription status
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        toast.error(errorData.detail || "Failed to cancel subscription");
+      }
+    } catch (error) {
+      console.error("Failed to cancel subscription:", error);
+      toast.error("An error occurred while canceling subscription");
+    } finally {
+      setLoading(false);
+    }
+  }, [getToken, fetchSubscription]);
+
   return {
     subscription,
     loading,
     portalLoading,
     createCheckoutSession,
     createPortalSession,
+    cancelSubscription, // Add cancel function
     updateSubscription, // Expose the new update function
     fetchSubscription, // --- FIX: Expose the fetch function ---
   };

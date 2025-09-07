@@ -174,10 +174,19 @@ async def create_checkout_session(
 
     # --- NEW: Free Trial Eligibility Check ---
     is_eligible_for_trial = True
-    if subscription and subscription.status in ['active', 'trialing', 'past_due', 'canceled']:
-        # If the user has EVER had a subscription (even a canceled one), they are not eligible for a new trial.
+    
+    # Only users who have completed a successful subscription lose trial eligibility
+    if subscription and subscription.status in ['active', 'trialing', 'past_due']:
         is_eligible_for_trial = False
         logger.info(f"User {db_user.id} has a subscription with status '{subscription.status}'. Not eligible for a new trial.")
+    
+    # Users with canceled/failed statuses CAN create new checkout sessions and get trials
+    # This allows retry after cancellation or payment failure
+    if subscription and subscription.status in ['canceled', 'incomplete', 'incomplete_expired']:
+        logger.info(f"User {db_user.id} has status '{subscription.status}'. Allowing new checkout session with trial.")
+        # Reset subscription status to allow new attempt
+        subscription.status = 'inactive'
+        await db.commit()
     
     # If user is already active, redirect them to the customer portal instead of a new checkout.
     if subscription and subscription.status in ['active', 'trialing', 'past_due']:
@@ -272,6 +281,76 @@ async def create_checkout_session(
         logger.error(f"Failed to create Stripe checkout session: {e}")
         raise HTTPException(
             status_code=500, detail="Failed to create checkout session."
+        )
+
+
+@router.post("/cancel-subscription")
+async def cancel_subscription(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Cancel the user's active subscription."""
+    try:
+        # Get the user's subscription
+        subscription = await get_subscription(db, current_user.id)
+        
+        if not subscription:
+            raise HTTPException(
+                status_code=404,
+                detail="No subscription found for this user"
+            )
+            
+        if subscription.status in ['canceled', 'incomplete', 'incomplete_expired']:
+            raise HTTPException(
+                status_code=400,
+                detail="Subscription is already canceled or inactive"
+            )
+            
+        # Cancel the subscription in Stripe
+        if subscription.stripe_subscription_id:
+            try:
+                canceled_subscription = stripe.Subscription.modify(
+                    subscription.stripe_subscription_id,
+                    cancel_at_period_end=True  # Cancel at the end of current billing period
+                )
+                
+                # Update the subscription in the database
+                subscription.status = "canceled"
+                subscription.plan = "free"
+                await db.commit()
+                
+                logger.info(f"Subscription {subscription.stripe_subscription_id} for user {current_user.id} set to cancel at period end")
+                
+                return {
+                    "success": True,
+                    "message": "Subscription will be canceled at the end of your current billing period",
+                    "period_end": canceled_subscription.current_period_end
+                }
+                
+            except stripe.error.StripeError as e:
+                logger.error(f"Stripe error when canceling subscription: {str(e)}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Failed to cancel subscription: {str(e)}"
+                )
+        else:
+            # No Stripe subscription ID, just update database
+            subscription.status = "canceled"
+            subscription.plan = "free"
+            await db.commit()
+            
+            return {
+                "success": True,
+                "message": "Subscription has been canceled"
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error canceling subscription for user {current_user.id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error occurred while canceling subscription"
         )
 
 

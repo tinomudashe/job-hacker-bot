@@ -187,6 +187,7 @@ export function SettingsDialog({
     fetchSubscription,
     createCheckoutSession,
     createPortalSession,
+    cancelSubscription,
     portalLoading,
   } = useSubscription();
 
@@ -874,7 +875,7 @@ export function SettingsDialog({
                                   </p>
                                 </>
                               ) : (
-                                <>
+                                <div className="space-y-3">
                                   <Button
                                     className="w-full"
                                     onClick={createPortalSession}
@@ -887,11 +888,23 @@ export function SettingsDialog({
                                     )}
                                     Manage Billing & Subscription
                                   </Button>
-                                  <p className="text-xs text-muted-foreground mt-2 text-center">
-                                    You will be redirected to Stripe to manage
-                                    your subscription.
+                                  <Button
+                                    variant="outline"
+                                    className="w-full text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300"
+                                    onClick={cancelSubscription}
+                                    disabled={subscriptionLoading}
+                                  >
+                                    {subscriptionLoading ? (
+                                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <X className="mr-2 h-4 w-4" />
+                                    )}
+                                    Cancel Subscription
+                                  </Button>
+                                  <p className="text-xs text-muted-foreground text-center">
+                                    Manage billing via Stripe or cancel directly here.
                                   </p>
-                                </>
+                                </div>
                               )}
                             </Card>
                           );
