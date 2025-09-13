@@ -433,9 +433,61 @@ class ResumeToolsLangGraph:
                     }
                     state["tool_results"] = tool_results
                 
+                # Generate improvement suggestions alongside the refined CV
+                try:
+                    suggestion_prompt = ChatPromptTemplate.from_template("""
+Based on this refined CV, provide 3-5 specific improvement suggestions that the user could apply:
+
+REFINED CV DATA:
+{refined_cv_data}
+
+TARGET ROLE: {target_role}
+
+Provide specific, actionable suggestions in this format:
+• **[Section]** - [Specific suggestion]
+• **Skills** - Add Docker and Kubernetes to strengthen your DevOps profile  
+• **Summary** - Reword to emphasize Python framework experience more prominently
+• **Experience** - Strengthen action verbs in job descriptions for more impact
+
+CRITICAL: Only suggest factual improvements using existing information. 
+NEVER suggest adding fake numbers, metrics, or achievements that aren't already present.
+Focus on: keyword optimization, stronger wording, better structure, grammar improvements.
+""")
+                    
+                    suggestion_llm = ChatAnthropic(model="claude-3-7-sonnet-20250219", temperature=0.3)
+                    suggestion_chain = suggestion_prompt | suggestion_llm | StrOutputParser()
+                    
+                    suggestions_text = await suggestion_chain.ainvoke({
+                        "refined_cv_data": refined_resume.dict(),
+                        "target_role": target_role
+                    })
+                    
+                    log.info(f"Generated CV improvement suggestions for {target_role}")
+                    
+                except Exception as e:
+                    log.warning(f"Failed to generate suggestions: {e}")
+                    suggestions_text = ""
+                
                 log.info(f"CV refined successfully for role: {target_role}")
-                return (f"I've successfully refined your CV for the **{target_role}** role. "
-                        "A download button will appear on this message. [DOWNLOADABLE_RESUME]")
+                
+                # Include context and suggestions in the response
+                response_text = f"I've successfully refined your CV for the **{target_role}** role.\n\n"
+                
+                if suggestions_text:
+                    response_text += f"**💡 Further Improvement Suggestions:**\n{suggestions_text}\n\n"
+                
+                # Add context data for PDF dialog to use for better suggestions
+                context_data = {
+                    "target_role": target_role,
+                    "job_description": job_description,
+                    "company_name": company_name,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                response_text += f"You can preview, edit, and download your refined CV below.\n\n"
+                response_text += f"[CV_CONTEXT]{json.dumps(context_data)}[/CV_CONTEXT] [DOWNLOADABLE_RESUME]"
+                
+                return response_text
                 
             except Exception as e:
                 log.error(f"Error in CV refinement: {e}", exc_info=True)
@@ -451,10 +503,194 @@ class ResumeToolsLangGraph:
                 
                 return f"❌ Sorry, an error occurred while refining your CV. Please try again."
 
+    async def analyze_cv_for_suggestions_with_state(
+        self,
+        target_role: str = "General Position",
+        job_description: str = "",
+        company_name: str = "",
+        state: Annotated[WebSocketState, InjectedState] = None
+    ) -> str:
+        """
+        NEW: Analyze CV and provide suggestions WITHOUT modifying the actual CV
+        This tool only generates suggestions for the user to apply manually
+        """
+        # Extract shared session from LangGraph state
+        shared_session = await self.get_shared_session_from_state(state)
+        
+        try:
+            log.info(f"Analyzing CV for suggestions for {target_role} (NO automatic changes)")
+            
+            # Get User's Base Resume Data using shared session (READ ONLY)
+            db_resume, base_resume_data = await self.get_or_create_resume(shared_session)
+            
+            # Check if resume has meaningful data for analysis
+            has_experience = base_resume_data.experience and len(base_resume_data.experience) > 0
+            has_personal_info = (base_resume_data.personalInfo and 
+                                base_resume_data.personalInfo.name and 
+                                base_resume_data.personalInfo.name != "User")
+            
+            if not has_experience or not has_personal_info:
+                return (
+                    f"I need to see your actual work experience first to analyze your CV for the **{target_role}** position.\n\n"
+                    "Please upload your CV or provide your work experience details, then I can give you targeted improvement suggestions."
+                )
+            
+            # Generate comprehensive suggestions for ALL sections using AI
+            suggestion_prompt = ChatPromptTemplate.from_template("""
+You are an expert career coach analyzing a CV to provide improvement suggestions WITHOUT making any changes.
+
+CURRENT CV DATA (READ-ONLY):
+{cv_data}
+
+TARGET ROLE: {target_role}
+JOB DESCRIPTION: {job_description}
+
+Analyze the CV and provide 8-15 specific suggestions across ALL sections using this JSON format:
+{{
+  "suggestions": [
+    {{
+      "id": "unique_id",
+      "section": "summary|skills|experience|education|projects|certifications",
+      "type": "enhance|reorder|add_keywords|improve_wording",
+      "title": "Brief suggestion title",
+      "description": "Detailed explanation of the improvement",
+      "target_text": "Exact text from CV to highlight",
+      "suggested_text": "Improved version of that text",
+      "priority": "high|medium|low",
+      "reasoning": "Why this improvement matters for the target role",
+      "color": "red|blue|green|purple"
+    }}
+  ]
+}}
+
+PROVIDE SUGGESTIONS FOR EACH SECTION:
+
+**SUMMARY SECTION**: 
+- Missing role-specific keywords
+- Weak or generic language that could be stronger
+- Years of experience positioning
+- Key technology emphasis
+
+**SKILLS SECTION**:
+- Missing technologies mentioned in job description  
+- Skill reordering by relevance to target role
+- Complementary skills that should be added
+- Outdated skills that could be replaced
+
+**EXPERIENCE SECTION**:
+- Weak action verbs that could be stronger
+- Job descriptions that lack impact
+- Missing keywords from job requirements
+- Better emphasis of relevant achievements
+
+**EDUCATION SECTION**:
+- Relevant coursework that should be highlighted
+- Degree relevance to target role
+- Academic achievements positioning
+- Additional educational details
+
+**PROJECTS SECTION**:
+- Technology stack emphasis
+- Project descriptions clarity
+- Relevance to target role
+- Impact and scope improvements
+
+**CERTIFICATIONS SECTION**:
+- Certification relevance
+- Missing certifications for the role
+- Better formatting and emphasis
+
+COLOR CODING:
+- RED: Critical missing keywords/skills for the role
+- BLUE: Clarity and structure improvements  
+- GREEN: Enhancement opportunities (stronger wording, better details)
+- PURPLE: Section reordering and formatting suggestions
+
+CRITICAL RULES:
+- NEVER suggest fake metrics or achievements
+- Only improve existing content or suggest factual additions
+- Focus on presentation, keywords, and structure
+- Provide specific target_text for each suggestion
+
+Provide comprehensive suggestions across ALL sections for maximum CV improvement.
+""")
+
+            llm = ChatAnthropic(model="claude-3-7-sonnet-20250219", temperature=0.3)
+            parser = JsonOutputParser()
+            chain = suggestion_prompt | llm | parser
+            
+            # Generate suggestions without modifying anything
+            suggestions_response = await chain.ainvoke({
+                "cv_data": base_resume_data.dict(),
+                "target_role": target_role,
+                "job_description": job_description or f"General {target_role} position requirements"
+            })
+            
+            suggestions = suggestions_response.get("suggestions", [])
+            
+            # Update LangGraph state with analysis info (no CV modification)
+            if state:
+                executed_tools = state.get("executed_tools", [])
+                executed_tools.append("analyze_cv_for_suggestions")
+                state["executed_tools"] = executed_tools
+                
+                tool_results = state.get("tool_results", {})
+                tool_results["analyze_cv_for_suggestions"] = {
+                    "target_role": target_role,
+                    "company_name": company_name,
+                    "suggestions_count": len(suggestions),
+                    "timestamp": datetime.now().isoformat(),
+                    "analysis_only": True  # Flag that no changes were made
+                }
+                state["tool_results"] = tool_results
+            
+            # Format suggestions for user display
+            suggestions_text = ""
+            if suggestions:
+                suggestions_by_section = {}
+                for suggestion in suggestions:
+                    section = suggestion.get("section", "general")
+                    if section not in suggestions_by_section:
+                        suggestions_by_section[section] = []
+                    suggestions_by_section[section].append(suggestion)
+                
+                suggestions_text = "\n**🎯 CV Improvement Suggestions:**\n\n"
+                for section, section_suggestions in suggestions_by_section.items():
+                    section_name = section.title()
+                    suggestions_text += f"**{section_name} ({len(section_suggestions)} suggestions):**\n"
+                    for suggestion in section_suggestions[:3]:  # Limit to 3 per section in text
+                        color_emoji = {"red": "🔴", "blue": "🔵", "green": "🟢", "purple": "🟣"}.get(suggestion.get("color", "blue"), "💡")
+                        suggestions_text += f"{color_emoji} {suggestion.get('title', 'Improvement suggestion')}\n"
+                    suggestions_text += "\n"
+            
+            # Add context data for PDF dialog
+            context_data = {
+                "target_role": target_role,
+                "job_description": job_description,
+                "company_name": company_name,
+                "suggestions_count": len(suggestions),
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            log.info(f"Generated {len(suggestions)} CV suggestions for {target_role} (no CV modifications made)")
+            
+            response_text = f"I've analyzed your CV for the **{target_role}** role and found opportunities to make it stronger.\n\n"
+            response_text += suggestions_text
+            response_text += f"**📋 Next Steps:**\n"
+            response_text += f"• Click the download button below to open your CV editor\n"
+            response_text += f"• Apply suggestions that resonate with you\n"
+            response_text += f"• Your original CV remains unchanged until you apply suggestions\n\n"
+            response_text += f"[CV_CONTEXT]{json.dumps(context_data)}[/CV_CONTEXT] [DOWNLOADABLE_RESUME]"
+            
+            return response_text
+            
+        except Exception as e:
+            log.error(f"Error analyzing CV for suggestions: {e}", exc_info=True)
+            return f"❌ Sorry, I couldn't analyze your CV right now. Please try again."
+
     async def generate_tailored_resume_with_state(
         self, 
         job_title: str, 
-        company_name: str = "", 
         job_description: str = "", 
         user_skills: str = "",
         state: Annotated[WebSocketState, InjectedState] = None
@@ -466,7 +702,7 @@ class ResumeToolsLangGraph:
         shared_session = await self.get_shared_session_from_state(state)
         
         try:
-            log.info(f"Generating tailored resume for {job_title} at {company_name}")
+            log.info(f"Generating tailored resume for {job_title}")
             
             # Get User's Base Resume Data using shared session
             db_resume, base_resume_data = await self.get_or_create_resume(shared_session)
@@ -479,7 +715,7 @@ class ResumeToolsLangGraph:
             
             if not has_experience or not has_personal_info:
                 response = (
-                    f"I need your actual work experience to create a tailored resume for the **{job_title}** position at **{company_name}**.\n\n"
+                    f"I need your actual work experience to create a tailored resume for the **{job_title}** position.\n\n"
                     "I can help you in several ways:\n\n"
                     "1. **Upload your CV/Resume** - Attach your existing PDF or Word document\n"
                     "2. **Quick Profile Setup** - Tell me about your:\n"
@@ -590,7 +826,6 @@ class ResumeToolsLangGraph:
                         "education": tailored_resume.education
                     },
                     target_role=job_title,
-                    company_name=None,  # Never pass company name
                     job_description=job_description[:500] if job_description else None
                 )
                 tailored_resume.personalInfo.summary = enhanced_summary
@@ -628,7 +863,6 @@ class ResumeToolsLangGraph:
                 tool_results = state.get("tool_results", {})
                 tool_results["generate_tailored_resume"] = {
                     "job_title": job_title,
-                    "company_name": company_name,
                     "timestamp": datetime.now().isoformat(),
                     "success": True
                 }
@@ -926,6 +1160,15 @@ class ResumeToolsLangGraph:
                     # Enhance confidence score
                     state["confidence_score"] = min(1.0, state.get("confidence_score", 0.5) + 0.2)
                 
+                # Add context data for PDF dialog
+                context_data = {
+                    "target_role": job_title,
+                    "job_description": job_description,
+                    "company_name": company_name,
+                    "job_url": job_url,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
                 output_str = (
                     f"✅ **Resume Refined for {job_title} at {company_name}!**\n\n"
                     f"I've analyzed the job posting from the URL and tailored your resume specifically for this position.\n\n"
@@ -936,7 +1179,7 @@ class ResumeToolsLangGraph:
                     f"• Added industry-specific keywords from the posting\n\n"
                     f"Your resume is now optimized for this specific opportunity! "
                     f"Click the download button below to get your tailored PDF.\n\n"
-                    f"[DOWNLOADABLE_RESUME]"
+                    f"[CV_CONTEXT]{json.dumps(context_data)}[/CV_CONTEXT] [DOWNLOADABLE_RESUME]"
                 )
                 
                 return output_str
@@ -1191,9 +1434,15 @@ class ResumeToolsLangGraph:
         """
         return [
             StructuredTool.from_function(
+                coroutine=self.analyze_cv_for_suggestions_with_state,
+                name="analyze_cv_for_suggestions",
+                description="🎯 PRIMARY CV ANALYSIS TOOL 🎯 - Analyzes CV and provides suggestions for improvement WITHOUT modifying the CV. User maintains full control over changes.",
+                # Async method with state injection handled automatically
+            ),
+            StructuredTool.from_function(
                 coroutine=self.refine_cv_for_role_with_state,  # Use coroutine for async function
                 name="refine_cv_for_role",
-                description="⭐ PRIMARY CV REFINEMENT TOOL ⭐ - Refines a user's CV for a specific role, company, and job description with shared session management.",
+                description="⚠️ AUTOMATIC CV MODIFICATION ⚠️ - Automatically refines and modifies a user's CV for a specific role. Use only when user explicitly wants automatic changes.",
                 # Async method with state injection handled automatically
             ),
             StructuredTool.from_function(
@@ -1277,9 +1526,9 @@ class ResumeTools(ResumeToolsLangGraph):
         """Original method without state injection for backwards compatibility"""
         return await self.refine_cv_for_role_with_state(target_role, job_description, company_name, state=None)
     
-    async def generate_tailored_resume(self, job_title: str, company_name: str = "", job_description: str = "", user_skills: str = "") -> str:
+    async def generate_tailored_resume(self, job_title: str, job_description: str = "", user_skills: str = "") -> str:
         """Original method without state injection for backwards compatibility"""
-        return await self.generate_tailored_resume_with_state(job_title, company_name, job_description, user_skills, state=None)
+        return await self.generate_tailored_resume_with_state(job_title, job_description, user_skills, state=None)
     
     async def create_resume_from_scratch(self, target_role: str, experience_level: str = "mid-level", industry: str = "", key_skills: str = "") -> str:
         """Original method without state injection for backwards compatibility"""

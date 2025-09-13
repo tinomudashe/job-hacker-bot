@@ -121,7 +121,8 @@ def get_node_progress_message(node_name: str, node_output: Dict[str, Any]) -> st
             tool_name = executed_tools[-1] if executed_tools else "tools"
             # Map tool names to user-friendly descriptions
             tool_messages = {
-                "refine_cv_for_role": "Tailoring your CV for the specific role",
+                "analyze_cv_for_suggestions": "Analyzing your CV and generating improvement suggestions",
+                "refine_cv_for_role": "Automatically updating your CV for the specific role",
                 "generate_cover_letter": "Creating a personalized cover letter",
                 "search_jobs": "Searching for job opportunities",
                 "update_resume": "Updating your resume information",
