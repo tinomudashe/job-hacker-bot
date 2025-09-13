@@ -543,7 +543,7 @@ class ResumeToolsLangGraph:
                - Expand each project with problem solved, approach taken, and impact
                - List specific technologies and methodologies used
                - Include metrics (users, performance improvements, cost savings)
-               - Make projects relevant to {company_name}'s needs
+               - Make projects relevant to the target role's requirements
             
             5. **Education & Certifications:**
                - Include relevant coursework, GPA (if strong), honors
@@ -556,7 +556,7 @@ class ResumeToolsLangGraph:
             - Create a premium resume that commands attention
             - Ensure all content is relevant to {job_title} role but keep it generic (no company names)
             - The professional summary MUST be universally applicable to any {job_title} position
-            - NEVER mention {company_name} or use phrases like "for your organization" in any section
+            - NEVER mention specific companies or use phrases like "for your organization" in any section
             - Output MUST be a complete, valid JSON object matching the schema
             
             {format_instructions}
