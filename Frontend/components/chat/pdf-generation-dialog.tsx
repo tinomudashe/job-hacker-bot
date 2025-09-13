@@ -24,6 +24,8 @@ import {
   Trash2,
   User,
   X,
+  Loader2,
+  CheckCircle,
 } from "lucide-react";
 import * as React from "react";
 import {
@@ -47,6 +49,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { SortableItem } from "./sortable-item";
 import { GripVertical } from "lucide-react";
+import { TextareaWithSuggestions } from "./textarea-with-suggestions";
 
 interface PDFGenerationDialogProps {
   open: boolean;
@@ -185,6 +188,14 @@ export function PDFGenerationDialog({
   const [isMobileNavOpen, setIsMobileNavOpen] = React.useState(false);
   const [isLoadingUserData, setIsLoadingUserData] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
+  const [isFullyLoaded, setIsFullyLoaded] = React.useState(false);
+  
+  // CV Suggestions state
+  const [cvSuggestions, setCvSuggestions] = React.useState<any[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = React.useState(false);
+  const [appliedSuggestions, setAppliedSuggestions] = React.useState<Set<string>>(new Set());
+  const [appliedSuggestionHistory, setAppliedSuggestionHistory] = React.useState<Array<{id: string, originalText: string, newText: string, section: string}>>([]);
+  const [cvContext, setCvContext] = React.useState<{target_role?: string, job_description?: string, company_name?: string} | null>(null);
 
   // Additional form fields for structured input
   const [personalInfo, setPersonalInfo] = React.useState({
@@ -663,6 +674,12 @@ export function PDFGenerationDialog({
         toast.error("Could not load personal information");
       } finally {
         setIsLoadingUserData(false);
+        // Check if suggestions are also done loading
+        if (!suggestionsLoading && contentType === "resume") {
+          setIsFullyLoaded(true);
+        } else if (contentType === "cover_letter") {
+          setIsFullyLoaded(true); // Cover letters don't need suggestions
+        }
       }
     };
 
@@ -1212,12 +1229,164 @@ export function PDFGenerationDialog({
     setLanguages(languages.filter((_, i) => i !== index));
   };
 
+  // Handle initial loading state based on content type
+  React.useEffect(() => {
+    if (open) {
+      if (contentType === "cover_letter") {
+        // Cover letters don't need suggestions, set as fully loaded immediately
+        setIsFullyLoaded(true);
+      } else if (contentType === "resume") {
+        // Resume needs both data and suggestions
+        setIsFullyLoaded(false);
+      }
+    }
+  }, [open, contentType]);
+
+  // Fetch CV suggestions only once when dialog opens for resume
+  React.useEffect(() => {
+    let hasFetched = false;
+    
+    const fetchSuggestions = async () => {
+      if (hasFetched || contentType !== "resume" || !getToken || !open) return;
+      
+      console.log("🔍 Fetching CV suggestions once on dialog open");
+      
+      // Wait a bit for resume data to load, then fetch suggestions once
+      setTimeout(async () => {
+        if (hasFetched) return; // Double-check to prevent multiple calls
+        hasFetched = true;
+        
+        setSuggestionsLoading(true);
+        try {
+          const token = await getToken();
+          
+          const response = await fetch("/api/cv/analyze-suggestions", {
+            method: "POST", 
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              job_title: cvContext?.target_role || editedJobTitle || personalInfo.professionalTitle || "General Position",
+              job_description: cvContext?.job_description || "" // Use extracted context first
+            })
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            console.log("🔍 CV suggestions loaded:", data.suggestions?.length || 0);
+            console.log("🔍 Suggestions by section:", data.suggestions?.reduce((acc: any, s: any) => {
+              acc[s.section] = (acc[s.section] || 0) + 1;
+              return acc;
+            }, {}));
+            setCvSuggestions(data.suggestions || []);
+          } else {
+            console.error("Failed to fetch suggestions:", response.status);
+          }
+        } catch (error) {
+          console.error("Error fetching suggestions:", error);
+        } finally {
+          setSuggestionsLoading(false);
+          // Mark as fully loaded when both user data and suggestions are ready
+          if (!isLoadingUserData) {
+            setIsFullyLoaded(true);
+          }
+        }
+      }, 1500);
+    };
+
+    // Only fetch when dialog opens for resume content
+    if (contentType === "resume" && open) {
+      setIsFullyLoaded(false); // Reset on new dialog open
+      
+      // Extract CV context from initial content if available
+      const contextMatch = initialContent?.match(/\[CV_CONTEXT\](.*?)\[\/CV_CONTEXT\]/);
+      if (contextMatch) {
+        try {
+          const contextData = JSON.parse(contextMatch[1]);
+          setCvContext(contextData);
+          console.log("🔍 Extracted CV context:", contextData);
+        } catch (e) {
+          console.warn("Failed to parse CV context:", e);
+        }
+      }
+      
+      fetchSuggestions();
+    }
+    
+    // Reset when dialog closes
+    if (!open) {
+      hasFetched = false;
+      setCvSuggestions([]);
+      setIsFullyLoaded(false);
+    }
+  }, [contentType, open, getToken]); // Only depend on dialog open state and content type
+
+  // Handlers for suggestion management that persist across tabs
+  const handleApplySuggestion = React.useCallback((suggestionId: string, newText: string, section: string, currentText: string) => {
+    // Track applied suggestion with history for revert
+    setAppliedSuggestions(prev => new Set([...prev, suggestionId]));
+    setAppliedSuggestionHistory(prev => [...prev, {
+      id: suggestionId,
+      originalText: currentText,
+      newText: newText,
+      section: section
+    }]);
+    console.log(`🔍 Applied suggestion ${suggestionId} to ${section}`);
+  }, []);
+
+  const handleRevertSuggestion = React.useCallback((suggestionId: string) => {
+    const historyItem = appliedSuggestionHistory.find(h => h.id === suggestionId);
+    if (historyItem) {
+      // Remove from applied suggestions
+      setAppliedSuggestions(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(suggestionId);
+        return newSet;
+      });
+      
+      // Remove from history
+      setAppliedSuggestionHistory(prev => prev.filter(h => h.id !== suggestionId));
+      
+      console.log(`🔍 Reverted suggestion ${suggestionId} from ${historyItem.section}`);
+      return historyItem.originalText;
+    }
+    return null;
+  }, [appliedSuggestionHistory]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         hideCloseButton
         className="max-w-[95vw] sm:max-w-6xl max-h-[92vh] sm:max-h-[95vh] w-[95vw] h-[92vh] sm:w-[95vw] sm:h-[95vh] flex flex-col !bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 !border !border-gray-200 dark:!border-white/8 shadow-2xl rounded-2xl sm:rounded-3xl overflow-hidden p-0"
       >
+        {/* Loading overlay for resume content - wait for both data and suggestions */}
+        {contentType === "resume" && !isFullyLoaded && (
+          <div className="absolute inset-0 bg-white/95 dark:bg-background/95 backdrop-blur-sm z-50 flex items-center justify-center rounded-2xl sm:rounded-3xl">
+            <div className="text-center p-8">
+              <div className="w-16 h-16 mx-auto mb-4 bg-blue-100 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center">
+                <Loader2 className="h-8 w-8 text-blue-600 dark:text-blue-400 animate-spin" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+                {cvContext?.target_role ? `Preparing CV for ${cvContext.target_role}` : "Preparing Your CV"}
+              </h3>
+              <div className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
+                <div className="flex items-center justify-center gap-2">
+                  <CheckCircle className={`h-4 w-4 ${!isLoadingUserData ? 'text-green-500' : 'text-gray-400'}`} />
+                  <span>Loading CV data</span>
+                </div>
+                <div className="flex items-center justify-center gap-2">
+                  <Loader2 className={`h-4 w-4 ${suggestionsLoading ? 'animate-spin text-blue-500' : !suggestionsLoading && cvSuggestions.length >= 0 ? 'text-green-500' : 'text-gray-400'}`} />
+                  <span>Analyzing for AI suggestions</span>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-500 mt-3">
+                This ensures all AI enhancements are ready before editing
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* --- UI FIX: Header structure corrected for proper responsive button visibility --- */}
         <div className="flex-shrink-0 !bg-white dark:!bg-background/60 dark:backdrop-blur-xl dark:backdrop-saturate-150 !border-b !border-gray-200 dark:!border-white/8 p-3 sm:p-5 relative z-10">
           {/* Mobile Header */}
@@ -2243,8 +2412,7 @@ export function PDFGenerationDialog({
                       <Label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 sm:mb-2 block">
                         Professional Summary
                       </Label>
-                      <Textarea
-                        placeholder="Write a brief summary of your career objectives and key qualifications..."
+                      <TextareaWithSuggestions
                         value={personalInfo.summary}
                         onChange={(e) =>
                           setPersonalInfo({
@@ -2252,6 +2420,43 @@ export function PDFGenerationDialog({
                             summary: e.target.value,
                           })
                         }
+                        suggestions={cvSuggestions}
+                        sectionName="summary"
+                        appliedSuggestions={appliedSuggestions}
+                        appliedSuggestionHistory={appliedSuggestionHistory}
+                        onApplySuggestion={(suggestionId, newText, currentText) => {
+                          // Find the suggestion to get the target text
+                          const suggestion = cvSuggestions.find(s => s.id === suggestionId);
+                          if (suggestion && suggestion.target_text) {
+                            // Replace only the target text, not the entire content
+                            const updatedText = currentText.replace(
+                              new RegExp(suggestion.target_text, 'gi'), 
+                              newText
+                            );
+                            handleApplySuggestion(suggestionId, newText, "summary", currentText);
+                            setPersonalInfo({
+                              ...personalInfo,
+                              summary: updatedText,
+                            });
+                          } else {
+                            // Fallback: replace entire content if no target text found
+                            handleApplySuggestion(suggestionId, newText, "summary", currentText);
+                            setPersonalInfo({
+                              ...personalInfo,
+                              summary: newText,
+                            });
+                          }
+                        }}
+                        onRevertSuggestion={(suggestionId) => {
+                          const originalText = handleRevertSuggestion(suggestionId);
+                          if (originalText !== null) {
+                            setPersonalInfo({
+                              ...personalInfo,
+                              summary: originalText,
+                            });
+                          }
+                        }}
+                        placeholder="Write a brief summary of your career objectives and key qualifications..."
                         rows={4}
                         className="w-full text-sm sm:text-base px-3 sm:px-4"
                       />
@@ -2389,7 +2594,7 @@ export function PDFGenerationDialog({
                               <Label className="text-xs sm:text-sm font-medium text-gray-700 dark:text-white mb-1.5 sm:mb-2 block">
                                 Job Description & Achievements
                               </Label>
-                              <Textarea
+                              <TextareaWithSuggestions
                                 placeholder="• Developed and maintained web applications using React and Node.js&#10;• Led a team of 5 developers in delivering high-quality software solutions&#10;• Improved application performance by 40% through code optimization"
                                 value={job.description}
                                 onChange={(e) => {
@@ -2397,8 +2602,32 @@ export function PDFGenerationDialog({
                                   updated[index].description = e.target.value;
                                   setWorkExperience(updated);
                                 }}
+                                suggestions={cvSuggestions}
+                                sectionName="experience"
+                                appliedSuggestions={appliedSuggestions}
+                                appliedSuggestionHistory={appliedSuggestionHistory}
+                                onApplySuggestion={(suggestionId, newText, currentText) => {
+                                  const suggestion = cvSuggestions.find(s => s.id === suggestionId);
+                                  if (suggestion && suggestion.target_text) {
+                                    const updatedText = currentText.replace(
+                                      new RegExp(suggestion.target_text, 'gi'), 
+                                      newText
+                                    );
+                                    handleApplySuggestion(suggestionId, newText, "experience", currentText);
+                                    const updated = [...workExperience];
+                                    updated[index].description = updatedText;
+                                    setWorkExperience(updated);
+                                  }
+                                }}
+                                onRevertSuggestion={(suggestionId) => {
+                                  const originalText = handleRevertSuggestion(suggestionId);
+                                  if (originalText !== null) {
+                                    const updated = [...workExperience];
+                                    updated[index].description = originalText;
+                                    setWorkExperience(updated);
+                                  }
+                                }}
                                 rows={4}
-                                data-scrollable="true"
                                 className="resize-none text-sm sm:text-base px-3 sm:px-4 py-2.5 sm:py-3 focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition-all duration-200 cursor-text"
                                 style={{
                                   fontSize: isMobile ? "16px" : undefined,
@@ -2541,7 +2770,7 @@ export function PDFGenerationDialog({
                             <Label className="text-sm font-medium text-gray-700 dark:text-white mb-2 block">
                               Additional Details
                             </Label>
-                            <Textarea
+                            <TextareaWithSuggestions
                               placeholder="GPA: 3.8/4.0&#10;Magna Cum Laude&#10;Relevant Coursework: Data Structures, Algorithms, Machine Learning"
                               value={edu.description}
                               onChange={(e) => {
@@ -2549,8 +2778,32 @@ export function PDFGenerationDialog({
                                 updated[index].description = e.target.value;
                                 setEducation(updated);
                               }}
+                              suggestions={cvSuggestions}
+                              sectionName="education"
+                              appliedSuggestions={appliedSuggestions}
+                              appliedSuggestionHistory={appliedSuggestionHistory}
+                              onApplySuggestion={(suggestionId, newText, currentText) => {
+                                const suggestion = cvSuggestions.find(s => s.id === suggestionId);
+                                if (suggestion && suggestion.target_text) {
+                                  const updatedText = currentText.replace(
+                                    new RegExp(suggestion.target_text, 'gi'), 
+                                    newText
+                                  );
+                                  handleApplySuggestion(suggestionId, newText, "education", currentText);
+                                  const updated = [...education];
+                                  updated[index].description = updatedText;
+                                  setEducation(updated);
+                                }
+                              }}
+                              onRevertSuggestion={(suggestionId) => {
+                                const originalText = handleRevertSuggestion(suggestionId);
+                                if (originalText !== null) {
+                                  const updated = [...education];
+                                  updated[index].description = originalText;
+                                  setEducation(updated);
+                                }
+                              }}
                               rows={3}
-                              data-scrollable="true"
                               className="resize-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition-all duration-200 cursor-text"
                               style={{
                                 fontSize: isMobile ? "16px" : undefined,
@@ -2666,7 +2919,7 @@ export function PDFGenerationDialog({
                       <Label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
                         Raw Skills Text (Advanced)
                       </Label>
-                      <Textarea
+                      <TextareaWithSuggestions
                         placeholder="You can also paste a formatted skills list here..."
                         value={skills}
                         onChange={(e) => {
@@ -2678,6 +2931,40 @@ export function PDFGenerationDialog({
                             .filter((s) => s.length > 0)
                             .slice(0, 15); // Limit to 15 skills
                           setSkillsArray(newSkillsArray);
+                        }}
+                        suggestions={cvSuggestions}
+                        sectionName="skills"
+                        appliedSuggestions={appliedSuggestions}
+                        appliedSuggestionHistory={appliedSuggestionHistory}
+                        onApplySuggestion={(suggestionId, newText, currentText) => {
+                          const suggestion = cvSuggestions.find(s => s.id === suggestionId);
+                          if (suggestion && suggestion.target_text) {
+                            const updatedText = currentText.replace(
+                              new RegExp(suggestion.target_text, 'gi'), 
+                              newText
+                            );
+                            handleApplySuggestion(suggestionId, newText, "skills", currentText);
+                            setSkills(updatedText);
+                            // Update skills array too
+                            const newSkillsArray = updatedText
+                              .split(/[,\n]/)
+                              .map((s) => s.trim())
+                              .filter((s) => s.length > 0)
+                              .slice(0, 15);
+                            setSkillsArray(newSkillsArray);
+                          }
+                        }}
+                        onRevertSuggestion={(suggestionId) => {
+                          const originalText = handleRevertSuggestion(suggestionId);
+                          if (originalText !== null) {
+                            setSkills(originalText);
+                            const newSkillsArray = originalText
+                              .split(/[,\n]/)
+                              .map((s) => s.trim())
+                              .filter((s) => s.length > 0)
+                              .slice(0, 15);
+                            setSkillsArray(newSkillsArray);
+                          }
                         }}
                         rows={3}
                         data-scrollable="true"

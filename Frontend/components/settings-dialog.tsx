@@ -1226,14 +1226,14 @@ export function SettingsDialog({
                     role="tabpanel"
                     aria-labelledby="extensions"
                   >
-                    {/* Chrome Extension Coming Soon Notice */}
-                    <Card className="border-blue-200 bg-blue-50/50">
+                    {/* Chrome Extension Live Features */}
+                    <Card className="border-green-200 bg-green-50/50">
                       <CardHeader className="pb-3">
                         <div className="flex items-center gap-2">
-                          <Chrome className="w-5 h-5 text-blue-600" />
+                          <Chrome className="w-5 h-5 text-green-600" />
                           <CardTitle className="text-lg">Chrome Extension</CardTitle>
-                          <Badge variant="secondary" className="bg-blue-100 text-blue-700 border-blue-300">
-                            Coming Soon
+                          <Badge variant="secondary" className="bg-green-100 text-green-700 border-green-300">
+                            Live Now!
                           </Badge>
                         </div>
                         <CardDescription>
@@ -1241,24 +1241,56 @@ export function SettingsDialog({
                         </CardDescription>
                       </CardHeader>
                       <CardContent>
-                        <div className="space-y-3">
+                        <div className="space-y-4">
                           <p className="text-sm text-gray-600">
-                            Our Chrome extension will allow you to extract job posting details from LinkedIn, Indeed, 
+                            The Job Hacker Bot Chrome extension is now live! Extract job posting details from LinkedIn, Indeed, 
                             Glassdoor, and any job site with one click, then instantly generate tailored resumes and 
                             cover letters through your Job Hacker Bot account.
                           </p>
-                          <div className="bg-blue-100/50 border border-blue-200 rounded-lg p-3">
-                            <p className="text-xs text-blue-800 font-medium">
-                              The Chrome extension is currently under review by Google and will be available soon. 
-                              Stay tuned for updates!
+                          
+                          <div className="space-y-3">
+                            <h4 className="text-sm font-semibold text-gray-700">Available Features:</h4>
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2">
+                                <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
+                                <span className="text-sm text-gray-600">Extract job details from any job posting</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
+                                <span className="text-sm text-gray-600">Generate tailored resumes and cover letters</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
+                                <span className="text-sm text-gray-600">Works on LinkedIn, Indeed, Glassdoor, and more</span>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <div className="bg-green-100/50 border border-green-200 rounded-lg p-3">
+                            <div className="flex items-center gap-2 mb-2">
+                              <CheckCircle className="h-4 w-4 text-green-600" />
+                              <p className="text-xs text-green-800 font-medium">
+                                Ready to Install!
+                              </p>
+                            </div>
+                            <p className="text-xs text-green-700 mb-3">
+                              Install the extension from the Chrome Web Store and start applying to jobs faster than ever.
                             </p>
+                            <Button 
+                              size="sm" 
+                              className="bg-green-600 hover:bg-green-700 text-white"
+                              onClick={() => window.open('https://chromewebstore.google.com/detail/job-hacker-bot/hfldpnnffdadlfidlnkmnebghpbglndp', '_blank')}
+                            >
+                              <Chrome className="h-4 w-4 mr-2" />
+                              Install Extension
+                            </Button>
                           </div>
                         </div>
                       </CardContent>
                     </Card>
 
-                    {/* Chrome Extension Token Management - Hidden until extension is approved */}
-                    {/* <ExtensionTokensManager /> */}
+                    {/* Chrome Extension Token Management - Now visible since extension is live */}
+                    <ExtensionTokensManager />
                   </div>
                 )}
               </div>
